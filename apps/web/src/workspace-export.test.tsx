@@ -45,6 +45,7 @@ vi.mock("@neoread/api", () => ({
     }),
     navigation: vi.fn(async () => ({ revision: 0, entries: {} })),
     messages: vi.fn(async () => []),
+    chatSessions: vi.fn(async () => []),
     blocks: vi.fn(async () => []),
     documentNote: vi.fn(async () => ({ body: "note", updatedAt: "" })),
     translations: vi.fn(async () => []),
@@ -57,6 +58,9 @@ vi.mock("@neoread/api", () => ({
 vi.mock("./progress", () => ({
   scheduleProgress: vi.fn(),
   flushProgress: vi.fn(async () => {}),
+}));
+vi.mock("@neoread/ui/components/scroll-area", () => ({
+  ScrollArea: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 vi.mock("./translation/PDFReadingView", () => ({
   PDFReadingView: ({
@@ -142,6 +146,13 @@ const button = (text: string) =>
     (el) => el.textContent?.trim() === text,
   )!;
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   vi.clearAllMocks();
   useReaderStore.setState({ theme: defaultTheme });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
