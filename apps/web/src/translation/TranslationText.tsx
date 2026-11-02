@@ -44,11 +44,13 @@ function BlockImage({
   alt,
   render,
   release,
+  scale = 1,
 }: {
   src: string;
   alt: string;
   render?: (width: number) => Promise<string>;
   release?: () => void;
+  scale?: number;
 }) {
   const [sharp, setSharp] = useState<{
     url: string;
@@ -70,6 +72,7 @@ function BlockImage({
     const width = originalWidth.current;
     const pixels = Math.ceil(
       Math.min(width, image.clientWidth || width) *
+        scale *
         (window.devicePixelRatio || 1),
     );
     if (pixels <= requested.current) return;
@@ -137,6 +140,11 @@ function BlockImage({
       releaseRef.current?.();
     };
   }, []);
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image?.complete) return;
+    sharpen(image);
+  }, [scale]);
   return (
     <img
       className="translation-image"
@@ -182,6 +190,7 @@ function TranslationContent({
   renderImage,
   releaseImage,
   onPreview,
+  imageScale,
 }: {
   // PDF blocks and EPUB paragraphs share these fields.
   block: Pick<PDFBlock, "id" | "label" | "text" | "image" | "caption"> &
@@ -204,6 +213,7 @@ function TranslationContent({
   ) => Promise<string>;
   releaseImage?: (blockId: string, owner?: string) => void;
   onPreview?: () => void;
+  imageScale?: number;
 }) {
   const imageOwner = useId();
   const formula = ["display_formula", "inline_formula"].includes(block.label);
@@ -217,6 +227,7 @@ function TranslationContent({
       key={`${block.id}:${block.image}`}
       src={imageURL ?? blockImageURL(documentId, block.id, block.image)}
       alt={block.caption || block.text || block.label}
+      scale={imageScale}
       render={
         imageURL || !renderImage
           ? undefined
