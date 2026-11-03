@@ -3,8 +3,11 @@ package neoread
 import (
 	"database/sql"
 	"encoding/json"
+	"io"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -111,6 +114,43 @@ func TestPatchPaperMetadataAndReadingStatus(t *testing.T) {
 		t.Fatalf("progress overrode a finished status: %s", got.ReadingStatus)
 	}
 }
+
+type delayedMetadataBody struct {
+	io.Reader
+	started, resume chan struct{}
+	once            sync.Once
+}
+
+func (b *delayedMetadataBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { close(b.started); <-b.resume })
+	return b.Reader.Read(p)
+}
+
+func TestConcurrentMetadataPatchesPreserveIndependentFields(t *testing.T) {
+	s := testServer(t)
+	d := organizationDoc(t, s)
+	body := &delayedMetadataBody{
+		Reader:  strings.NewReader(`{"metadata":{"date":"2026"}}`),
+		started: make(chan struct{}), resume: make(chan struct{}),
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- request(t, s, "PATCH", "/api/documents/"+d.ID, body) }()
+	<-body.started
+	other := request(t, s, "PATCH", "/api/documents/"+d.ID, strings.NewReader(`{"metadata":{"remark":"manual note"}}`))
+	close(body.resume)
+	first := <-done
+	if first.Code != 200 || other.Code != 200 {
+		t.Fatalf("patches failed: %d %s; %d %s", first.Code, first.Body.String(), other.Code, other.Body.String())
+	}
+	saved, err := s.Store.Document(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Metadata.Date != "2026" || saved.Metadata.Remark != "manual note" || saved.Metadata.Sources["date"] != "manual" || saved.Metadata.Sources["remark"] != "manual" {
+		t.Fatalf("a successful patch lost fields or their manual provenance: %+v", saved.Metadata)
+	}
+}
+
 func TestDocumentAnnotationCounts(t *testing.T) {
 	s := testServer(t)
 	d := organizationDoc(t, s)
