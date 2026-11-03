@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -484,6 +485,9 @@ func (s *Server) importFileToCategory(ctx context.Context, temp, filename, libra
 			return failure(500, "无法创建解析任务")
 		}
 		return d, 200, nil
+	} else if !errors.Is(e, sql.ErrNoRows) {
+		s.diagnosticEvent(slog.LevelError, "document.import_rejected", "documentId", docID, "reasonCode", "existing_record_unreadable")
+		return failure(500, "无法读取已有文档，原文件已保留，请先检查书库")
 	}
 	if kind == "pdf" {
 		f, e := os.Open(temp)
