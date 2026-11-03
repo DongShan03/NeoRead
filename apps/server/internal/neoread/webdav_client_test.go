@@ -92,10 +92,29 @@ func TestDAVPreservesRateLimitDelayAndHidesServerBody(t *testing.T) {
 }
 func TestDAVCancellationStopsPacing(t *testing.T) {
 	d := newDAVClient(webdavConfig{Folder: "论文库"})
-	d.last = time.Now()
+	*d.last = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := d.request(ctx, "GET", "devices/a.json", nil); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestDAVLibraryAndCatalogRequestsShareRateLimitPacing(t *testing.T) {
+	server, _ := testDAV(t)
+	d := testDAVClient(webdavConfig{Account: "reader@example.com", Password: "application-password", Folder: "论文库"}, server)
+	if err := d.prepare(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	d.interval = time.Second
+	*d.last = time.Time{}
+	root := d.rootClient()
+	if err := root.put(t.Context(), "pacing-test", []byte("test")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := d.get(ctx, "library.json", 100); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("library request did not wait after catalog request", err)
 	}
 }

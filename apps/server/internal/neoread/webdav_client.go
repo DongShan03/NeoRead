@@ -42,7 +42,7 @@ type davClient struct {
 	password string
 	http     *http.Client
 	interval time.Duration
-	last     time.Time
+	last     *time.Time
 	folders  map[string]bool
 }
 
@@ -56,7 +56,7 @@ func newDAVClient(c webdavConfig) *davClient {
 			return http.ErrUseLastResponse
 		}},
 		// Nutstore's free tier permits 600 requests / 30 minutes.
-		interval: 3100 * time.Millisecond, folders: map[string]bool{},
+		interval: 3100 * time.Millisecond, last: &time.Time{}, folders: map[string]bool{},
 	}
 }
 
@@ -70,7 +70,7 @@ func (d *davClient) request(ctx context.Context, method, name string, body []byt
 		case <-timer.C:
 		}
 	}
-	d.last = time.Now()
+	*d.last = time.Now()
 	u := *d.base
 	u.Path += name
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))

@@ -196,7 +196,6 @@ func (d *davClient) move(ctx context.Context, destination string) (*http.Respons
 	client := *d
 	client.http = &wrapped
 	res, err := client.request(ctx, "MOVE", "", nil)
-	d.last = client.last
 	return res, err
 }
 
