@@ -154,7 +154,7 @@ export class EPUBBlockOverlay {
   private move = (event: PointerEvent) => {
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest(blockActionTarget)) return;
-    if (event.buttons || window.getSelection()?.toString().trim()) {
+    if (event.buttons || window.getSelection()?.isCollapsed === false) {
       this.clear();
       return;
     }
@@ -238,7 +238,7 @@ export class EPUBBlockOverlay {
     if (
       !pressed ||
       Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 5 ||
-      (!double && window.getSelection()?.toString().trim()) ||
+      (!double && window.getSelection()?.isCollapsed === false) ||
       (event.target as Element | null)?.closest("a,button,input,textarea") ||
       this.blockAt(event) !== pressed.id
     )

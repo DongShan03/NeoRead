@@ -902,7 +902,7 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     if (
       !target ||
       event.buttons ||
-      window.getSelection()?.toString().trim() ||
+      window.getSelection()?.isCollapsed === false ||
       target.closest("a,button,input,textarea")
     ) {
       this.events.annotationHover?.(null);
@@ -957,7 +957,7 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     }
     if (
       !(this.theme.translationAlignment === "double" && event.detail === 2) &&
-      window.getSelection()?.toString().trim()
+      window.getSelection()?.isCollapsed === false
     )
       return;
     const hits = this.marks.filter((mark) =>
