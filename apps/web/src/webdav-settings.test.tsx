@@ -109,7 +109,17 @@ it("defaults to the current library and accepts custom intervals with suggestion
   await change("email", "reader@example.com");
   await change("password", "application-password");
   await change("number", "7");
+  const save = () =>
+    [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.trim() === "保存",
+    )!;
+  expect(save().disabled).toBe(true);
+  await click("测试连接");
+  expect(save().disabled).toBe(false);
   await click("保存");
+  expect(api.testWebdav).toHaveBeenCalledOnce();
+  await change("number", "10");
+  expect(save().disabled).toBe(false);
   expect(api.saveWebdavConfig).toHaveBeenCalledWith(
     expect.objectContaining({
       folder: "论文库",
@@ -259,5 +269,28 @@ it("turns off configured sync immediately and hides its credentials without dele
   await toggle();
   expect(input("email").value).toBe("reader@example.com");
   expect(input("password").value).toBe("");
+  expect(api.saveWebdavConfig).not.toHaveBeenCalled();
+});
+
+it("requires a successful connection test again after either credential changes", async () => {
+  await render();
+  await toggle();
+  await change("email", "reader@example.com");
+  await change("password", "application-password");
+  const save = () =>
+    [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.trim() === "保存",
+    )!;
+  vi.mocked(api.testWebdav).mockRejectedValueOnce(new Error("连接未通过"));
+  await click("测试连接");
+  expect(save().disabled).toBe(true);
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("连接未通过");
+  await click("测试连接");
+  expect(save().disabled).toBe(false);
+  await change("email", "other@example.com");
+  expect(save().disabled).toBe(true);
+  await click("测试连接");
+  await change("password", "changed-password");
+  expect(save().disabled).toBe(true);
   expect(api.saveWebdavConfig).not.toHaveBeenCalled();
 });
