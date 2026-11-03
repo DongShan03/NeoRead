@@ -230,6 +230,11 @@ export class ChatSession {
         this.publish({ loaded: false, loadError: (error as Error).message });
     }
   }
+  async refreshSynced() {
+    if (this.state.busy) return;
+    if (this.active?.phase === "saved") this.active = undefined;
+    await this.load();
+  }
   dispose() {
     this.alive = false;
     this.serial++;

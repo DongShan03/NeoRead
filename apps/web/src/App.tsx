@@ -60,6 +60,7 @@ import { PaperLibrary } from "./papers/PaperLibrary";
 import { PaperSidebar } from "./papers/PaperSidebar";
 import { LibrarySidebarResizer } from "./LibrarySidebarResizer";
 import { LibraryArchiveProgress } from "./LibraryArchiveProgress";
+import { installWebDAVSync } from "./webdav-sync";
 import { usePaperUI } from "./papers/state";
 import { ImportPaperDialog } from "./papers/ImportPaperDialog";
 import { LibraryModeSwitcher, libraryModes } from "./LibraryModeSwitcher";
@@ -88,6 +89,7 @@ const onEmptyLibrary = (target: EventTarget) =>
     '.book-card, .detail-sheet, button, a, input, textarea, select, label, [role="button"], [role="separator"], [role="menu"], [role="dialog"]',
   );
 export function App() {
+  useEffect(installWebDAVSync, []);
   const {
     documents: allDocuments,
     active,

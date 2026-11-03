@@ -48,6 +48,73 @@ beforeEach(() => {
   vi.clearAllMocks();
   takePaperNoteSaveWarning();
 });
+it("accepts a shorter synced note instead of merging back the stale longer text", async () => {
+  const { entry, release } = await note();
+  entry.edit("a longer local version that has already been saved");
+  await entry.flush();
+  await importWithPaperNotes(async () => {
+    vi.mocked(api.documentNote).mockResolvedValueOnce({ body: "short" });
+  }, true);
+  expect(entry.getSnapshot()).toMatchObject({ body: "short", status: "saved" });
+  expect(entry.hasPending()).toBe(false);
+  release();
+});
+it("holds the note editor between flushing drafts and applying a sync commit", async () => {
+  const { entry, release } = await note();
+  entry.edit("latest draft");
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const sync = importWithPaperNotes(async () => {
+    expect(api.saveDocumentNote).toHaveBeenCalledWith(entry.id, "latest draft");
+    await gate;
+    vi.mocked(api.documentNote).mockResolvedValueOnce({ body: "synced note" });
+  }, true);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(entry.getSnapshot().status).toBe("loading");
+  entry.edit("stale edit during local commit");
+  expect(entry.getSnapshot().body).toBe("latest draft");
+  finish();
+  await sync;
+  expect(entry.getSnapshot()).toMatchObject({
+    body: "synced note",
+    status: "saved",
+  });
+  release();
+});
+it("recovers the open editor when the sync apply response is lost", async () => {
+  const { entry, release } = await note();
+  await expect(
+    importWithPaperNotes(async () => {
+      vi.mocked(api.documentNote).mockResolvedValueOnce({ body: "committed" });
+      throw new Error("response lost");
+    }, true),
+  ).rejects.toThrow("response lost");
+  expect(entry.getSnapshot()).toMatchObject({
+    body: "committed",
+    status: "saved",
+  });
+  entry.edit("new edit");
+  await entry.flush();
+  expect(api.saveDocumentNote).toHaveBeenLastCalledWith(entry.id, "new edit");
+  release();
+});
+it("shows a retryable read error if sync apply and the follow-up read both fail", async () => {
+  const { entry, release } = await note();
+  await expect(
+    importWithPaperNotes(async () => {
+      vi.mocked(api.documentNote).mockRejectedValueOnce(new Error("offline"));
+      throw new Error("apply failed");
+    }, true),
+  ).rejects.toThrow("apply failed");
+  expect(entry.getSnapshot().status).toBe("load-error");
+  entry.edit("stale edit");
+  expect(api.saveDocumentNote).not.toHaveBeenCalled();
+  await entry.load();
+  expect(entry.getSnapshot().status).toBe("saved");
+  release();
+});
 afterEach(() => vi.useRealTimers());
 it("automatically saves the latest text every five seconds", async () => {
   const { entry, release } = await note();

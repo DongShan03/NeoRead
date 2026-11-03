@@ -82,3 +82,16 @@ it("keeps temporary mode changes separate from the primary library", async () =>
     papers: { autoLookup: false },
   });
 });
+
+it("refreshes synced categories without changing the current library mode", async () => {
+  useReaderStore.setState({ libraryPreferences: { mode: "books" } });
+  vi.mocked(api.libraryPreferences).mockResolvedValue({
+    mode: "papers",
+    papers: { categories: ["研究"] },
+  });
+  await loadLibraryPreferences(true);
+  expect(useReaderStore.getState().libraryPreferences).toEqual({
+    mode: "books",
+    papers: { categories: ["研究"] },
+  });
+});

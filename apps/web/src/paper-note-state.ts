@@ -28,6 +28,7 @@ class PaperNoteState {
   private saving?: Promise<string>;
   private merging?: Promise<void>;
   private needsRefresh = false;
+  private replaceOnRefresh = false;
   private discarded = false;
   constructor(readonly id: string) {}
   getSnapshot = () => this.snapshot;
@@ -85,7 +86,12 @@ class PaperNoteState {
     return this.loading;
   };
   edit = (body: string) => {
-    if (this.discarded || this.saved === undefined) return;
+    if (
+      this.discarded ||
+      this.saved === undefined ||
+      (this.needsRefresh && this.replaceOnRefresh)
+    )
+      return;
     // An in-flight PUT may replace the saved text; a concurrent revert must
     // still be written after that request finishes.
     this.pending = body !== this.saved || this.uncertain;
@@ -144,11 +150,13 @@ class PaperNoteState {
         if (this.discarded) return;
         // Count Unicode characters, matching the server's note selection rule.
         const body =
+          !this.replaceOnRefresh &&
           [...this.snapshot.body].length > [...remote.body].length
             ? this.snapshot.body
             : remote.body;
         this.saved = remote.body;
         this.needsRefresh = false;
+        this.replaceOnRefresh = false;
         this.uncertain = false;
         this.pending = body !== remote.body;
         this.update({
@@ -172,7 +180,10 @@ class PaperNoteState {
   };
   merge = (from: string[]): Promise<void> =>
     this.synchronize(() => api.mergeDocuments(this.id, from));
-  synchronize = (change: () => Promise<unknown>): Promise<void> => {
+  synchronize = (
+    change: () => Promise<unknown>,
+    replace = false,
+  ): Promise<void> => {
     if (this.merging) return this.merging;
     this.clearTimer();
     this.merging = Promise.resolve()
@@ -181,7 +192,19 @@ class PaperNoteState {
         if (this.pending) await this.write();
         // Even a lost merge response may mean the server already changed the note.
         this.needsRefresh = true;
-        await change();
+        this.replaceOnRefresh = replace;
+        if (replace) this.update({ status: "loading", error: "" });
+        try {
+          await change();
+        } catch (error) {
+          // A lost apply response can still mean that the sync committed.
+          // Re-read before allowing the open editor to write again.
+          if (replace && !this.discarded)
+            await this.refresh().catch(() => {
+              toast.error("笔记刷新失败，请在笔记页重试");
+            });
+          throw error;
+        }
         if (this.discarded) return;
         await this.refresh().catch(() => {
           toast.error("笔记刷新失败，请在笔记页重试");
@@ -300,6 +323,7 @@ export function discardPaperNotes(ids: string[]) {
 /** Imports identify duplicate PDFs on the server, so hold cached editors during import. */
 export async function importWithPaperNotes<T>(
   run: () => Promise<T>,
+  replace = false,
 ): Promise<T> {
   const entries = [...notes.values()];
   const releases = entries.map((entry) => entry.subscribe(() => {}));
@@ -312,7 +336,7 @@ export async function importWithPaperNotes<T>(
     };
     for (const entry of entries) {
       const next = change;
-      change = () => entry.synchronize(next);
+      change = () => entry.synchronize(next, replace);
     }
     await change();
     return result;

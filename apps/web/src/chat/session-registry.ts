@@ -4,6 +4,18 @@ import { ChatSession, type ChatTransport } from "./chat-session";
 import { refreshAIConfig } from "../store";
 
 const sessions = new Map<string, ChatSession>();
+export async function refreshSyncedChatSessions(documents: string[]) {
+  const changed = new Set(documents);
+  await Promise.all(
+    [...sessions.entries()]
+      .filter(
+        ([key, session]) =>
+          changed.has(key.slice(0, key.indexOf(":"))) &&
+          !session.getSnapshot().busy,
+      )
+      .map(([, session]) => session.refreshSynced()),
+  );
+}
 /** Viewer lifetime is independent of run lifetime. Active stores are never evicted. */
 export function getChatSession(
   documentId: string,

@@ -13,6 +13,22 @@ vi.setConfig({ testTimeout: 30_000 });
 
 vi.mock("@neoread/api", () => ({
   api: {
+    webdavConfig: vi.fn(async () => ({
+      account: "",
+      folder: "论文库",
+      deviceName: "这台设备",
+      intervalMinutes: 15,
+      enabled: false,
+      passwordSet: false,
+    })),
+    webdavStatus: vi.fn(async () => ({
+      phase: "idle",
+      conflicts: [],
+      changed: [],
+      deferred: 0,
+      transferred: 0,
+      revision: 0,
+    })),
     connectorStatus: vi.fn(async () => ({ available: true })),
     paperRefreshStatus: vi.fn(async () => ({
       status: "idle",
@@ -468,7 +484,7 @@ it("persists CLI web search directly from the toggle without a Save action", asy
   expect(toggle.getAttribute("aria-checked")).toBe("true");
 });
 
-it("shows only library location in the books tab for the current library", async () => {
+it("shows library location and whole-library sync in the books tab", async () => {
   const previous = useReaderStore.getState().libraryPreferences;
   libraryPanel.visible = true;
   useReaderStore.setState({
@@ -493,7 +509,9 @@ it("shows only library location in the books tab for the current library", async
     )!;
     expect(panel.textContent).toContain("书库位置");
     expect(panel.textContent).toContain("/test/library");
-    expect(panel.querySelectorAll("section")).toHaveLength(1);
+    expect(panel.textContent).toContain("坚果云同步");
+    expect(panel.textContent).toContain("包含其中的论文、图书");
+    expect(panel.querySelectorAll("section")).toHaveLength(2);
     expect(panel.textContent).not.toContain("导入设置");
     expect(panel.textContent).not.toContain("论文显示作者名字");
   } finally {

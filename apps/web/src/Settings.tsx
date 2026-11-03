@@ -24,6 +24,7 @@ import { DiagnosticExport } from "./DiagnosticExport";
 import { PaperRefreshSettings } from "./PaperRefreshSettings";
 import { LibraryLocationSettings } from "./LibraryLocationSettings";
 import { LibraryArchiveSettings } from "./LibraryArchiveSettings";
+import { WebDAVSyncSettings } from "./WebDAVSyncSettings";
 import { CommandLineSettings } from "./CommandLineSettings";
 import { ProviderIcon, providerLabel } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
@@ -1043,6 +1044,7 @@ export function Settings({
               <LibraryLocationSettings open={open} />
             )}
             <LibraryArchiveSettings />
+            <WebDAVSyncSettings open={open} />
             {currentLibrary === "papers" && (
               <>
                 <CitePluginSettings open={open} />

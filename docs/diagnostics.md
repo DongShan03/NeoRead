@@ -127,6 +127,12 @@ ZIP 包含：
 
 API 厂商规则、实际强度映射、上游错误分类和请求关联字段见 [API 厂商适配与错误诊断](api-provider-compatibility.md)。新增 API 错误事件只记录安全的结构化证据，不保存厂商可能回显正文的原始错误 message。
 
+## 坚果云同步
+
+`sync.started / stage / finished` 用 `taskId` 关联一轮同步，终态记录耗时并区分完成、待选择冲突、失败和取消。阶段包括扫描、下载、等待渲染端保存、应用和上传；限流终态使用 `errorCode=rate_limited`，后续遵守上游 `Retry-After`。
+
+`sync.config_saved / config_failed / connection_verified / connection_failed / disconnected` 记录连接操作结果；配置成功只记录是否自动同步和分钟间隔。`sync.index_failed` 记录接收内容后全文索引排队失败，带文档 ID 和固定错误类别。事件不记录坚果云账号、应用密码、文件夹名、完整 URL、上游响应正文、笔记或聊天内容。使用说明与人工检查见[坚果云同步](webdav-sync.md)。
+
 ## PDF 本地解析诊断
 
 `pdf.parse.start / spawned / stage / finish` 使用 `runId` 和 `documentId` 关联一次解析。记录原生 Canvas、ONNX Runtime 加载、PDF.js 加载、输出目录准备、模型校验、CPU 推理会话创建、PDF 读取与打开、逐页渲染/推理/文本提取、附件与清单写入等阶段。`stage` 是正在执行的阶段；后续阶段出现表示前一阶段已返回。失败时记录白名单异常类型和系统错误码、异常指纹，最终事件记录退出码、耗时、取消状态，以及标准错误的字节数、有限尾部指纹和截断标记。

@@ -125,3 +125,16 @@ it("offers retry after failing to load saved boards", async () => {
     "Web Security",
   );
 });
+
+it("reloads saved boards after library data arrives from sync", async () => {
+  await render();
+  vi.mocked(api.tagBoards).mockResolvedValue([
+    { ...board, name: "Synced board" },
+  ]);
+  await act(async () => {
+    window.dispatchEvent(
+      new CustomEvent("neoread:sync-applied", { detail: ["library"] }),
+    );
+  });
+  expect(host.textContent).toContain("Synced board");
+});

@@ -143,19 +143,31 @@ export class LibraryCatalog {
     active: string,
     id: string,
     name: string,
+    notify?: (name: string) => Promise<void>,
   ): Promise<LibraryCatalogSnapshot> {
     return this.run(async () => {
       const libraries = await this.ensure(active);
       const entry = libraries.find((item) => item.id === id);
       if (!entry) throw new Error("书库已不存在。");
+      const previous = entry.name;
       entry.name = uniqueLibraryName(
         name,
         libraries.filter((item) => item.id !== id).map((item) => item.name),
       );
-      await this.save(libraries);
       const directory = active
         ? await realpath(active).catch(() => active)
         : "";
+      const notifyName = (value: string) =>
+        entry.directory === directory
+          ? (notify?.(value) ?? Promise.resolve())
+          : queueInactiveSyncRename(entry.directory, value);
+      await notifyName(entry.name);
+      try {
+        await this.save(libraries);
+      } catch (error) {
+        await notifyName(previous).catch(() => {});
+        throw error;
+      }
       const current = libraries.find((item) => item.directory === directory);
       if (current) this.names.set(active, current.name);
       return {
@@ -164,5 +176,34 @@ export class LibraryCatalog {
           libraries.find((item) => item.directory === directory)?.id ?? null,
       };
     });
+  }
+}
+
+/** Inactive libraries have no server; their next activation applies this rename. */
+async function queueInactiveSyncRename(directory: string, name: string) {
+  let config: { account?: string };
+  try {
+    config = JSON.parse(
+      await readFile(join(directory, "webdav-sync.json"), "utf8"),
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (!config.account) return;
+  if (
+    !name.trim() ||
+    name === "." ||
+    name === ".." ||
+    [...name].length > 80 ||
+    /[\\/\p{Cc}]/u.test(name)
+  )
+    throw new Error("书库名称不能包含斜杠或控制字符");
+  const temporary = join(directory, `webdav-library-name.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, name, { flag: "wx", mode: 0o600 });
+    await rename(temporary, join(directory, "webdav-library-name.json"));
+  } finally {
+    await rm(temporary, { force: true });
   }
 }

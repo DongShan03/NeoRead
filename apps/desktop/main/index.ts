@@ -1207,7 +1207,30 @@ app
           throw new Error("书库名称无效");
         if (choosingLibrary || librarySwitching)
           throw new Error("书库正在处理中，请稍后重试。");
-        return libraryCatalog.rename(activeLibrary || "", id, name);
+        return libraryCatalog.rename(
+          activeLibrary || "",
+          id,
+          name,
+          async (savedName) => {
+            if (recoveryServer) return;
+            const response = await fetch(
+              serverURL + "/api/sync/webdav/rename",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: "Bearer " + serverToken,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ name: savedName }),
+                signal: AbortSignal.timeout(10000),
+              },
+            );
+            if (!response.ok) {
+              const result = await response.json();
+              throw new Error(result.error || "无法保存同步书库名称");
+            }
+          },
+        );
       },
     );
     ipcMain.handle("neoread:switch-library", async (event, id: unknown) => {

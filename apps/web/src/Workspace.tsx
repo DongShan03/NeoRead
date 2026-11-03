@@ -221,6 +221,7 @@ export function Workspace({
   const linkTarget = useReaderStore((s) => s.linkTarget);
   const [annotationsLoaded, setAnnotationsLoaded] = useState(false);
   const [blocks, setBlocks] = useState<PDFBlock[]>([]);
+  const [syncRevision, setSyncRevision] = useState(0);
   const [adapter, setAdapter] = useState<ReaderAdapter>();
   const [readingToolbar, setReadingToolbar] = useState<HTMLDivElement | null>(
     null,
@@ -479,6 +480,15 @@ export function Workspace({
     } catch {}
   };
   useEffect(() => {
+    const changed = (event: Event) => {
+      if (!(event as CustomEvent<string[]>).detail?.includes(doc.id)) return;
+      setSyncRevision((value) => value + 1);
+      void refreshSessions().catch((error) => toast.error(error.message));
+    };
+    window.addEventListener("neoread:sync-applied", changed);
+    return () => window.removeEventListener("neoread:sync-applied", changed);
+  }, [doc.id, refreshSessions]);
+  useEffect(() => {
     if (!active) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -696,6 +706,7 @@ export function Workspace({
     processing?.layoutRevision,
     // Book pages parsed in the background add blocks as they arrive.
     processing?.bookLayout?.pagesDone,
+    syncRevision,
   ]);
   const move = (next: DocumentLocation) => {
     void adapter?.goTo(next).catch((e) => toast.error(e.message));

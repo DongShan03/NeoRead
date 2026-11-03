@@ -103,9 +103,15 @@ export function TagBoards({
   useEffect(() => {
     mounted.current = true;
     void load();
+    const synced = (event: Event) => {
+      if ((event as CustomEvent<string[]>).detail.includes("library"))
+        void load();
+    };
+    window.addEventListener("neoread:sync-applied", synced);
     return () => {
       mounted.current = false;
       ++revision.current;
+      window.removeEventListener("neoread:sync-applied", synced);
     };
   }, []);
   const active = boards.find((b) => b.id === activeId);

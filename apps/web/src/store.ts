@@ -287,11 +287,12 @@ export const libraryMode = (preferences: LibraryPreferences): LibraryMode =>
   preferences.mode === "books" || preferences.mode === "papers"
     ? preferences.mode
     : primaryLibraryMode(preferences);
-export async function loadLibraryPreferences() {
+export async function loadLibraryPreferences(preserveMode = false) {
   const preferences = await api.libraryPreferences();
+  const current = useReaderStore.getState().libraryPreferences;
   useReaderStore.getState().setLibraryPreferences({
     ...preferences,
-    mode: primaryLibraryMode(preferences),
+    mode: preserveMode ? libraryMode(current) : primaryLibraryMode(preferences),
   });
 }
 let preferenceWrite = Promise.resolve();
