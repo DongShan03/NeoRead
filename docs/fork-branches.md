@@ -24,26 +24,37 @@
 
 [#214](https://github.com/cynicalight/NeoRead/pull/214) 的远端来源仍为 `codex/pr-01-reader-tab-lifecycle`，与语义分支同步；[#215](https://github.com/cynicalight/NeoRead/pull/215) 的来源仍为 `codex/pr-03-windows-codex`。保留这两条引用以延续现有审核。
 
-## 待本地体验的 PDF 性能改动
+## 阅读性能来源分支与构建主分支
 
-Fork 性能分支 [`codex/pdf-viewport-ahead`](https://github.com/DongShan03/NeoRead/tree/codex/pdf-viewport-ahead) 的提交 [`b0ec405`](https://github.com/DongShan03/NeoRead/commit/b0ec40540af9c2d9f18478581571deaa76c83b18)，以 [`4912cfa`](https://github.com/DongShan03/NeoRead/commit/4912cfa2632359b85385358a4087d763dd5174df) 集成到包含全部功能的 `main`。原文优先绘制当前视口，再按视口高度准备上下各 100% 范围内的页面；译文高清图片使用同样的范围，连续跟随直接对齐，点击定位保留平滑动画。
+`codex/bilingual-reader-performance` 是本轮阅读性能改动的来源分支，基于 `fork/codex/translation-zoom`（`2ccfb3c`），前置链为上游 #214 → #228 → #230。该分支包含阅读性能、窗口重排和标签缓存改动，便于推送到 Fork 后向原仓库提交草稿 PR。其他集成功能继续保留在本地 `main`，用于构建完整应用。
 
-本轮先同步本地和 Fork 的 `main` 供用户体验，流畅度由实际文档确认。新增性能改动暂未更新到上游 #228 及其后续 PR；上表仍指向现有审核版本。确认后再集中整理依赖和更新 PR，避免每个小修都传播一轮 merge。
+| 改动                         | 来源分支提交 | 本地 main 集成提交 |
+| ---------------------------- | ------------ | ------------------ |
+| 此前的滚动与图片优化         | `4ce77af`    | `4912cfa`          |
+| 译文内容复用与 EPUB 直接跟随 | `ed6f356`    | `5fa6c26`          |
+| 译文块列表与页面缓存优化     | `e8b550b`    | `f17ff74`          |
+| 窗口放大与还原重排           | `9ebef7a`    | `09e507b`          |
+| 受预算约束的标签页缓存       | `23b1ca9`    | `ad71eb2`          |
+| 前台恢复上游渲染参数         | `539d268`    | `31b41be`          |
+
+当前前台沿用原仓库的 PDF.js 渲染调度及 4MP/4096 画布限制；后台暂停绘制，保留当前页及相邻页，所有后台画布共用 256MiB 预算，超出后回收最久未使用的标签缓存。切换标签复用阅读器，关闭标签释放资源。
+
+来源分支与 `main` 使用各自的提交历史。整理时保留了 `main` 的正文进度、公式复制、对齐手势等集成功能，来源分支按其声明的前置保留对应实现。现有上游 PR 来源分支和远端历史尚未改动；本轮来源分支先完成本地整理与验证。前置合入后再合并最新上游 `main` 并更新审核差异。
 
 ## 后续维护
 
-本地 `origin` 指向自己的 Fork，`upstream` 指向原仓库。先在功能分支完成修改、必要验证并更新对应上游 PR，再更新 `main` 的集成提交。来源分支只同步上游和声明的前置，保持各项功能可独立审核。
+本地 `fork` 指向 `DongShan03/NeoRead`，`origin` 指向原仓库 `cynicalight/NeoRead`。先在功能分支完成修改、必要验证并更新对应上游 PR，再更新 `main` 的集成提交。来源分支只同步上游和声明的前置，保持各项功能可独立审核。
 
 前置合入上游后的操作示例：
 
 ```sh
-git fetch upstream main
-git switch codex/translation-zoom
-git merge upstream/main
+git fetch origin main
+git switch codex/bilingual-reader-performance
+git merge origin/main
 pnpm typecheck
 pnpm test
 pnpm build
-git push origin codex/translation-zoom
+git push -u fork codex/bilingual-reader-performance
 ```
 
 重建完整 `main` 时，从上游基线建立候选分支，按 01、03、04、09、10、12、13、02、05、06、07、08、11 的顺序，以各组独立差异形成普通提交。解决冲突时保留组合功能；上游已有完整等价实现的部分沿用上游。组合验证完成后再同步 Fork `main`，使用精确租约保护远端后续更新。
