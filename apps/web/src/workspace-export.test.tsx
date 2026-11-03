@@ -207,6 +207,15 @@ it("updates the active outline heading when reading moves within one PDF page", 
     ),
   );
   expect(heading("Section 1").classList.contains("selected")).toBe(true);
+  const renders = panels.readerRenders;
+  for (let i = 0; i < 30; i++)
+    await act(async () =>
+      panels.readerEvents!.location(
+        { type: "pdf", page: 1, x: 0.1, y: 0.15 + i * 0.019 },
+        0.5,
+      ),
+    );
+  expect(panels.readerRenders).toBe(renders);
   await act(async () =>
     panels.readerEvents!.location(
       { type: "pdf", page: 1, x: 0.1, y: 0.72 },
