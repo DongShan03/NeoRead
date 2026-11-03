@@ -786,7 +786,7 @@ it.each(["source", "translation"] as const)(
       expect(pane.hasAttribute("data-aligning")).toBe(true);
       await act(async () => {
         pane.dispatchEvent(new Event("scroll", { bubbles: true }));
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(560);
       });
       expect(pane.scrollTop).toBe(400);
       expect(pane.hasAttribute("data-aligning")).toBe(false);
@@ -805,7 +805,7 @@ it("top-aligns tall translation blocks and cancels their motion when the user sc
   try {
     await act(async () => block.click());
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(560);
     });
     expect(pane.scrollTop).toBe(600);
     expect(adapter.followBlock).not.toHaveBeenCalled();
@@ -821,7 +821,7 @@ it("top-aligns tall translation blocks and cancels their motion when the user sc
     );
     pane.scrollTop = 75;
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(560);
     });
     expect(pane.scrollTop).toBe(75);
   } finally {
@@ -896,7 +896,7 @@ it("opens a clicked translation image in the preview and cancels unfinished alig
       "preview",
     );
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(560);
     });
     expect(pane.scrollTop).toBe(before);
     expect(adapter.focusBlock).toHaveBeenLastCalledWith("p1-b1", "parallel");
@@ -969,7 +969,7 @@ it("centers both panels from a source click and recalculates a focused translati
   try {
     await act(async () => fixture.events!.blockFocus?.(sourceBlock));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(560);
     });
     expect(pane.scrollTop).toBe(600); // tall translation top, independent of short original
     expect(adapter.focusBlock).toHaveBeenLastCalledWith("p1-b1", "parallel");
@@ -984,7 +984,7 @@ it("centers both panels from a source click and recalculates a focused translati
     blockHeight = 200;
     await act(async () => block.click());
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(560);
     });
     expect(pane.scrollTop).toBe(450);
     expect(pane.scrollLeft).toBe(100);
