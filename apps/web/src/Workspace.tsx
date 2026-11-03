@@ -453,7 +453,8 @@ export function Workspace({
       clearTimeout(timer);
     };
   }, [refreshSessions, active]);
-  const [prompt, setPrompt] = useState("");
+  const prompt = useRef("");
+  const [hasPrompt, setHasPrompt] = useState(false);
   const [quotes, setQuotes] = useState<ReaderSelection[]>([]);
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [previewImage, setPreviewImage] = useState<ImageAttachment>();
@@ -464,8 +465,18 @@ export function Workspace({
       { prompt: string; quotes: ReaderSelection[]; images: ImageAttachment[] }
     >(),
   );
-  const composerValue = useRef({ prompt, quotes, images });
-  composerValue.current = { prompt, quotes, images };
+  const composerValue = useRef({ prompt: prompt.current, quotes, images });
+  composerValue.current = { prompt: prompt.current, quotes, images };
+  // Native editing keeps each keystroke out of the reader and chat render tree.
+  const setPrompt = (value: string) => {
+    const hadPrompt = !!prompt.current.trim();
+    prompt.current = value;
+    composerValue.current = { ...composerValue.current, prompt: value };
+    if (composeInput.current && composeInput.current.value !== value)
+      composeInput.current.value = value;
+    const nextHasPrompt = !!value.trim();
+    if (hadPrompt !== nextHasPrompt) setHasPrompt(nextHasPrompt);
+  };
   const composerKey = `${doc.id}:${currentSession?.id ?? ""}`;
   const currentComposerKey = useRef(composerKey);
   currentComposerKey.current = composerKey;
@@ -864,7 +875,7 @@ export function Workspace({
     }
   };
   const send = async (
-    question = prompt,
+    question = prompt.current,
     selected = quotes,
     useSection = false,
     attachments = images,
@@ -1143,7 +1154,7 @@ export function Workspace({
   closeState.current = {
     busy: chat.busy || sending,
     draft:
-      !!prompt.trim() ||
+      hasPrompt ||
       quotes.length > 0 ||
       images.length > 0 ||
       (noteOpen && !!note.trim()),
@@ -1888,7 +1899,7 @@ export function Workspace({
                     ref={composeInput}
                     aria-label="向 AI 提问"
                     placeholder="问一个问题，或引用选中的文字…"
-                    value={prompt}
+                    defaultValue={prompt.current}
                     onChange={(e) => setPrompt(e.target.value)}
                     onKeyDown={(e) => {
                       if (
@@ -1929,7 +1940,7 @@ export function Workspace({
                           !adapter ||
                           aiModelSaving ||
                           !provider ||
-                          (!prompt.trim() && !images.length)
+                          (!hasPrompt && !images.length)
                         }
                         onClick={() => void send()}
                       >
