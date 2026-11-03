@@ -129,6 +129,7 @@ export const useReaderStore = create<{
         removing.has(id) ? [{ id, index }] : [],
       );
       if (!closed.length) return state;
+      ++openRevision;
       const ids = state.tabIds.filter((id) => !removing.has(id));
       const activeRemoved = state.active && removing.has(state.active.id);
       const index = state.tabIds.indexOf(state.active?.id ?? "");
@@ -172,6 +173,7 @@ export const useReaderStore = create<{
             state.documents.some((doc) => doc.id === tab.id),
         );
         if (!restored.length) continue;
+        ++openRevision;
         const ids = [...state.tabIds];
         for (const tab of restored)
           ids.splice(Math.min(tab.index, ids.length), 0, tab.id);
@@ -365,32 +367,35 @@ export async function openLinkTarget(target: NeoReadLinkTarget) {
   return true;
 }
 
-let parsedRevision = 0;
 /**
  * Open a document chosen with the system Open With menu. Papers still open only
  * once parsed: the papers library shows progress meanwhile, and a paper that
- * cannot finish is reported instead. A later Open With replaces the wait.
+ * cannot finish is reported instead. A later navigation replaces the wait.
  */
 export async function openWhenParsed(id: string, onWaiting: () => void) {
-  const revision = ++parsedRevision;
+  const revision = ++openRevision;
   let doc = useReaderStore.getState().documents.find((d) => d.id === id);
   if (!doc) {
     await refreshLibrary();
+    if (revision !== openRevision) return true;
     doc = useReaderStore.getState().documents.find((d) => d.id === id);
   }
   if (!doc) return false;
   let waiting = false;
   while (doc.library === "papers") {
     const job = (await api.processing()).find((job) => job.documentId === id);
-    if (revision !== parsedRevision) return true;
-    if (job && job.phase !== "learning") {
+    if (revision !== openRevision) return true;
+    if (!useReaderStore.getState().documents.some((item) => item.id === id))
+      return false;
+    if (!job) throw new Error("论文解析任务已不存在，请重新解析文档");
+    if (job.phase !== "learning") {
       if (job.incomplete)
         throw new Error(
           job.warning || job.detail || "论文正文不完整，无法打开",
         );
       break;
     }
-    if (job && ["failed", "waiting", "paused"].includes(job.status))
+    if (["failed", "waiting", "paused"].includes(job.status))
       throw new Error(job.detail || "论文解析没有完成，无法打开");
     if (!waiting) {
       waiting = true;
@@ -400,7 +405,7 @@ export async function openWhenParsed(id: string, onWaiting: () => void) {
         void updateLibraryPreferences({ mode: "papers" }).catch(() => {});
     }
     await new Promise((resolve) => setTimeout(resolve, 1200));
-    if (revision !== parsedRevision) return true;
+    if (revision !== openRevision) return true;
   }
   await openLibraryDocument(doc, { id });
   return true;

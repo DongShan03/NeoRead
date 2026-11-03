@@ -158,3 +158,46 @@ it("replaces an earlier Open With wait", async () => {
     vi.useRealTimers();
   }
 });
+
+it("cancels automatic opening after the reader chooses another document", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(api.processing).mockResolvedValue([job()]);
+    const pending = openWhenParsed(doc.id, vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    const book = paper({ id: "chosen-book", library: "books" });
+    useReaderStore.setState({ documents: [doc, book] });
+    await openLibraryDocument(book);
+    vi.mocked(api.processing).mockResolvedValue([job({ phase: "ready" })]);
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(await pending).toBe(true);
+    expect(useReaderStore.getState().active?.id).toBe(book.id);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("stops waiting when the document is removed from the library", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(api.processing).mockResolvedValue([job()]);
+    const pending = openWhenParsed(doc.id, vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    useReaderStore.getState().setDocuments([]);
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(await pending).toBe(false);
+    const calls = vi.mocked(api.processing).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(api.processing).toHaveBeenCalledTimes(calls);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("reports a missing parsing task instead of polling indefinitely", async () => {
+  vi.mocked(api.processing).mockResolvedValue([]);
+  await expect(openWhenParsed(doc.id, vi.fn())).rejects.toThrow(
+    "解析任务已不存在",
+  );
+  expect(api.processing).toHaveBeenCalledOnce();
+});
