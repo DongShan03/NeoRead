@@ -67,6 +67,9 @@
 | 持续更新中的长草稿回归     | `codex/chat-message-editing`         | `8c26fee` | `b6e3897`      |
 | 后台会话轮询与浮层复用     | `codex/chat-message-editing`         | `78ac899` | `900d733`      |
 | 输入检查排除初始化批注加载 | `codex/chat-message-editing`         | `f11779e` | `1c48417`      |
+| 原文双击保留原生选词后的点击 | `codex/reading-alignment-gesture`   | `1a82683` | `4017350`      |
+| 长草稿使用原生输入与按需快照 | `codex/chat-message-editing`       | `a10775c` | `269b9a0`      |
+| 对齐缓入缓出与滚动锚定处理   | `codex/bilingual-reader-performance` | `54507af` | `7992441`     |
 
 ## 后续维护
 
