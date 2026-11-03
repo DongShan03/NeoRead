@@ -3,6 +3,7 @@ package neoread
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,30 @@ import (
 
 //go:embed example-paper/paper.pdf example-paper/paper.json example-paper/analysis
 var examplePaper embed.FS
+
+// Explicitly created libraries belong to an existing app user. They start
+// empty and retain that first-run decision when reopened.
+func OpenEmptyLibrary(root, version string) (*Store, error) {
+	for _, name := range []string{"neoread.sqlite", "reader.sqlite"} {
+		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			if err != nil {
+				return nil, err
+			}
+			return nil, errors.New("书库已存在，未覆盖任何内容")
+		}
+	}
+	store, err := OpenStore(root)
+	if err != nil {
+		return nil, err
+	}
+	_, err = store.DB.Exec("INSERT INTO settings(key,value) VALUES('preferences:guide',?)", jsonText(map[string]any{"onboarded": true, "seenVersion": version}))
+	if err != nil {
+		store.DB.Close()
+		return nil, err
+	}
+	slog.Info("library.empty_created")
+	return store, nil
+}
 
 // OpenLibrary runs after desktop Reader migration and opens the resulting
 // library before deciding whether it needs an example. The caller holds
@@ -45,6 +70,22 @@ func OpenLibrary(root string) (store *Store, err error) {
 		if err == nil {
 			slog.Info("library.example_skipped", "reasonCode", "existing_documents")
 		}
+		return store, err
+	}
+	var raw string
+	err = store.DB.QueryRow("SELECT value FROM settings WHERE key='preferences:guide'").Scan(&raw)
+	if err == nil {
+		var guide struct {
+			Onboarded bool `json:"onboarded"`
+		}
+		if err = json.Unmarshal([]byte(raw), &guide); err != nil {
+			return store, err
+		}
+		if guide.Onboarded {
+			slog.Info("library.example_skipped", "reasonCode", "existing_user")
+			return store, nil
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
 		return store, err
 	}
 	started := time.Now()

@@ -45,6 +45,7 @@ func main() {
 	retryLegacyCleanup := flag.Bool("retry-reader-cleanup", false, "explicitly retry a failed Reader data cleanup")
 	shutdownOnStdin := flag.Bool("shutdown-on-stdin", false, "shut down when the desktop closes stdin")
 	checkLibrary := flag.Bool("check-library", false, "validate an existing library and exit")
+	emptyLibrary := flag.Bool("empty-library", false, "initialize a new empty library for an existing app user")
 	desktopRuntime := flag.Bool("desktop-runtime", false, "receive desktop environment after local service readiness")
 	exportArchive := flag.String("export-library", "", "export a stopped library to ZIP")
 	importArchive := flag.String("import-library-archive", "", "import a NeoRead library ZIP")
@@ -154,7 +155,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer unlock()
-	store, err := neoread.OpenLibrary(root)
+	var store *neoread.Store
+	if *emptyLibrary {
+		store, err = neoread.OpenEmptyLibrary(root, neoreadVersion)
+	} else {
+		store, err = neoread.OpenLibrary(root)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}

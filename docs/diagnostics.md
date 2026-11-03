@@ -133,7 +133,7 @@ Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history
 
 ## 本地书库新建
 
-新建书库沿用 `library.switch_started / switch_stage / switch_completed / switch_failed` 的保存、停止旧服务、连接和加载阶段；分配目录或切换失败另记 `library.create_failed`，只含固定错误类别，不记录书库名称或路径。
+新建书库沿用 `library.switch_started / switch_stage / switch_completed / switch_failed` 的保存、停止旧服务、连接和加载阶段；分配目录或切换失败另记 `library.create_failed`，只含固定错误类别，不记录书库名称或路径。服务端的 `library.empty_created` 表示空库初始化完成；已有用户的空库重开使用 `library.example_skipped`，原因码为 `existing_user`。
 
 ## 坚果云同步
 

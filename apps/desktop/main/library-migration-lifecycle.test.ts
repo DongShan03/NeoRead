@@ -1202,7 +1202,11 @@ it("creates an empty local library through the saved-state switch path without a
   ipc.emit("neoread:flushed", event(), null);
   expect(await creating).toBe(true);
   expect(serverSpawn.mock.calls[1][1]).toEqual(
-    expect.arrayContaining(["--data", importedEntry.directory]),
+    expect.arrayContaining([
+      "--data",
+      importedEntry.directory,
+      "--empty-library",
+    ]),
   );
   expect(saveLocation).toHaveBeenCalledWith(
     "/userdata",

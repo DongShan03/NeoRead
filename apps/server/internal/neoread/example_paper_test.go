@@ -56,7 +56,7 @@ func TestNewLibraryExample(t *testing.T) {
 	if !bytes.Contains([]byte(prefs), []byte(paper.ID)) {
 		t.Fatal("missing onboarding example")
 	}
-	// Restart does not duplicate; completely emptying the library seeds again.
+	// Restart does not duplicate or restore an example the reader deleted.
 	s.DB.Close()
 	s, err = OpenLibrary(root)
 	if err != nil {
@@ -77,8 +77,8 @@ func TestNewLibraryExample(t *testing.T) {
 	}
 	defer s.DB.Close()
 	s.DB.QueryRow("SELECT count(*) FROM documents").Scan(&count)
-	if count != 1 {
-		t.Fatal("empty library was not reseeded")
+	if count != 0 {
+		t.Fatal("deleted example was restored in an existing user's library")
 	}
 }
 
@@ -223,5 +223,69 @@ func TestExampleRecoveryPreservesConflictingFile(t *testing.T) {
 	s.DB.QueryRow("SELECT count(*) FROM documents").Scan(&count)
 	if count != 0 {
 		t.Fatal("partial example published")
+	}
+}
+
+func TestExplicitEmptyLibraryDoesNotStartFirstRunOnCreationOrRestart(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "new-library")
+	store, err := OpenEmptyLibrary(root, "0.10.0-experiment.6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.DB.Close()
+	for i := 0; i < 2; i++ {
+		opened, err := OpenLibrary(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		var raw string
+		if err := opened.DB.QueryRow("SELECT count(*) FROM documents").Scan(&count); err != nil || count != 0 {
+			t.Fatal("created library received demo documents", count, err)
+		}
+		if err := opened.DB.QueryRow("SELECT value FROM settings WHERE key='preferences:guide'").Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var guide struct {
+			Onboarded   bool   `json:"onboarded"`
+			SeenVersion string `json:"seenVersion"`
+			Example     string `json:"exampleDocumentId"`
+		}
+		if err := json.Unmarshal([]byte(raw), &guide); err != nil || !guide.Onboarded || guide.SeenVersion != "0.10.0-experiment.6" || guide.Example != "" {
+			t.Fatal("new library would replay onboarding", guide, err)
+		}
+		opened.DB.Close()
+	}
+}
+
+func TestExplicitEmptyLibraryCannotReplaceAnExistingDatabase(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "existing")
+	store, err := OpenStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB.Close()
+	if _, err := store.DB.Exec("INSERT INTO settings(key,value) VALUES('preferences:guide','{\"onboarded\":false}')"); err != nil {
+		t.Fatal(err)
+	}
+	if replacement, err := OpenEmptyLibrary(root, "new"); err == nil {
+		replacement.DB.Close()
+		t.Fatal("existing library was reinitialized")
+	}
+	var onboarded bool
+	if err := store.DB.QueryRow("SELECT json_extract(value,'$.onboarded') FROM settings WHERE key='preferences:guide'").Scan(&onboarded); err != nil || onboarded {
+		t.Fatal("existing preferences changed", onboarded, err)
+	}
+	legacy := t.TempDir()
+	legacyFile := filepath.Join(legacy, "reader.sqlite")
+	if err := os.WriteFile(legacyFile, []byte("legacy database"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if opened, err := OpenEmptyLibrary(legacy, "new"); err == nil {
+		opened.DB.Close()
+		t.Fatal("legacy library was reinitialized")
+	}
+	if body, err := os.ReadFile(legacyFile); err != nil || string(body) != "legacy database" {
+		t.Fatal("legacy database changed", err)
 	}
 }

@@ -198,7 +198,7 @@ const commandLineHost = () => ({
   binary: bundledBinary("neoread"),
   env: process.env,
 });
-async function startServer(reuse?: { url: string; token: string }) {
+async function startServer(reuse?: { url: string; token: string }, empty = false) {
   const childEnv = process.env;
   serverToken = reuse?.token ?? randomBytes(32).toString("hex");
   diagnostics?.logs.secrets.push(serverToken);
@@ -220,6 +220,7 @@ async function startServer(reuse?: { url: string; token: string }) {
       diagnostics!.logs.sessionId,
       "--data",
       activeLibrary!,
+      ...(empty ? ["--empty-library"] : []),
       "--webdav-account",
       join(app.getPath("userData"), "webdav-connection.json"),
       "--shutdown-on-stdin",
@@ -1125,7 +1126,7 @@ app
         old.destroy();
         activeLibrary = destination;
         stage("connect");
-        await startServer(connection);
+        await startServer(connection, !!entry);
         // Register the requested name before the new renderer asks for its
         // catalog; otherwise ensure() can register the UUID directory as a name.
         if (entry) await libraryCatalog.remember(entry);
