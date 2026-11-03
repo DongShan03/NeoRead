@@ -55,12 +55,16 @@ vi.mock("@neoread/api", () => ({
     messages: vi.fn(async () => []),
     chatSessions: vi.fn(async () => []),
     sessionMessages: vi.fn(async () => []),
+    startChatRun: vi.fn(async () => ({ id: "run", status: "running" })),
     blocks: vi.fn(async () => []),
     documentNote: vi.fn(async () => ({ body: "note", updatedAt: "" })),
     translations: vi.fn(async () => []),
   },
   setDiagnosticReporter: vi.fn(),
   reportDiagnostic: vi.fn(),
+  watchChatRun: vi.fn(async (_doc, _session, _run, _signal, emit) => {
+    emit({ event: "done", data: { ok: true } });
+  }),
   blockImageURL: vi.fn(),
   publicationURL: vi.fn(),
 }));
@@ -576,6 +580,45 @@ it("restores the latest session draft and text when the composer remounts", asyn
   );
   await enterPrompt("   ");
   expect(tabCloseWarning(doc.id)).toBeNull();
+});
+
+it("sends from a mounted reader after other chat sessions fill the cache", async () => {
+  vi.useFakeTimers();
+  vi.mocked(api.aiConfig).mockResolvedValue({
+    primary: "api",
+    models: {},
+    capabilities: {},
+  } as Awaited<ReturnType<typeof api.aiConfig>>);
+  vi.mocked(api.chatSessions).mockResolvedValue([
+    {
+      id: "cache-current",
+      documentId: doc.id,
+      title: "current",
+      provider: "api",
+      createdAt: "now",
+      updatedAt: "now",
+    },
+  ]);
+  await act(async () => render(0));
+  await act(async () =>
+    panels.readerReady?.({
+      getLocation: () => undefined,
+    } as unknown as ReaderAdapter),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  for (let i = 0; i < 24; i++)
+    sessionRegistry.getChatSession(`cache-document-${i}`, `cache-session-${i}`);
+  await enterPrompt("send this draft");
+  const send = host.querySelector<HTMLButtonElement>(
+    '[aria-label="发送问题"]',
+  )!;
+  expect(send.disabled).toBe(false);
+  await act(async () => send.click());
+  expect(api.startChatRun).toHaveBeenCalledExactlyOnceWith(
+    doc.id,
+    "cache-current",
+    expect.objectContaining({ prompt: "send this draft" }),
+  );
 });
 
 it("keeps long Chinese composition and paste native across workspace updates", async () => {

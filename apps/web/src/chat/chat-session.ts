@@ -158,6 +158,9 @@ export class ChatSession {
       this.listeners.delete(listener);
     };
   };
+  canEvict() {
+    return !this.state.busy && this.listeners.size === 0;
+  }
   private publish(patch: Partial<ChatSnapshot> = {}) {
     this.state = {
       ...this.state,
