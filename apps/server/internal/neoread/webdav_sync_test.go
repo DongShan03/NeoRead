@@ -738,3 +738,182 @@ func TestWebDAVConfigDefaultsIntervalsAndCredentialsStayLocal(t *testing.T) {
 		t.Fatal("application password not saved locally")
 	}
 }
+
+func syncAPI(t *testing.T, s *Server, method, path string) {
+	t.Helper()
+	req := httptest.NewRequest(method, "http://127.0.0.1"+path, nil)
+	req.Header.Set("Authorization", "Bearer "+s.Token)
+	out := httptest.NewRecorder()
+	s.Handler().ServeHTTP(out, req)
+	if out.Code < 200 || out.Code >= 300 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+}
+
+func assertSyncDocumentDeleted(t *testing.T, s *Server, names []string) {
+	t.Helper()
+	if _, err := s.Store.Document("paper"); err == nil {
+		t.Fatal("deleted document returned")
+	}
+	for _, name := range names {
+		if _, err := os.Stat(filepath.Join(s.Store.Root, filepath.FromSlash(name))); !os.IsNotExist(err) {
+			t.Fatal("deleted file remained", name, err)
+		}
+	}
+	for _, table := range []string{"annotations", "document_notes", "translations", "messages", "search_index"} {
+		var count int
+		if err := s.Store.DB.QueryRow("SELECT count(*) FROM " + table + " WHERE document_id='paper'").Scan(&count); err != nil || count != 0 {
+			t.Fatal("deleted records remained", table, count, err)
+		}
+	}
+}
+
+func TestWebDAVTrashRestoreAndPermanentDeletionReachTheCloudAndOtherDevices(t *testing.T) {
+	remote, directory := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	runSync(t, b)
+	syncAPI(t, a, "POST", "/api/documents/paper/trash")
+	runSync(t, a)
+	runSync(t, b)
+	d, err := b.Store.Document("paper")
+	if err != nil || d.DeletedAt == "" {
+		t.Fatal("trash state not synchronized", d, err)
+	}
+	if _, err := os.Stat(b.Store.File(d)); err != nil {
+		t.Fatal("trash removed original", err)
+	}
+	syncAPI(t, b, "POST", "/api/documents/paper/restore")
+	runSync(t, b)
+	runSync(t, a)
+	d, err = a.Store.Document("paper")
+	if err != nil || d.DeletedAt != "" {
+		t.Fatal("restore not synchronized", d, err)
+	}
+	config, _ := a.readSyncConfig()
+	state, err := a.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for name := range state.Base["document/paper"].Files {
+		names = append(names, name)
+	}
+	syncAPI(t, a, "DELETE", "/api/documents/paper")
+	runSync(t, a)
+	runSync(t, b)
+	assertSyncDocumentDeleted(t, b, names)
+	var manifest syncManifest
+	body, err := os.ReadFile(filepath.Join(directory, "NeoRead", "论文库", "devices", state.Device+".json"))
+	if err != nil || json.Unmarshal(body, &manifest) != nil || !manifest.Entries["document/paper"].Deleted {
+		t.Fatal("cloud did not receive deletion", string(body), err)
+	}
+	c := syncFixture(t, remote, "New device")
+	runSync(t, c)
+	runSync(t, b)
+	runSync(t, a)
+	assertSyncDocumentDeleted(t, c, names)
+	assertSyncDocumentDeleted(t, b, names)
+}
+
+func TestWebDAVOfflineDeletionWaitsForAConcurrentEditChoiceAndNeverResurrects(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	runSync(t, b)
+	config, _ := a.readSyncConfig()
+	before, _ := a.loadSyncState(config)
+	names := []string{}
+	for name := range before.Base["document/paper"].Files {
+		names = append(names, name)
+	}
+	syncAPI(t, a, "DELETE", "/api/documents/paper")
+	a.webdav.factory = func(c webdavConfig) *davClient {
+		client := testDAVClient(c, remote)
+		client.http.Transport = davTestTransport(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 503, Header: http.Header{}, Body: http.NoBody}, nil
+		})
+		return client
+	}
+	if err := a.runWebDAV(context.Background(), config); err == nil {
+		t.Fatal("expected offline sync failure")
+	}
+	if _, err := b.Store.DB.Exec("UPDATE document_notes SET body='offline edit' WHERE document_id='paper'"); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, b)
+	a.Close()
+	resumed := NewServer(a.Store, "test-token", "")
+	resumed.webdav.factory = func(c webdavConfig) *davClient { return testDAVClient(c, remote) }
+	resumed.webdav.beforeApply = func(context.Context) error { return nil }
+	t.Cleanup(resumed.Close)
+	runSync(t, resumed)
+	conflicts := resumed.syncStatus().Conflicts
+	if len(conflicts) != 1 || conflicts[0].CanKeepBoth {
+		t.Fatal("delete/edit conflict not retained", conflicts)
+	}
+	var note string
+	if err := b.Store.DB.QueryRow("SELECT body FROM document_notes WHERE document_id='paper'").Scan(&note); err != nil || note != "offline edit" {
+		t.Fatal("unresolved edit was lost", note, err)
+	}
+	state, err := resumed.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletion := ""
+	for _, version := range conflicts[0].Versions {
+		if version.Deleted {
+			deletion = version.ID
+		}
+	}
+	if deletion == "" {
+		t.Fatal("missing deletion choice")
+	}
+	state.Choices[conflicts[0].Key] = syncChoice{Conflict: conflicts[0].ID, Version: deletion}
+	if err := resumed.saveSyncState(config, state); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, resumed)
+	runSync(t, b)
+	runSync(t, resumed)
+	runSync(t, b)
+	assertSyncDocumentDeleted(t, b, names)
+	if len(resumed.syncStatus().Conflicts) != 0 || len(b.syncStatus().Conflicts) != 0 {
+		t.Fatal("resolved deletion was offered again")
+	}
+}
+
+func TestWebDAVDeletionFileRecoveryMatchesTheDatabaseCommit(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rollback", true: "commit"}[committed], func(t *testing.T) {
+			s := NewServer(archiveFixture(t, t.TempDir()), "test-token", "")
+			run := id()
+			name := "papers/paper.pdf"
+			backup := filepath.Join(s.syncDirectory(), "apply", run, "backup", name)
+			if err := os.MkdirAll(filepath.Dir(backup), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(backup, []byte("original"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(syncInstallJournal{ID: run, Files: []syncInstallFile{{Name: name, Existed: true, Remove: true}}})
+			if err := atomicFile(filepath.Join(s.syncDirectory(), "apply.json"), body); err != nil {
+				t.Fatal(err)
+			}
+			if committed {
+				if _, err := s.Store.DB.Exec("INSERT INTO settings(key,value) VALUES('sync:apply',?)", run); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.recoverSyncInstall(); err != nil {
+				t.Fatal(err)
+			}
+			restored, err := os.ReadFile(filepath.Join(s.Store.Root, name))
+			if committed && !os.IsNotExist(err) || !committed && (err != nil || string(restored) != "original") {
+				t.Fatal("deletion recovery lost or revived the original", string(restored), err)
+			}
+		})
+	}
+}

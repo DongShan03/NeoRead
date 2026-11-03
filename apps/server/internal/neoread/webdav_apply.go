@@ -455,9 +455,9 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 				}
 			}
 		}
-		if after != nil && initial.Documents[key] != nil {
+		if initial.Documents[key] != nil {
 			for name := range initial.Documents[key].Files {
-				if _, ok := after.Files[name]; !ok {
+				if _, ok := after.FileSafe(name); !ok {
 					names[name] = true
 				}
 			}
