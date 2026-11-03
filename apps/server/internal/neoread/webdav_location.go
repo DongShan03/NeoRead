@@ -170,6 +170,7 @@ func (s *Server) prepareSyncLocation(ctx context.Context, config webdavConfig) (
 	}
 	config.RemoteID = location.ID
 	config.Folder = location.Folder
+	config.LibraryConfigured = true
 	if err = s.writeSyncConfig(config); err != nil {
 		return config, nil, err
 	}

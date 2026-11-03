@@ -14,14 +14,15 @@ import (
 )
 
 type webdavConfig struct {
-	RemoteID        string `json:"remoteId,omitempty"`
-	IntervalMinutes int    `json:"intervalMinutes"`
-	Account         string `json:"account"`
-	Password        string `json:"password,omitempty"`
-	PasswordSet     bool   `json:"passwordSet"`
-	Folder          string `json:"folder"`
-	DeviceName      string `json:"deviceName"`
-	Enabled         bool   `json:"enabled"`
+	LibraryConfigured bool   `json:"libraryConfigured"`
+	RemoteID          string `json:"remoteId,omitempty"`
+	IntervalMinutes   int    `json:"intervalMinutes"`
+	Account           string `json:"account"`
+	Password          string `json:"password,omitempty"`
+	PasswordSet       bool   `json:"passwordSet"`
+	Folder            string `json:"folder"`
+	DeviceName        string `json:"deviceName"`
+	Enabled           bool   `json:"enabled"`
 }
 type syncClock map[string]uint64
 
@@ -81,7 +82,68 @@ type syncRemoteCache struct {
 type syncChoice struct {
 	Conflict string `json:"conflict"`
 	Version  string `json:"version"`
+	KeepBoth bool   `json:"keepBoth,omitempty"`
 }
+
+// The reader has one note per document. Keep each distinct version in a named
+// Markdown section, then merge the other records using the normal rules.
+func keepSyncNotes(base *syncDocument, versions []*syncVersion) (*syncDocument, bool) {
+	if len(versions) < 2 {
+		return nil, false
+	}
+	noteKey := ""
+	parts := []string{}
+	seen := map[string]bool{}
+	var template syncRow
+	for _, version := range versions {
+		if version.Deleted || version.Body == nil {
+			return nil, false
+		}
+		text := ""
+		for key, record := range version.Body.Records {
+			if rows := record["document_notes"]; len(rows) == 1 {
+				noteKey, template = key, rows[0]
+				text = fmtSyncString(rows[0]["body"])
+			}
+		}
+		if seen[text] {
+			continue
+		}
+		seen[text] = true
+		name := strings.NewReplacer("\r", " ", "\n", " ").Replace(version.Name)
+		parts = append(parts, "## "+name+" · "+version.Updated+"\n\n"+text)
+	}
+	if noteKey == "" || len(parts) < 2 {
+		return nil, false
+	}
+	row := syncRow{}
+	for key, value := range template {
+		row[key] = value
+	}
+	row["body"], row["updated_at"] = strings.Join(parts, "\n\n---\n\n"), now()
+	if len([]rune(fmtSyncString(row["body"]))) > 100000 {
+		return nil, false
+	}
+	var result *syncDocument
+	for _, version := range versions {
+		copy := &syncDocument{Records: map[string]syncRecord{}, Files: version.Body.Files}
+		for key, record := range version.Body.Records {
+			copy.Records[key] = record
+		}
+		copy.Records[noteKey] = syncRecord{"document_notes": {row}}
+		if result == nil {
+			result = copy
+			continue
+		}
+		var ok bool
+		result, ok = mergeSyncDocument(base, result, copy)
+		if !ok {
+			return nil, false
+		}
+	}
+	return result, true
+}
+
 type syncLocalState struct {
 	Device     string                     `json:"device"`
 	Clock      syncClock                  `json:"clock"`

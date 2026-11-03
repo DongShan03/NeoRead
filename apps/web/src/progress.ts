@@ -1,5 +1,6 @@
 import type { DocumentLocation } from "@neoread/core";
 import { api } from "@neoread/api";
+import { notifyLibraryChange } from "../../../packages/neoread-core/src/library-changes";
 type Progress = {
   progress: DocumentLocation;
   percentage: number;
@@ -11,6 +12,8 @@ const versions = new Map<string, number>();
 const furthestPositions = new Map<string, number>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let saving: Promise<unknown> = Promise.resolve();
+let pendingWrites = 0;
+export const hasPendingProgress = () => latest.size > 0 || pendingWrites > 0;
 const errors = new Map<string, unknown>();
 /** Deleted or merged documents must not leave failed writes blocking other tabs. */
 export function forgetProgress(ids: string[]) {
@@ -41,6 +44,7 @@ export function scheduleProgress(
     };
   }
   latest.set(id, { id, patch, version });
+  notifyLibraryChange();
   clearTimeout(timer);
   timer = setTimeout(() => {
     void flushProgress().catch(onError);
@@ -51,6 +55,7 @@ export async function flushProgress() {
   const updates = [...latest.values()];
   latest.clear();
   if (updates.length) {
+    pendingWrites++;
     saving = saving
       .catch(() => {})
       .then(async () => {
@@ -71,6 +76,9 @@ export async function flushProgress() {
           }
         }
         if (failure) throw failure;
+      })
+      .finally(() => {
+        pendingWrites--;
       });
   }
   const pending = saving;

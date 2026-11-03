@@ -1,4 +1,5 @@
 export interface WebDAVConfig {
+  libraryConfigured?: boolean;
   account: string;
   folder: string;
   deviceName: string;
@@ -19,8 +20,13 @@ export interface WebDAVConflict {
   id: string;
   title: string;
   versions: WebDAVVariant[];
+  canKeepBoth: boolean;
 }
 export interface WebDAVStatus {
+  runId?: string;
+  manual: boolean;
+  dirty: boolean;
+  failed: boolean;
   phase:
     | "idle"
     | "scanning"

@@ -403,6 +403,10 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 	if _, err = tx.ExecContext(ctx, "PRAGMA defer_foreign_keys=ON"); err != nil {
 		return nil, err
 	}
+	beforeRevision, err := syncLocalRevision(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	current, err := snapshotSyncRows(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -528,6 +532,10 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 	if err == nil {
 		_, err = tx.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES('sync:apply',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", run)
 	}
+	var afterRevision int64
+	if err == nil {
+		afterRevision, err = syncLocalRevision(ctx, tx)
+	}
 	if err == nil {
 		err = tx.Commit()
 	}
@@ -538,6 +546,7 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 		}
 		return nil, err
 	}
+	initial.AppliedChanges = afterRevision - beforeRevision
 	return accepted, nil
 }
 

@@ -2,6 +2,7 @@ import { api } from "@neoread/api";
 import { toast } from "sonner";
 import { reportDiagnostic } from "./diagnostics";
 import { diagnosticError } from "../../../packages/neoread-core/src/diagnostics";
+import { notifyLibraryChange } from "../../../packages/neoread-core/src/library-changes";
 
 type NoteStatus = "loading" | "load-error" | "dirty" | "saving" | "saved";
 type NoteSnapshot = { body: string; status: NoteStatus; error: string };
@@ -100,8 +101,10 @@ class PaperNoteState {
       status: this.saving ? "saving" : this.pending ? "dirty" : "saved",
       error: "",
     });
-    if (this.pending) this.scheduleSave();
-    else this.clearTimer();
+    if (this.pending) {
+      notifyLibraryChange();
+      this.scheduleSave();
+    } else this.clearTimer();
   };
   flush = (): Promise<string> => {
     if (this.discarded) return Promise.resolve(this.snapshot.body);

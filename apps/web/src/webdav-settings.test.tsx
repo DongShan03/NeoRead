@@ -13,6 +13,8 @@ vi.mock("@neoread/api", () => ({
     saveWebdavConfig: vi.fn(),
     testWebdav: vi.fn(async () => ({ ok: true })),
     runWebdav: vi.fn(),
+    keepWebdavNotes: vi.fn(),
+    resolveWebdav: vi.fn(),
   },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -35,7 +37,12 @@ beforeEach(() => {
     ...value,
     passwordSet: true,
   }));
-  useWebDAVSync.setState({ config: undefined, status: emptyWebDAVStatus });
+  useWebDAVSync.setState({
+    config: undefined,
+    status: emptyWebDAVStatus,
+    starting: false,
+    localFailure: undefined,
+  });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -118,4 +125,79 @@ it("keeps an already stored application password out of the renderer input", asy
   expect(api.testWebdav).toHaveBeenCalledWith(
     expect.objectContaining({ password: "", passwordSet: true }),
   );
+});
+
+it("allows note conflicts to be deferred or kept together without forcing a dialog", async () => {
+  const conflict = {
+    key: "document/paper",
+    id: "conflict",
+    title: "Paper",
+    canKeepBoth: true,
+    versions: [
+      {
+        id: "a",
+        device: "Mac",
+        updated: "2026-11-03T10:00:00Z",
+        deleted: false,
+        preview: "note A",
+      },
+      {
+        id: "b",
+        device: "Windows",
+        updated: "2026-11-03T10:00:00Z",
+        deleted: false,
+        preview: "note B",
+      },
+    ],
+  };
+  vi.mocked(api.webdavStatus).mockResolvedValue({
+    ...emptyWebDAVStatus,
+    phase: "conflict",
+    conflicts: [conflict],
+  });
+  vi.mocked(api.keepWebdavNotes).mockResolvedValue({
+    ...emptyWebDAVStatus,
+    phase: "scanning",
+  });
+  await render();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  await click("选择版本");
+  const dialogButton = (text: string) =>
+    [...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === text,
+    )!;
+  await act(async () => dialogButton("稍后处理").click());
+  expect(api.keepWebdavNotes).not.toHaveBeenCalled();
+  await click("选择版本");
+  await act(async () => dialogButton("都保留").click());
+  expect(api.keepWebdavNotes).toHaveBeenCalledWith(conflict.key, conflict.id);
+  expect(useWebDAVSync.getState().status.conflicts).toHaveLength(0);
+  expect(api.resolveWebdav).not.toHaveBeenCalled();
+});
+
+it("offers a configured shared connection without enabling a different library", async () => {
+  vi.mocked(api.webdavConfig).mockResolvedValue({
+    ...config,
+    account: "reader@example.com",
+    passwordSet: true,
+    enabled: false,
+    libraryConfigured: false,
+  });
+  vi.stubGlobal("neoreadDesktop", {
+    libraryCatalog: async () => ({
+      activeId: "other",
+      libraries: [{ id: "other", name: "研究资料", directory: "/other" }],
+    }),
+  });
+  await render();
+  expect(input("email").value).toBe("reader@example.com");
+  expect(host.textContent).toContain("NeoRead/研究资料/");
+  expect(
+    host.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+  ).toBe("false");
+  expect(
+    [...host.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "立即同步",
+    )?.disabled,
+  ).toBe(true);
 });

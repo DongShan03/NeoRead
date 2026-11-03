@@ -346,7 +346,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resolve an unchanged conflict using a selected document version */
+        /** Resolve an unchanged conflict by selecting a version or keeping both notes */
         post: {
             parameters: {
                 query?: never;
@@ -359,7 +359,9 @@ export interface paths {
                     "application/json": {
                         key: string;
                         conflict: string;
-                        version: string;
+                        version?: string;
+                        /** @default false */
+                        keepBoth?: boolean;
                     };
                 };
             };
@@ -5562,6 +5564,7 @@ export interface components {
         WebDAVConfig: {
             /** Format: email */
             account: string;
+            readonly libraryConfigured?: boolean;
             /** @default 论文库 */
             folder: string;
             deviceName: string;
@@ -5574,6 +5577,11 @@ export interface components {
             readonly remoteId?: string;
         };
         WebDAVStatus: {
+            dirty: boolean;
+            manual: boolean;
+            runId?: string;
+            /** @description Failure remains set until a successful sync */
+            failed: boolean;
             /** @enum {unknown} */
             phase: "idle" | "scanning" | "downloading" | "uploading" | "ready" | "applying" | "complete" | "conflict" | "cancelled" | "failed";
             lastSync?: string;
@@ -5590,6 +5598,7 @@ export interface components {
             key: string;
             id: string;
             title: string;
+            canKeepBoth: boolean;
             versions: components["schemas"]["WebDAVVariant"][];
         };
         WebDAVVariant: {

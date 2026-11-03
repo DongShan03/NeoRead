@@ -31,6 +31,7 @@ func main() {
 	data := flag.String("data", ".neoread", "local library directory")
 	port := flag.String("port", "17840", "loopback port, 0 for automatic")
 	web := flag.String("web", "", "built web directory")
+	webdavAccount := flag.String("webdav-account", "", "machine-local shared WebDAV connection file")
 	connector := flag.Bool("connector", true, "enable NeoRead Connector listener")
 	citeCredential := flag.String("cite-credential", "", "credential file for the Word and WPS plugins")
 	citePlugins := flag.String("cite-plugins", "", "directory with the Word and WPS add-in files")
@@ -173,6 +174,11 @@ func main() {
 	recorder.Secrets = append(recorder.Secrets, token)
 	server := neoread.NewServer(store, token, *web)
 	server.SetDiagnostics(recorder)
+	if *webdavAccount != "" {
+		if err := server.SetWebDAVAccountPath(*webdavAccount); err != nil {
+			log.Fatal("无法准备 WebDAV 连接设置")
+		}
+	}
 	defer server.Close()
 	if err := server.PrepareStartupSettings(); err != nil {
 		log.Fatal(err)

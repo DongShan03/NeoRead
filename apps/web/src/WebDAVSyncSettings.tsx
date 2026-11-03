@@ -22,6 +22,8 @@ import {
   loadWebDAVSettings,
   useWebDAVSync,
   wakeWebDAVSync,
+  startWebDAVSync,
+  setWebDAVStatus,
 } from "./webdav-sync";
 
 const defaults: WebDAVConfig = {
@@ -40,7 +42,7 @@ const phases: Record<string, string> = {
   ready: "正在保存阅读状态…",
   applying: "正在更新本地书库…",
   complete: "同步完成",
-  conflict: "有内容需要选择版本",
+  conflict: "有内容存在不同版本，可稍后处理",
   cancelled: "同步已停止",
   failed: "同步未完成",
 };
@@ -68,9 +70,13 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
           (item) => item.id === catalog.activeId,
         );
         setDraft(
-          config.account
+          config.account && config.libraryConfigured !== false
             ? config
-            : { ...config, enabled: true, folder: local?.name || "论文库" },
+            : {
+                ...config,
+                enabled: !config.account,
+                folder: local?.name || "论文库",
+              },
         );
         setPassword("");
         setError("");
@@ -95,7 +101,7 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
       setError((failure as Error).message);
     } finally {
       setOperation("");
-      wakeWebDAVSync();
+      if (name !== "sync") wakeWebDAVSync();
     }
   };
   const input = { ...draft, password };
@@ -249,11 +255,15 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
           ) : (
             <Button
               variant="outline"
-              disabled={loading || !!operation || !draft.passwordSet}
+              disabled={
+                loading ||
+                !!operation ||
+                !draft.passwordSet ||
+                draft.libraryConfigured === false
+              }
               onClick={() =>
                 void run("sync", async () => {
-                  const next = await api.runWebdav();
-                  useWebDAVSync.setState({ status: next });
+                  await startWebDAVSync();
                 })
               }
             >
@@ -268,14 +278,19 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
               onClick={() =>
                 void run("disconnect", async () => {
                   await api.disconnectWebdav();
-                  setDraft(defaults);
                   setPassword("");
-                  await loadWebDAVSettings();
-                  toast.success("已断开，云端数据保留");
+                  useWebDAVSync.setState({ localFailure: undefined });
+                  const disconnected = await loadWebDAVSettings();
+                  setDraft({
+                    ...disconnected,
+                    folder: draft.folder,
+                    enabled: false,
+                  });
+                  toast.success("已关闭此书库同步，云端数据保留");
                 })
               }
             >
-              断开连接
+              关闭此书库同步
             </Button>
           )}
         </div>
@@ -305,7 +320,7 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
         )}
         {status.conflicts.map((item) => (
           <div
-            className="flex items-center justify-between gap-3 text-sm"
+            className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
             key={item.key}
           >
             <span className="min-w-0 truncate">{item.title}</span>
@@ -329,9 +344,27 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
           <DialogHeader>
             <DialogTitle>{conflict?.title}</DialogTitle>
             <DialogDescription>
-              不同设备修改了同一篇文档。选择要保留的文档版本后，其他设备会接收这个版本。
+              {conflict?.canKeepBoth
+                ? "可以将各设备的笔记分段保存，也可以只使用一个版本。此提示可关闭，稍后再处理。"
+                : "不同设备修改了同一篇文档，可以选择要使用的版本，也可以稍后处理。"}
             </DialogDescription>
           </DialogHeader>
+          {conflict?.canKeepBoth && (
+            <Button
+              variant="outline"
+              disabled={!!operation || running}
+              onClick={() =>
+                void run("keepBoth", async () => {
+                  setWebDAVStatus(
+                    await api.keepWebdavNotes(conflict.key, conflict.id),
+                  );
+                  setConflict(undefined);
+                })
+              }
+            >
+              都保留
+            </Button>
+          )}
           {conflict?.versions.map((version) => (
             <div key={version.id} className="grid gap-2 rounded-md border p-3">
               <p className="text-sm font-medium">
@@ -352,15 +385,18 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
                       conflict.id,
                       version.id,
                     );
-                    useWebDAVSync.setState({ status: next });
+                    setWebDAVStatus(next);
                     setConflict(undefined);
                   })
                 }
               >
-                采用此版本
+                只使用此版本
               </Button>
             </div>
           ))}
+          <Button variant="ghost" onClick={() => setConflict(undefined)}>
+            稍后处理
+          </Button>
         </DialogContent>
       </Dialog>
     </section>

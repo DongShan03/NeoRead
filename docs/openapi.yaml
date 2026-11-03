@@ -292,7 +292,7 @@
         {
           "post":
             {
-              "summary": "Resolve an unchanged conflict using a selected document version",
+              "summary": "Resolve an unchanged conflict by selecting a version or keeping both notes",
               "responses":
                 {
                   "202":
@@ -335,8 +335,10 @@
                                   "key": { "type": "string" },
                                   "conflict": { "type": "string" },
                                   "version": { "type": "string" },
+                                  "keepBoth":
+                                    { "type": "boolean", "default": false },
                                 },
-                              "required": ["key", "conflict", "version"],
+                              "required": ["key", "conflict"],
                             },
                         },
                     },
@@ -6361,6 +6363,7 @@
               "properties":
                 {
                   "account": { "type": "string", "format": "email" },
+                  "libraryConfigured": { "type": "boolean", "readOnly": true },
                   "folder": { "type": "string", "default": "论文库" },
                   "deviceName": { "type": "string" },
                   "intervalMinutes":
@@ -6390,6 +6393,14 @@
               "type": "object",
               "properties":
                 {
+                  "dirty": { "type": "boolean" },
+                  "manual": { "type": "boolean" },
+                  "runId": { "type": "string" },
+                  "failed":
+                    {
+                      "type": "boolean",
+                      "description": "Failure remains set until a successful sync",
+                    },
                   "phase":
                     {
                       "enum":
@@ -6427,6 +6438,9 @@
                 },
               "required":
                 [
+                  "dirty",
+                  "manual",
+                  "failed",
                   "phase",
                   "conflicts",
                   "deferred",
@@ -6443,13 +6457,14 @@
                   "key": { "type": "string" },
                   "id": { "type": "string" },
                   "title": { "type": "string" },
+                  "canKeepBoth": { "type": "boolean" },
                   "versions":
                     {
                       "type": "array",
                       "items": { "$ref": "#/components/schemas/WebDAVVariant" },
                     },
                 },
-              "required": ["key", "id", "title", "versions"],
+              "required": ["key", "id", "title", "versions", "canKeepBoth"],
             },
           "WebDAVVariant":
             {

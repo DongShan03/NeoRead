@@ -219,6 +219,8 @@ async function startServer(reuse?: { url: string; token: string }) {
       diagnostics!.logs.sessionId,
       "--data",
       activeLibrary!,
+      "--webdav-account",
+      join(app.getPath("userData"), "webdav-connection.json"),
       "--shutdown-on-stdin",
       "--desktop-runtime",
       "--web",

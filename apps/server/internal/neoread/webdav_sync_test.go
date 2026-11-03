@@ -435,6 +435,163 @@ func TestWebDAVMergesIndependentEditsAndPreservesNoteConflicts(t *testing.T) {
 		t.Fatal(note, err)
 	}
 }
+
+func TestWebDAVKeepBothNotesResolvesConflictForAllDevices(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	runSync(t, b)
+	if _, err := a.Store.DB.Exec("UPDATE document_notes SET body='Mac 完整笔记' WHERE document_id='paper'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Store.DB.Exec("UPDATE document_notes SET body='Windows 完整笔记' WHERE document_id='paper'"); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	runSync(t, b)
+	conflict := b.syncStatus().Conflicts[0]
+	if !conflict.CanKeepBoth {
+		t.Fatal("note conflict cannot keep both")
+	}
+	body := jsonText(map[string]any{"key": conflict.Key, "conflict": conflict.ID, "keepBoth": true})
+	r := httptest.NewRequest("POST", "http://127.0.0.1/api/sync/webdav/resolve", strings.NewReader(body))
+	r.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	b.Handler().ServeHTTP(w, r)
+	if w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if len(b.syncStatus().Conflicts) != 0 {
+		t.Fatal("resolved conflict still prompts")
+	}
+	b.webdav.mu.Lock()
+	done := b.webdav.done
+	b.webdav.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resolution did not finish")
+	}
+	for i := 0; i < 2; i++ {
+		runSync(t, a)
+		runSync(t, b)
+	}
+	for _, server := range []*Server{a, b} {
+		var note string
+		if err := server.Store.DB.QueryRow("SELECT body FROM document_notes WHERE document_id='paper'").Scan(&note); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(note, "Mac 完整笔记") != 1 || strings.Count(note, "Windows 完整笔记") != 1 || !strings.Contains(note, "## Mac") || !strings.Contains(note, "## Windows") {
+			t.Fatal(note)
+		}
+		if len(server.syncStatus().Conflicts) != 0 || server.syncStatus().Dirty {
+			t.Fatal("kept notes were not acknowledged", server.syncStatus())
+		}
+	}
+}
+
+func TestWebDAVTracksDirtyChangesAndLatchesFailuresUntilSuccess(t *testing.T) {
+	remote, _ := testDAV(t)
+	s := syncFixture(t, remote, "Mac")
+	syncDocumentFixture(t, s.Store, "paper", "分类")
+	runSync(t, s)
+	if s.syncStatus().Dirty || s.syncStatus().Failed {
+		t.Fatal("fresh sync is not clean", s.syncStatus())
+	}
+	if _, err := s.Store.DB.Exec("INSERT INTO settings(key,value) VALUES('api:key','private'); INSERT INTO settings(key,value) VALUES('preferences:library','{\"mode\":\"books\"}')"); err != nil {
+		t.Fatal(err)
+	}
+	if s.syncStatus().Dirty {
+		t.Fatal("machine configuration dirtied sync")
+	}
+	if _, err := s.Store.DB.Exec("UPDATE document_notes SET body='new edit' WHERE document_id='paper'"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.syncStatus().Dirty {
+		t.Fatal("note edit was not detected")
+	}
+	s.webdav.factory = func(c webdavConfig) *davClient {
+		client := testDAVClient(c, remote)
+		client.http.Transport = davTestTransport(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 500, Header: http.Header{}, Body: http.NoBody}, nil
+		})
+		return client
+	}
+	if err := s.beginWebDAVSync(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	s.webdav.mu.Lock()
+	done := s.webdav.done
+	s.webdav.mu.Unlock()
+	<-done
+	if !s.syncStatus().Failed || !s.syncStatus().Manual || s.syncStatus().RunID == "" {
+		t.Fatal(s.syncStatus())
+	}
+	if _, err := s.Store.DB.Exec("UPDATE document_notes SET body='another edit' WHERE document_id='paper'"); err != nil {
+		t.Fatal(err)
+	}
+	s.webdav.mu.Lock()
+	s.webdav.status = webdavStatus{}
+	s.webdav.mu.Unlock()
+	if !s.syncStatus().Failed {
+		t.Fatal("editing or restarting cleared failure")
+	}
+	s.webdav.factory = func(c webdavConfig) *davClient { return testDAVClient(c, remote) }
+	runSync(t, s)
+	if s.syncStatus().Failed || s.syncStatus().Dirty {
+		t.Fatal("successful retry did not clear failure", s.syncStatus())
+	}
+}
+
+func TestWebDAVChangesDuringUploadRemainUnsynced(t *testing.T) {
+	remote, _ := testDAV(t)
+	s := syncFixture(t, remote, "Mac")
+	syncDocumentFixture(t, s.Store, "paper", "分类")
+	changed := false
+	s.webdav.factory = func(c webdavConfig) *davClient {
+		client := testDAVClient(c, remote)
+		client.http.Transport = davTestTransport(func(r *http.Request) (*http.Response, error) {
+			if !changed && r.Method == "PUT" && strings.Contains(r.URL.Path, "/devices/") {
+				changed = true
+				if _, err := s.Store.DB.Exec("UPDATE document_notes SET body='edit while uploading' WHERE document_id='paper'"); err != nil {
+					return nil, err
+				}
+			}
+			return http.DefaultTransport.RoundTrip(r)
+		})
+		return client
+	}
+	runSync(t, s)
+	if !s.syncStatus().Dirty {
+		t.Fatal("late local edit was marked synced")
+	}
+	s.webdav.factory = func(c webdavConfig) *davClient { return testDAVClient(c, remote) }
+	runSync(t, s)
+	if s.syncStatus().Dirty {
+		t.Fatal("follow-up sync did not acknowledge late edit")
+	}
+}
+
+func TestWebDAVConfiguredConnectionIsAvailableButOffInOtherLibraries(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), NewServer(archiveFixture(t, t.TempDir()), "test-token", "")
+	t.Cleanup(b.Close)
+	shared := filepath.Join(t.TempDir(), "webdav-connection.json")
+	if err := a.SetWebDAVAccountPath(shared); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetWebDAVAccountPath(shared); err != nil {
+		t.Fatal(err)
+	}
+	config, err := b.readSyncConfig()
+	if err != nil || config.Account != "reader@example.com" || !config.PasswordSet || config.Enabled || config.LibraryConfigured {
+		t.Fatal(publicSyncConfig(config), err)
+	}
+	if err := b.beginWebDAVSync(t.Context(), true); err == nil {
+		t.Fatal("unconfigured library could sync the default folder")
+	}
+}
 func TestWebDAVRemoteFolderFollowsRenameAndOtherDevicesDiscoverIt(t *testing.T) {
 	remote, directory := testDAV(t)
 	a := syncFixture(t, remote, "Mac")

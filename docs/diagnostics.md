@@ -133,6 +133,8 @@ API 厂商规则、实际强度映射、上游错误分类和请求关联字段�
 
 `sync.config_saved / config_failed / connection_verified / connection_failed / disconnected` 记录连接操作结果；配置成功只记录是否自动同步和分钟间隔。`sync.index_failed` 记录接收内容后全文索引排队失败，带文档 ID 和固定错误类别。事件不记录坚果云账号、应用密码、文件夹名、完整 URL、上游响应正文、笔记或聊天内容。使用说明与人工检查见[坚果云同步](webdav-sync.md)。
 
+状态接口用 `runId` 和 `manual` 区分每轮同步及其触发方式，渲染端据此只提示一次结果。SQLite 变更计数与应用远端内容的事务一起更新，用于识别传输期间的新本地修改；失败标记保留到成功同步，记录失败标记无法保存时产生 `sync.status_failed`，只含任务 ID 和固定的 `save` 错误类别。
+
 ## PDF 本地解析诊断
 
 `pdf.parse.start / spawned / stage / finish` 使用 `runId` 和 `documentId` 关联一次解析。记录原生 Canvas、ONNX Runtime 加载、PDF.js 加载、输出目录准备、模型校验、CPU 推理会话创建、PDF 读取与打开、逐页渲染/推理/文本提取、附件与清单写入等阶段。`stage` 是正在执行的阶段；后续阶段出现表示前一阶段已返回。失败时记录白名单异常类型和系统错误码、异常指纹，最终事件记录退出码、耗时、取消状态，以及标准错误的字节数、有限尾部指纹和截断标记。

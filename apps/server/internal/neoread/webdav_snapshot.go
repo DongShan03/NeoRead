@@ -30,9 +30,11 @@ type syncQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 type syncSnapshot struct {
-	Documents map[string]*syncDocument
-	Files     map[string]syncFingerprint
-	Busy      map[string]bool
+	Documents      map[string]*syncDocument
+	Files          map[string]syncFingerprint
+	Busy           map[string]bool
+	Revision       int64
+	AppliedChanges int64
 }
 
 func syncSchema(ctx context.Context, q syncQuery) (map[string]syncTable, error) {
@@ -290,11 +292,15 @@ func (s *Server) snapshotSync(ctx context.Context, state *syncLocalState) (*sync
 		return nil, err
 	}
 	documents, err := snapshotSyncRows(ctx, tx)
+	var revision int64
+	if err == nil {
+		revision, err = syncLocalRevision(ctx, tx)
+	}
 	tx.Rollback()
 	if err != nil {
 		return nil, err
 	}
-	result := &syncSnapshot{Documents: documents, Files: map[string]syncFingerprint{}, Busy: s.syncBusy()}
+	result := &syncSnapshot{Documents: documents, Files: map[string]syncFingerprint{}, Busy: s.syncBusy(), Revision: revision}
 	for key, doc := range documents {
 		if key == "library" {
 			continue

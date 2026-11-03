@@ -1,4 +1,5 @@
 import { consumeAnnotationStream } from "./annotation-stream";
+import { notifyLibraryChange } from "../../neoread-core/src/library-changes";
 import { diagnosticFetch, reportDiagnostic } from "./diagnostics";
 import {
   uploadAttachment,
@@ -146,6 +147,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       data.pages,
     );
   }
+  if (
+    init.method &&
+    !["GET", "HEAD"].includes(init.method) &&
+    /^\/api\/(documents(?:\/|$)|libraries\/|tag-boards(?:\/|$)|preferences\/library$|import\/)/.test(
+      path,
+    )
+  )
+    notifyLibraryChange();
   return response.status === 204 ? (undefined as T) : response.json();
 }
 // Fetch keepalive has a shared 64 KiB in-flight body budget. Leave headroom,
@@ -317,6 +326,11 @@ export const api = {
     request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/resolve", {
       method: "POST",
       body: JSON.stringify({ key, conflict, version }),
+    }),
+  keepWebdavNotes: (key: string, conflict: string) =>
+    request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/resolve", {
+      method: "POST",
+      body: JSON.stringify({ key, conflict, keepBoth: true }),
     }),
   snapshotStatus: (id: string) =>
     request<{ available: boolean; sourceUrl?: string }>(

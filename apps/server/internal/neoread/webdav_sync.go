@@ -23,12 +23,17 @@ type webdavVariant struct {
 	Preview string `json:"preview"`
 }
 type webdavConflict struct {
-	Key      string          `json:"key"`
-	ID       string          `json:"id"`
-	Title    string          `json:"title"`
-	Versions []webdavVariant `json:"versions"`
+	Key         string          `json:"key"`
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	Versions    []webdavVariant `json:"versions"`
+	CanKeepBoth bool            `json:"canKeepBoth"`
 }
 type webdavStatus struct {
+	RunID       string           `json:"runId,omitempty"`
+	Manual      bool             `json:"manual"`
+	Dirty       bool             `json:"dirty"`
+	Failed      bool             `json:"failed"`
 	Phase       string           `json:"phase"`
 	LastSync    string           `json:"lastSync,omitempty"`
 	Error       string           `json:"error,omitempty"`
@@ -40,6 +45,7 @@ type webdavStatus struct {
 	ApplyToken  string           `json:"applyToken,omitempty"`
 }
 type webdavState struct {
+	accountPath string
 	mu          sync.Mutex
 	operation   sync.Mutex
 	status      webdavStatus
@@ -59,14 +65,16 @@ func (s *Server) syncConfigPath() string { return filepath.Join(s.Store.Root, "w
 func (s *Server) readSyncConfig() (webdavConfig, error) {
 	config := webdavConfig{Folder: "论文库", IntervalMinutes: 15, DeviceName: "这台设备"}
 	body, err := os.ReadFile(s.syncConfigPath())
-	if os.IsNotExist(err) {
-		return config, nil
-	}
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return config, err
 	}
-	if decodeSyncJSON(body, &config) != nil {
+	if err == nil && decodeSyncJSON(body, &config) != nil {
 		return config, errors.New("同步设置无法读取，请重新配置")
+	}
+	config.LibraryConfigured = err == nil
+	config, err = s.useSyncConnection(config)
+	if err != nil {
+		return config, err
 	}
 	config.PasswordSet = config.Password != ""
 	return config, nil
@@ -145,8 +153,11 @@ func (s *Server) setSyncPhase(phase string) {
 func (s *Server) syncStatusLocked() *webdavStatus { return &s.webdav.status }
 func (s *Server) syncStatus() webdavStatus {
 	s.webdav.mu.Lock()
-	defer s.webdav.mu.Unlock()
 	result := *s.syncStatusLocked()
+	s.webdav.mu.Unlock()
+	dirty, failed, err := s.syncChangeStatus()
+	result.Dirty = err != nil || dirty || result.Deferred > 0 || len(result.Conflicts) > 0
+	result.Failed = failed || result.Phase == "failed"
 	if result.Phase == "" {
 		result.Phase = "idle"
 	}
@@ -309,8 +320,14 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 		if selected == nil {
 			choice := state.Choices[key]
 			if choice.Conflict == conflictID {
+				if choice.KeepBoth {
+					if body, ok := keepSyncNotes(state.Base[key], versions); ok {
+						selected = &syncVersion{Body: body}
+						merged = true
+					}
+				}
 				for _, version := range versions {
-					if syncHash(version) == choice.Version {
+					if !choice.KeepBoth && syncHash(version) == choice.Version {
 						selected = version
 						merged = true
 						break
@@ -318,7 +335,9 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 				}
 			}
 			if selected == nil {
-				conflicts = append(conflicts, syncConflict(key, conflictID, versions))
+				conflict := syncConflict(key, conflictID, versions)
+				_, conflict.CanKeepBoth = keepSyncNotes(state.Base[key], versions)
+				conflicts = append(conflicts, conflict)
 				continue
 			}
 		}
@@ -459,6 +478,11 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 		return err
 	}
 	_ = os.Remove(s.syncUploadPath(config))
+	if len(conflicts) == 0 && len(snapshot.Busy) == 0 && len(accepted) == len(updates) {
+		if err = s.confirmSyncRevision(ctx, snapshot.Revision+snapshot.AppliedChanges); err != nil {
+			return err
+		}
+	}
 	s.webdav.mu.Lock()
 	s.syncStatusLocked().LastSync = state.LastSync
 	s.webdav.mu.Unlock()
@@ -577,12 +601,12 @@ func syncConflict(key, identifier string, versions []*syncVersion) webdavConflic
 	return result
 }
 
-func (s *Server) beginWebDAVSync(ctx context.Context) error {
+func (s *Server) beginWebDAVSync(ctx context.Context, manual ...bool) error {
 	if !s.webdav.operation.TryLock() {
 		return errors.New("同步正在进行")
 	}
 	config, err := s.readSyncConfig()
-	if err != nil || config.Account == "" || config.Password == "" {
+	if err != nil || !config.LibraryConfigured || config.Account == "" || config.Password == "" {
 		s.webdav.operation.Unlock()
 		return errors.New("请先保存坚果云账号和应用密码")
 	}
@@ -606,6 +630,8 @@ func (s *Server) beginWebDAVSync(ctx context.Context) error {
 	s.syncStatusLocked().Transferred = 0
 	taskID := id()
 	s.webdav.taskID = taskID
+	s.webdav.status.RunID = taskID
+	s.webdav.status.Manual = len(manual) > 0 && manual[0]
 	s.webdav.mu.Unlock()
 	go func() {
 		defer s.webdav.operation.Unlock()
@@ -614,6 +640,11 @@ func (s *Server) beginWebDAVSync(ctx context.Context) error {
 		started := time.Now()
 		s.diagnosticEvent(slog.LevelInfo, "sync.started", "taskId", taskID)
 		err := s.runWebDAV(child, config)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			if _, saveErr := s.Store.DB.Exec("INSERT INTO settings(key,value) VALUES('sync:last-result','failed') ON CONFLICT(key) DO UPDATE SET value=excluded.value"); saveErr != nil {
+				s.diagnosticEvent(slog.LevelError, "sync.status_failed", "taskId", taskID, "errorCode", "save")
+			}
+		}
 		phase := "complete"
 		level := slog.LevelInfo
 		code := ""

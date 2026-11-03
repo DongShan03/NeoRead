@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -108,6 +109,19 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			fail(w, 502, err.Error())
 			return
 		}
+		if old.Account != config.Account || old.RemoteID != config.RemoteID {
+			if _, err = s.Store.DB.Exec("DELETE FROM settings WHERE key IN ('sync:synced-revision','sync:last-result')"); err != nil {
+				fail(w, 500, "无法更新同步状态")
+				return
+			}
+			s.webdav.mu.Lock()
+			s.webdav.status = webdavStatus{Phase: "idle"}
+			s.webdav.mu.Unlock()
+		}
+		if err = s.saveSyncConnection(config); err != nil {
+			fail(w, 500, "无法保存共享 WebDAV 连接")
+			return
+		}
 		s.webdav.mu.Lock()
 		s.webdav.next = time.Now().Add(time.Duration(config.IntervalMinutes) * time.Minute)
 		s.webdav.mu.Unlock()
@@ -180,7 +194,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /api/sync/webdav/status", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, s.syncStatus()) })
 	mux.HandleFunc("POST /api/sync/webdav/run", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.beginWebDAVSync(context.Background()); err != nil {
+		if err := s.beginWebDAVSync(context.Background(), true); err != nil {
 			fail(w, 409, err.Error())
 			return
 		}
@@ -223,6 +237,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			Key      string `json:"key"`
 			Conflict string `json:"conflict"`
 			Version  string `json:"version"`
+			KeepBoth bool   `json:"keepBoth"`
 		}
 		if !decode(w, r, &choice) {
 			return
@@ -234,8 +249,11 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 		valid := false
 		for _, conflict := range s.syncStatus().Conflicts {
 			if conflict.Key == choice.Key && conflict.ID == choice.Conflict {
+				if choice.KeepBoth && choice.Version == "" && conflict.CanKeepBoth {
+					valid = true
+				}
 				for _, version := range conflict.Versions {
-					if version.ID == choice.Version {
+					if !choice.KeepBoth && version.ID == choice.Version {
 						valid = true
 					}
 				}
@@ -252,7 +270,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			state, err = s.loadSyncState(config)
 		}
 		if err == nil {
-			state.Choices[choice.Key] = syncChoice{Conflict: choice.Conflict, Version: choice.Version}
+			state.Choices[choice.Key] = syncChoice{Conflict: choice.Conflict, Version: choice.Version, KeepBoth: choice.KeepBoth}
 			err = s.saveSyncState(config, state)
 		}
 		s.webdav.operation.Unlock()
@@ -260,7 +278,12 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			fail(w, 500, "无法保存冲突处理结果")
 			return
 		}
-		if err = s.beginWebDAVSync(context.Background()); err != nil {
+		s.webdav.mu.Lock()
+		s.webdav.status.Conflicts = slices.DeleteFunc(slices.Clone(s.webdav.status.Conflicts), func(conflict webdavConflict) bool {
+			return conflict.Key == choice.Key && conflict.ID == choice.Conflict
+		})
+		s.webdav.mu.Unlock()
+		if err = s.beginWebDAVSync(context.Background(), true); err != nil {
 			fail(w, 409, err.Error())
 			return
 		}
@@ -278,7 +301,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			fail(w, 500, err.Error())
 			return
 		}
-		if config.Account != "" {
+		if config.LibraryConfigured && config.Account != "" {
 			if !validSyncFolder(value.Name) {
 				fail(w, 400, "书库名称不能包含斜杠或控制字符")
 				return
@@ -291,6 +314,6 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			s.webdav.next = time.Time{}
 			s.webdav.mu.Unlock()
 		}
-		respond(w, 200, map[string]bool{"queued": config.Account != ""})
+		respond(w, 200, map[string]bool{"queued": config.LibraryConfigured && config.Account != ""})
 	})
 }
