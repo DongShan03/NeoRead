@@ -172,7 +172,12 @@ beforeEach(() => {
   );
   vi.clearAllMocks();
   panels.readerRenders = panels.assistantRenders = 0;
-  vi.mocked(api.chatSessions).mockResolvedValue([]);
+  vi.mocked(api.chatSessions).mockReset().mockResolvedValue([]);
+  vi.mocked(api.aiConfig)
+    .mockReset()
+    .mockResolvedValue({ primary: "", models: {}, capabilities: {} } as Awaited<
+      ReturnType<typeof api.aiConfig>
+    >);
   useReaderStore.setState({ theme: defaultTheme });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("PointerEvent", MouseEvent);
@@ -444,7 +449,9 @@ it("keeps typing local and preserves the latest text across workspace updates", 
     '[aria-label="发送问题"]',
   )!;
   expect(send.disabled).toBe(true);
+  const emptyRenders = panels.readerRenders;
   await enterPrompt("第");
+  expect(panels.readerRenders).toBe(emptyRenders);
   expect(send.disabled).toBe(false);
   expect(tabCloseWarning(doc.id)).not.toBeNull();
   const readerRenders = panels.readerRenders,
@@ -463,7 +470,9 @@ it("keeps typing local and preserves the latest text across workspace updates", 
     expect.objectContaining({ prompt: "第二个问题\n补充条件" }),
   );
   expect(composer().value).toBe("");
-  expect(send.disabled).toBe(true);
+  expect(
+    host.querySelector<HTMLButtonElement>('[aria-label="发送问题"]')!.disabled,
+  ).toBe(true);
   expect(tabCloseWarning(doc.id)).toBeNull();
 });
 
@@ -599,6 +608,12 @@ it("keeps streamed answer deltas out of the reader while accepting new draft inp
       });
     });
     await enterPrompt("new draft");
+    // Settle the reader's initial frame before measuring streamed updates.
+    await act(async () => {
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
     const before = panels.readerRenders;
     for (const text of ["first", " second", " third"]) {
       await act(async () => {
