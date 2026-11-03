@@ -704,8 +704,9 @@ func (s *Server) StartWebDAV(ctx context.Context) {
 		}
 	}
 	go func() {
-		timer := time.NewTimer(20 * time.Second)
+		timer := time.NewTimer(time.Second)
 		defer timer.Stop()
+		startup := true
 		for {
 			select {
 			case <-ctx.Done():
@@ -719,9 +720,10 @@ func (s *Server) StartWebDAV(ctx context.Context) {
 			if closed {
 				return
 			}
-			if err == nil && config.Enabled && config.Account != "" && config.Password != "" && !time.Now().Before(next) {
+			if err == nil && config.Enabled && config.Account != "" && config.Password != "" && (startup || !time.Now().Before(next)) {
 				_ = s.beginWebDAVSync(ctx)
 			}
+			startup = false
 			timer.Reset(30 * time.Second)
 		}
 	}()

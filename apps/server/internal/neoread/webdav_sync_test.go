@@ -348,6 +348,39 @@ func TestWebDAVRestoresLastSyncAfterRestart(t *testing.T) {
 	}
 }
 
+func TestWebDAVStartupSyncPushesAndPullsBeforeTheNextInterval(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	runSync(t, b)
+	if _, err := a.Store.DB.Exec("UPDATE document_notes SET body='启动时推送的本地笔记' WHERE document_id='paper'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Store.DB.Exec("UPDATE documents SET title='启动时拉取的云端标题' WHERE id='paper'"); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, b)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	a.StartWebDAV(ctx)
+	status := waitSyncPhase(t, a, "complete")
+	if status.Manual || status.RunID == "" || status.Dirty {
+		t.Fatal("startup did not run an automatic sync", status)
+	}
+	runSync(t, b)
+	for _, server := range []*Server{a, b} {
+		doc, err := server.Store.Document("paper")
+		if err != nil || doc.Title != "启动时拉取的云端标题" {
+			t.Fatal(doc, err)
+		}
+		var note string
+		if err := server.Store.DB.QueryRow("SELECT body FROM document_notes WHERE document_id='paper'").Scan(&note); err != nil || note != "启动时推送的本地笔记" {
+			t.Fatal(note, err)
+		}
+	}
+}
+
 func TestWebDAVRenameCanRevertAPendingLocalRename(t *testing.T) {
 	remote, _ := testDAV(t)
 	s := syncFixture(t, remote, "Mac")
