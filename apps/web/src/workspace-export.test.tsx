@@ -541,7 +541,7 @@ it("keeps typing local and preserves the latest text across workspace updates", 
   expect(tabCloseWarning(doc.id)).toBeNull();
 });
 
-it("restores the latest session draft and text when the composer remounts", async () => {
+it("preserves session drafts through remounts and checks every draft before closing", async () => {
   vi.mocked(api.chatSessions).mockResolvedValue(
     ["draft-a", "draft-b"].map((id) => ({
       id,
@@ -559,6 +559,7 @@ it("restores the latest session draft and text when the composer remounts", asyn
   await act(async () => panels.sessions!.onChange("draft-b"));
   expect(composer().value).toBe("");
   expect(host.querySelector(".quote-chips")).toBeNull();
+  expect(tabCloseWarning(doc.id)?.message).toContain("未发送");
   await enterPrompt("second draft");
   await act(async () => panels.sessions!.onChange("draft-a"));
   expect(composer().value).toBe("first draft with latest typing");
@@ -579,6 +580,9 @@ it("restores the latest session draft and text when the composer remounts", asyn
     host.querySelector<HTMLButtonElement>('[aria-label="移除引用"]')!.click(),
   );
   await enterPrompt("   ");
+  expect(tabCloseWarning(doc.id)?.message).toContain("未发送");
+  await act(async () => panels.sessions!.onChange("draft-b"));
+  await enterPrompt("");
   expect(tabCloseWarning(doc.id)).toBeNull();
 });
 

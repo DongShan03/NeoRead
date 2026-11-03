@@ -1264,7 +1264,14 @@ export function Workspace({
         if (
           closeState.current.busy ||
           closeState.current.draft ||
-          !!prompt.current.trim()
+          !!prompt.current.trim() ||
+          [...composerDrafts.current].some(
+            ([key, draft]) =>
+              key !== currentComposerKey.current &&
+              (draft.prompt.trim() ||
+                draft.quotes.length ||
+                draft.images.length),
+          )
         )
           return {
             message:
