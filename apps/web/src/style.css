@@ -321,6 +321,18 @@ kbd {
 .library-sidebar-resizer:is(:hover, :focus-visible)::after {
   background: var(--border);
 }
+.library-mode-heading {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin: -6px 0 -10px -4px;
+}
+.library-mode-heading .library-mode-trigger {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+}
 .library-mode-trigger {
   max-width: 100%;
   align-self: flex-start;

@@ -1,4 +1,5 @@
 import { ComposerSendButton } from "./chat/ComposerSendButton";
+import { WebDAVSyncButton } from "./WebDAVSyncButton";
 import { useAnnotationUpdates } from "./useAnnotationUpdates";
 import {
   focusSelectionScope,
@@ -1312,6 +1313,7 @@ export function Workspace({
           >
             <ArrowLeft />
           </IconButton>
+          <WebDAVSyncButton />
           <IconButton
             label="目录与搜索"
             active={left}

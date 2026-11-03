@@ -61,6 +61,7 @@ import { PaperSidebar } from "./papers/PaperSidebar";
 import { LibrarySidebarResizer } from "./LibrarySidebarResizer";
 import { LibraryArchiveProgress } from "./LibraryArchiveProgress";
 import { installWebDAVSync } from "./webdav-sync";
+import { WebDAVSyncButton } from "./WebDAVSyncButton";
 import { usePaperUI } from "./papers/state";
 import { ImportPaperDialog } from "./papers/ImportPaperDialog";
 import { LibraryModeSwitcher, libraryModes } from "./LibraryModeSwitcher";
@@ -112,6 +113,16 @@ export function App() {
     [jobs],
   );
   const [settings, setSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"agent" | "papers">("agent");
+  useEffect(() => {
+    const openSync = () => {
+      setSettingsTab("papers");
+      setSettings(true);
+    };
+    window.addEventListener("neoread:open-sync-settings", openSync);
+    return () =>
+      window.removeEventListener("neoread:open-sync-settings", openSync);
+  }, []);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [about, setAbout] = useState(false);
   const [guide, setGuide] = useState(false);
@@ -554,7 +565,10 @@ export function App() {
               inert={!nav}
             >
               <div className="window-drag-handle" aria-hidden="true" />
-              <LibraryModeSwitcher mode={mode} onChange={switchMode} />
+              <div className="library-mode-heading">
+                <LibraryModeSwitcher mode={mode} onChange={switchMode} />
+                <WebDAVSyncButton />
+              </div>
               <Button
                 className="w-full justify-between"
                 variant="outline"
@@ -936,6 +950,7 @@ export function App() {
         />
         <Settings
           open={settings}
+          initialTab={settingsTab}
           onOpenChange={setSettings}
           onOpenGuide={() => {
             setSettings(false);

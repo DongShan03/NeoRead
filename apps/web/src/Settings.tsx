@@ -92,10 +92,12 @@ export function Settings({
   open,
   onOpenChange,
   onOpenGuide,
+  initialTab = "agent",
 }: {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   onOpenGuide?: () => void;
+  initialTab?: "agent" | "papers";
 }) {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [testing, setTesting] = useState<Map<string, "text" | "vision">>(
@@ -688,7 +690,11 @@ export function Settings({
             Agent 连接、显示、阅读、诊断与{libraryModes[currentLibrary].label}
           </DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue="agent" className="settings-tabs">
+        <Tabs
+          key={initialTab}
+          defaultValue={initialTab}
+          className="settings-tabs"
+        >
           <TabsList aria-label="设置分类" className="settings-nav">
             <TabsTrigger value="agent" data-tour="settings-agent-tab">
               <Bot />
