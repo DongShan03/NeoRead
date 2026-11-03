@@ -44,7 +44,7 @@ export function columnMinimums(root: Element): ColumnWidths {
             ((heading?.getBoundingClientRect().width ?? 0) +
               (parseFloat(style.paddingLeft) || 0) +
               (parseFloat(style.paddingRight) || 0)) *
-              (cell.dataset.column === "published" ? 1.2 : 1),
+              (cell.dataset.column === "published" ? 1.1 : 1),
           ),
         ];
       },
