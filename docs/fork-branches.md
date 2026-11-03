@@ -70,6 +70,9 @@
 | 原文双击保留原生选词后的点击 | `codex/reading-alignment-gesture`   | `1a82683` | `4017350`      |
 | 长草稿使用原生输入与按需快照 | `codex/chat-message-editing`       | `a10775c` | `269b9a0`      |
 | 对齐缓入缓出与滚动锚定处理   | `codex/bilingual-reader-performance` | `54507af` | `7992441`     |
+| 对齐过渡调整为 480ms        | `codex/bilingual-reader-performance` | `2075697` | `f91eded`     |
+| 输入事件不再重复复位 PDF 文本层 | `codex/bilingual-reader-performance` | `77713f2` | `2c43a11`   |
+| 图片预览关闭时移除全局拖动样式 | `codex/bilingual-reader-performance` | `3ba0574` | `52aa3d6`    |
 
 ## 后续维护
 
