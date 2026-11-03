@@ -495,6 +495,7 @@ export function Workspace({
     return () => {
       alive = false;
       clearTimeout(timer);
+      sessionListSerial.current++;
     };
   }, [refreshSessions, active]);
   const prompt = useRef("");
@@ -2047,7 +2048,7 @@ export function Workspace({
       </ResizablePanelGroup>
 
       <SelectionTranslation
-        key={doc.id}
+        key={`selection-translation-${doc.id}`}
         selection={active ? translationSelection : null}
         trackedAnchor={translationAnchor.current}
         onClose={() => setTranslationSelection(null)}
@@ -2058,7 +2059,7 @@ export function Workspace({
         onEdit={editAnnotationNote}
       />
       <LinkPreviewPanel
-        key={doc.id}
+        key={`link-preview-${doc.id}`}
         preview={active ? linkPreview : null}
         onDismiss={() => setLinkPreview(null)}
         onNavigate={(location) =>
@@ -2171,7 +2172,7 @@ export function Workspace({
         />
       )}
       <DocumentOverviewDialog
-        key={doc.id}
+        key={`document-overview-${doc.id}`}
         document={active && overviewOpen ? doc : null}
         onClose={() => setOverviewOpen(false)}
         onNavigate={async (location) => {
