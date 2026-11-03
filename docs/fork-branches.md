@@ -51,6 +51,11 @@
 | 图表边缘轴标签裁剪         | `codex/pdf-symbols-and-crop`         | `9548cac` | `5fd666e`      |
 | 聊天输入期间避免工作区重绘 | `codex/chat-message-editing`         | `3ca82f2` | `2f160e7`      |
 | 拖选期间的高亮与悬浮开销   | `codex/bilingual-reader-performance` | `e7ada92` | `0cc9826`      |
+| 译文离屏内容按需排版       | `codex/bilingual-reader-performance` | `87f6d67` | `b165bfc`      |
+| 重新解析后接续变化内容翻译 | `codex/pdf-symbols-and-crop`         | `33c171f` | `4470808`      |
+| 普通按键与流式消息刷新     | `codex/chat-message-editing`         | `a915711` | `5b9f8a6`      |
+| 空会话首字输入局部更新     | `codex/chat-message-editing`         | `be0dd2e` | `72a8f6b`      |
+| 聊天选文引用与暂停跟随     | `codex/chat-message-editing`         | `c93d48c` | `de9e704`      |
 
 ## 后续维护
 
@@ -81,3 +86,4 @@ git push -u fork codex/bilingual-reader-performance
 3. 编辑/撤回聊天问题并检查引用和附件，再用测试书库验证 ZIP 导出、导入、后台传输和切库；见[书库迁移步骤](library-archive.md)。
 
 4. 在 PDF/EPUB 原文和译文中连续拖选、反向拖选、跨行选择并复制；确认选区和批注操作正常。输入长问题后切换会话，检查最新草稿仍在。用 arXiv:2503.10635 第 4 页检查 `Step` 标签；对既有符号误提取，可重新解析后开启辅助阅读，确认第 5 页的 `𝒯` 被保留为花体。
+5. 对已完成重新解析、但新段落或公式仍等待翻译的自动翻译论文，重新打开文档，确认接续缺失译文且已有译文与批注保留，无需重复解析。长译文中跳转到远处段落，检查对齐及全文复制；在空会话输入首字、连续中文，再选中聊天回答并引用到草稿。
