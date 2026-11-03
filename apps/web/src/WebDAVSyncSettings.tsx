@@ -51,6 +51,10 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
   const status = useWebDAVSync((state) => state.status);
   const [draft, setDraft] = useState(defaults);
   const [password, setPassword] = useState("");
+  const [verified, setVerified] = useState<{
+    account: string;
+    password: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [operation, setOperation] = useState("");
   const [error, setError] = useState("");
@@ -60,6 +64,7 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
     if (!open) return;
     let current = true;
     setLoading(true);
+    setVerified(null);
     void Promise.all([
       loadWebDAVSettings(),
       window.neoreadDesktop?.libraryCatalog?.(),
@@ -105,6 +110,7 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
     }
   };
   const toggle = (enabled: boolean) => {
+    if (!enabled) setVerified(null);
     if (enabled || !useWebDAVSync.getState().config?.enabled) {
       setDraft({ ...draft, enabled });
       if (!enabled) setPassword("");
@@ -120,6 +126,9 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
     });
   };
   const input = { ...draft, password };
+  const connectionVerified =
+    verified?.account === draft.account.trim() &&
+    verified?.password === password;
   return (
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -146,9 +155,10 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
               autoComplete="username"
               value={draft.account}
               disabled={loading || !!operation || running}
-              onChange={(event) =>
-                setDraft({ ...draft, account: event.target.value })
-              }
+              onChange={(event) => {
+                setVerified(null);
+                setDraft({ ...draft, account: event.target.value });
+              }}
             />
           </label>
           <label className="grid gap-1.5 text-sm">
@@ -163,7 +173,10 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
                   ? "已保存，留空保持不变"
                   : "填写坚果云生成的应用密码"
               }
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                setVerified(null);
+                setPassword(event.target.value);
+              }}
             />
           </label>
           <p className="text-xs leading-5 text-muted-foreground">
@@ -220,13 +233,16 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
                 !!operation ||
                 running ||
                 !draft.account ||
-                (!password && !draft.passwordSet)
+                (!password && !draft.passwordSet) ||
+                !connectionVerified
               }
+              title={connectionVerified ? undefined : "请先测试连接"}
               onClick={() =>
                 void run("save", async () => {
                   const saved = await api.saveWebdavConfig(input);
                   setDraft(saved);
                   setPassword("");
+                  setVerified({ account: saved.account.trim(), password: "" });
                   useWebDAVSync.setState({ config: saved });
                   toast.success("同步设置已保存");
                 })
@@ -248,7 +264,9 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
               }
               onClick={() =>
                 void run("test", async () => {
+                  setVerified(null);
                   await api.testWebdav(input);
+                  setVerified({ account: draft.account.trim(), password });
                   toast.success("坚果云读写正常");
                 })
               }
