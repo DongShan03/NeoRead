@@ -40,12 +40,12 @@ export function WebDAVSyncButton() {
       }}
     >
       <span
-        className="relative block size-6"
+        className="relative block size-[1.2rem]"
         data-sync-state={busy ? "syncing" : !enabled ? "disabled" : marker}
       >
         <RefreshCw
           aria-hidden="true"
-          className={`absolute inset-0 !size-6 ${enabled && status.conflicts.length ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"} ${busy ? "animate-spin motion-reduce:animate-none" : ""}`}
+          className={`absolute inset-0 !size-full ${enabled && status.conflicts.length ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"} ${busy ? "animate-spin motion-reduce:animate-none" : ""}`}
           style={{ animationDuration: "1.2s" }}
         />
         {enabled &&
@@ -54,19 +54,19 @@ export function WebDAVSyncButton() {
             <Check
               aria-hidden="true"
               strokeWidth={3}
-              className="absolute left-1/2 top-1/2 !size-3 -translate-x-1/2 -translate-y-1/2 text-emerald-600 dark:text-emerald-400"
+              className="absolute left-1/2 top-1/2 !size-[0.6rem] -translate-x-1/2 -translate-y-1/2 text-emerald-600 dark:text-emerald-400"
             />
           ) : marker === "failed" ? (
             <X
               aria-hidden="true"
               strokeWidth={3}
-              className="absolute left-1/2 top-1/2 !size-3 -translate-x-1/2 -translate-y-1/2 text-destructive"
+              className="absolute left-1/2 top-1/2 !size-[0.6rem] -translate-x-1/2 -translate-y-1/2 text-destructive"
             />
           ) : (
             <svg
               aria-hidden="true"
               viewBox="0 0 12 12"
-              className="absolute left-1/2 top-1/2 !size-3 -translate-x-1/2 -translate-y-1/2 text-amber-600 dark:text-amber-400"
+              className="absolute left-1/2 top-1/2 !size-[0.6rem] -translate-x-1/2 -translate-y-1/2 text-amber-600 dark:text-amber-400"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
