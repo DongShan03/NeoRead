@@ -63,6 +63,38 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("chat request lifecycle", () => {
+  it("reconciles partial output when reloading a run completed after disconnection", async () => {
+    const h = setup();
+    await h.session.load();
+    const sending = h.session.send(input);
+    const question = message(
+      h.session.getSnapshot().pending!.input.userMessageId!,
+      "user",
+      input.prompt,
+    );
+    h.messages.mockResolvedValue([question]);
+    h.emit({ event: "delta", data: { text: "partial answer" } });
+    h.wait.reject(new Error("connection lost"));
+    await sending;
+    expect(h.session.getSnapshot().pending?.phase).toBe("unconfirmed");
+    const answer = message("completed-answer", "assistant", "full answer");
+    h.messages.mockResolvedValue([question, answer]);
+    const calls = h.messages.mock.calls.length;
+    await h.session.load();
+    expect(h.messages).toHaveBeenCalledTimes(calls + 1);
+    expect(h.session.getSnapshot().pending).toMatchObject({
+      savedId: answer.id,
+      phase: "saved",
+      content: "full answer",
+      notice: "",
+    });
+    expect(h.session.getSnapshot().messageKeys[answer.id]).toBe(
+      h.session.getSnapshot().pending?.key,
+    );
+    expect(h.session.getSnapshot().messages).toEqual([question, answer]);
+    h.session.dispose();
+  });
+
   it("regenerates a failed question with the current provider and replaces all partial output", async () => {
     let history: Message[] = [];
     const requests: ChatInput[] = [];
