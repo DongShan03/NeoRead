@@ -73,6 +73,7 @@
 | 对齐过渡调整为 480ms        | `codex/bilingual-reader-performance` | `2075697` | `f91eded`     |
 | 输入事件不再重复复位 PDF 文本层 | `codex/bilingual-reader-performance` | `77713f2` | `2c43a11`   |
 | 图片预览关闭时移除全局拖动样式 | `codex/bilingual-reader-performance` | `3ba0574` | `52aa3d6`    |
+| 原生窗口预览拖动规则优先级   | `codex/bilingual-reader-performance` | `a98d4ed` | `43407c4`     |
 
 ## 后续维护
 
