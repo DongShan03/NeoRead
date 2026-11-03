@@ -56,6 +56,17 @@
 | 普通按键与流式消息刷新     | `codex/chat-message-editing`         | `a915711` | `5b9f8a6`      |
 | 空会话首字输入局部更新     | `codex/chat-message-editing`         | `be0dd2e` | `72a8f6b`      |
 | 聊天选文引用与暂停跟随     | `codex/chat-message-editing`         | `c93d48c` | `de9e704`      |
+| 长中文草稿与普通按键处理   | `codex/chat-message-editing`         | `e4b55c9` | `cd88280`      |
+| 聊天选文使用引用条         | `codex/chat-message-editing`         | `8f1864c` | `85b4410`      |
+| 当前阅读区域内全选         | `codex/bilingual-reader-performance` | `903cb60` | `a34c5ad`      |
+| 滚动位置更新隔离到目录     | `codex/bilingual-reader-performance` | `ac7c3c1` | `8e92971`      |
+| 及时清理残留选区悬浮条     | `codex/bilingual-reader-performance` | `4940b25` | `11d27f5`      |
+| 原生动画平滑对齐           | `codex/bilingual-reader-performance` | `5d1f968` | `ea1b54d`      |
+| 行内数学重音与嵌套上下标   | `codex/pdf-symbols-and-crop`         | `5480ab1` | `6096ae6`      |
+| 公式图像能力等待与恢复     | `codex/pdf-symbols-and-crop`         | `3c4c3d9` | `7f6a92c`      |
+| 持续更新中的长草稿回归     | `codex/chat-message-editing`         | `8c26fee` | `b6e3897`      |
+| 后台会话轮询与浮层复用     | `codex/chat-message-editing`         | `78ac899` | `900d733`      |
+| 输入检查排除初始化批注加载 | `codex/chat-message-editing`         | `f11779e` | `1c48417`      |
 
 ## 后续维护
 
@@ -86,4 +97,7 @@ git push -u fork codex/bilingual-reader-performance
 3. 编辑/撤回聊天问题并检查引用和附件，再用测试书库验证 ZIP 导出、导入、后台传输和切库；见[书库迁移步骤](library-archive.md)。
 
 4. 在 PDF/EPUB 原文和译文中连续拖选、反向拖选、跨行选择并复制；确认选区和批注操作正常。输入长问题后切换会话，检查最新草稿仍在。用 arXiv:2503.10635 第 4 页检查 `Step` 标签；对既有符号误提取，可重新解析后开启辅助阅读，确认第 5 页的 `𝒯` 被保留为花体。
-5. 对已完成重新解析、但新段落或公式仍等待翻译的自动翻译论文，重新打开文档，确认接续缺失译文且已有译文与批注保留，无需重复解析。长译文中跳转到远处段落，检查对齐及全文复制；在空会话输入首字、连续中文，再选中聊天回答并引用到草稿。
+5. 对已完成重新解析、但新段落或公式仍等待翻译的自动翻译论文，重新打开文档，确认接续缺失译文且已有译文与批注保留，无需重复解析。长译文中跳转到远处段落，检查对齐及全文复制；在空会话输入首字、连续中文，再选中聊天回答并添加引用条，确认草稿不变。
+6. 保持多个标签打开并持续阅读、生成回答，之后输入长中文和大段粘贴，检查输入法候选、草稿和光标；切回后台标签后，会话列表应更新，已有草稿仍在。
+7. 分别聚焦原文、译文和聊天记录后按 Command/Ctrl+A，确认只全选当前区域；点击其他位置、收起选区或切换窗口后，旧悬浮框应关闭。单击、双击段落对齐应平滑过渡，滚动可中断。
+8. 在新版重新解析 arXiv:2503.10635，检查第 5 页波浪号属于 x、上下标与花体字母保留；图像能力未就绪时，公式应进入等待，设置中测试通过后继续转换。
