@@ -1353,3 +1353,63 @@ it("lays out only the current navigation target before measuring and releases it
   await click("仅原文");
   expect(third.hasAttribute("data-translation-render-target")).toBe(false);
 });
+
+it.each([
+  ["仅原文", "原文译文"],
+  ["仅原文", "仅译文"],
+  ["原文译文", "仅原文"],
+  ["原文译文", "仅译文"],
+  ["仅译文", "仅原文"],
+  ["仅译文", "原文译文"],
+])(
+  "captures the authoritative PDF pane before switching %s to %s",
+  async (from, to) => {
+    await renderView(defaultTheme, [
+      {
+        id: "p1-b2",
+        page: 1,
+        label: "text",
+        text: "Later paragraph.",
+        bounds: { x: 0.1, y: 0.7, width: 0.3, height: 0.1 },
+      },
+    ]);
+    adapter.getReadingAnchor = vi.fn(() => ({
+      blockId: "p1-b1",
+      fraction: 0.25,
+    }));
+    try {
+      if (from !== "仅原文") await click(from);
+      // Shared state has been updated by the translation; the source is still on b1.
+      await act(async () =>
+        fixture.events!.readingAnchor?.({ blockId: "p1-b2", fraction: 0.8 }),
+      );
+      if (from !== "仅原文") {
+        const { pane, block } = translationGeometry();
+        block.getBoundingClientRect = () => new DOMRect(40, -1000, 520, 200);
+        pane.querySelector<HTMLElement>(
+          '[data-translation-block="p1-b2"]',
+        )!.getBoundingClientRect = () => new DOMRect(40, 250, 520, 200);
+      }
+      vi.mocked(adapter.followBlock!).mockClear();
+      vi.mocked(adapter.getReadingAnchor).mockClear();
+      await click(to);
+      const expected = {
+        blockId: from === "仅译文" ? "p1-b2" : "p1-b1",
+        fraction: 0.25,
+      };
+      if (to !== "仅译文")
+        expect(adapter.followBlock).toHaveBeenLastCalledWith(expected);
+      if (to !== "仅原文")
+        expect(
+          host
+            .querySelector("[data-translation-render-target]")
+            ?.getAttribute("data-translation-block"),
+        ).toBe(expected.blockId);
+      expect(adapter.getReadingAnchor).toHaveBeenCalledTimes(
+        from === "仅译文" ? 0 : 1,
+      );
+    } finally {
+      delete adapter.getReadingAnchor;
+    }
+  },
+);

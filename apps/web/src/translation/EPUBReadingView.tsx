@@ -37,7 +37,10 @@ import { ReadingSync } from "../readers/pdf-reading";
 import { animatePDFScroll } from "../readers/pdf-scroll";
 import { isSelectionToolbar } from "../readers/selection-anchor";
 import { defaultTheme } from "@neoread/core";
-import { translationBlockAt } from "./translation-viewport";
+import {
+  translationBlockAt,
+  translationReadingAnchor,
+} from "./translation-viewport";
 import { translationFont } from "../appearance";
 import "./translation.css";
 
@@ -87,6 +90,8 @@ export function EPUBReadingView({
   const translationMotion = useRef(0);
   const scrollFrame = useRef(0);
   const modeFrame = useRef(0);
+  const modeOperation = useRef(0);
+  const modeRestoring = useRef(false);
   const dragging = useRef(false);
   const [hoveredBlock, setHoveredBlock] = useState<string>();
   const [focusedBlock, setFocusedBlock] = useState<string>();
@@ -236,6 +241,8 @@ export function EPUBReadingView({
     engine.current?.cancelBlockFocus?.();
   };
   const input = (origin: "source" | "translation") => {
+    modeOperation.current++;
+    modeRestoring.current = false;
     translationMotion.current++;
     pendingFollow.current = undefined;
     syncTarget.current = undefined;
@@ -337,6 +344,7 @@ export function EPUBReadingView({
       syncTarget.current = undefined;
       translationMotion.current++;
       focusMotion.current.operation++;
+      modeOperation.current++;
       cancelAnimationFrame(scrollFrame.current);
       cancelAnimationFrame(modeFrame.current);
     };
@@ -417,6 +425,7 @@ export function EPUBReadingView({
     scrollFrame.current = requestAnimationFrame(() => {
       if (
         focusMotion.current.moving ||
+        modeRestoring.current ||
         !sync.current.canFollow("translation") ||
         dragging.current ||
         selection.current ||
@@ -455,21 +464,51 @@ export function EPUBReadingView({
     });
   };
   const changeMode = (value: Mode) => {
+    if (value === mode) return;
+    const translated = mode === "translation";
+    const anchor = translated
+      ? pane.current && translationReadingAnchor(pane.current, nodes.current)
+      : engine.current?.getReadingAnchor?.();
+    const block = anchor && blocksById.get(anchor.blockId);
+    const current = translated
+      ? position.current
+      : engine.current?.getLocation();
+    const target = current?.type === "epub" ? current : position.current;
+    const location = translated && block ? block.location : target;
     clear();
     input(value === "translation" ? "translation" : "source");
+    modeRestoring.current = true;
+    const operation = modeOperation.current;
     hover("source");
     hover("translation");
+    updateLocation(location);
     setMode(value);
     side.current = value === "translation" ? "translation" : "source";
-    const target = position.current;
     cancelAnimationFrame(modeFrame.current);
     modeFrame.current = requestAnimationFrame(() => {
-      if (value !== "source") {
-        const block = epubBlocksAt(target, live.current.blocks)[0];
-        if (block) follow(block.id);
-      }
-      if (target.href)
-        void engine.current?.goTo(target).catch((e) => toast.error(e.message));
+      modeFrame.current = requestAnimationFrame(() => {
+        const cancelled = () => operation !== modeOperation.current;
+        if (cancelled()) return;
+        void (async () => {
+          if (value !== "translation" && location.href) {
+            await engine.current?.goTo(location);
+            if (cancelled()) return;
+            if (anchor) await engine.current?.followBlock?.(anchor);
+          }
+          if (cancelled()) return;
+          if (value !== "source") {
+            const block = epubBlocksAt(location, live.current.blocks)[0];
+            if (anchor) follow(anchor.blockId, anchor.fraction);
+            else if (block) follow(block.id);
+          }
+        })()
+          .catch((e) => {
+            if (!cancelled()) toast.error(e.message);
+          })
+          .finally(() => {
+            if (!cancelled()) modeRestoring.current = false;
+          });
+      });
     });
   };
   const retry = (id = "") => {
@@ -579,6 +618,7 @@ export function EPUBReadingView({
                 location: (location, percent) => {
                   if (
                     location.type !== "epub" ||
+                    modeRestoring.current ||
                     side.current === "translation"
                   )
                     return;
@@ -604,6 +644,7 @@ export function EPUBReadingView({
                 epubReadingAnchor: (id, fraction = 0.5) => {
                   if (
                     !focusMotion.current.moving &&
+                    !modeRestoring.current &&
                     sync.current.canFollow("source") &&
                     !selection.current &&
                     live.current.mode === "parallel"

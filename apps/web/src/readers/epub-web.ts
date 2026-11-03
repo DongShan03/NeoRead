@@ -547,6 +547,28 @@ export class EPUBReaderAdapter implements ReaderAdapter {
   getLocation() {
     return this.location;
   }
+  getReadingAnchor(): ReadingAnchor | undefined {
+    const middle =
+      this.container.getBoundingClientRect().top +
+      this.container.clientHeight / 2;
+    const nodes = Array.from(
+      this.container.querySelectorAll<HTMLElement>("[data-epub-block]"),
+    );
+    const node =
+      nodes.find((node) => node.getBoundingClientRect().bottom > middle) ??
+      nodes.at(-1);
+    const blockId = node?.dataset.epubBlock;
+    const rect = blockId && epubBlockRect(this.container, blockId);
+    return rect && blockId
+      ? {
+          blockId,
+          fraction: Math.max(
+            0,
+            Math.min(1, (middle - rect.top) / (rect.height || 1)),
+          ),
+        }
+      : undefined;
+  }
   async goTo(location: DocumentLocation) {
     this.cancelBlockFocus();
     if (location.type !== "epub" || this.disposed) return;

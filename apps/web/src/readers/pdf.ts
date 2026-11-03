@@ -761,6 +761,9 @@ export class PDFReaderAdapter implements ReaderAdapter {
   followBlock(anchor: import("@neoread/core").PDFReadingAnchor) {
     return this.navigation.follow(anchor);
   }
+  getReadingAnchor() {
+    return this.navigation.anchor();
+  }
   previewCitation(
     location: import("@neoread/core").PDFLocation,
     anchor: HTMLAnchorElement,

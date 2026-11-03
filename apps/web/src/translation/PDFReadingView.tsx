@@ -50,7 +50,10 @@ import {
   PDFTranslationBlock,
   type PDFBlockInteractions,
 } from "./PDFTranslationBlock";
-import { translationBlockAt } from "./translation-viewport";
+import {
+  translationBlockAt,
+  translationReadingAnchor,
+} from "./translation-viewport";
 import { blockImageCache } from "./block-images";
 import { useSentenceMarks } from "./useSentenceMarks";
 import { translatedSelection as captureTranslationSelection } from "./selection";
@@ -123,6 +126,10 @@ export function PDFReadingView({
     );
   };
   const previousMode = useRef<Mode>("source");
+  const modeRestoring = useRef(false);
+  const modeTarget = useRef<{
+    anchor?: PDFReadingAnchor;
+  }>(undefined);
   const syncEnabledRef = useRef(syncEnabled);
   syncEnabledRef.current = syncEnabled;
   const explicitFocus = useRef({
@@ -720,7 +727,9 @@ export function PDFReadingView({
     events.selection(null);
     window.getSelection()?.removeAllRanges();
     void engine.focusSentences?.("", []);
-    const anchor = reading.current;
+    const target = modeTarget.current;
+    modeTarget.current = undefined;
+    const anchor = target ? target.anchor : reading.current;
     const operation = explicitFocus.current.operation;
     const restore = async () => {
       if (previous !== mode) {
@@ -728,16 +737,25 @@ export function PDFReadingView({
         // temporary passage zoom and saving this document's zoom preference.
         events.zoom?.("width");
         await engine.setTheme({ ...state.current.theme, zoom: "width" });
-        if (cancelled) return;
-        if (mode !== "translation" && anchor && syncEnabledRef.current)
-          await engine.followBlock?.(anchor);
+        if (cancelled || operation !== explicitFocus.current.operation) return;
+        if (mode !== "translation") {
+          if (anchor) await engine.followBlock?.(anchor);
+        }
       }
-      if (!cancelled && mode !== "source" && anchor) followTranslation(anchor);
+      if (!cancelled && operation === explicitFocus.current.operation) {
+        if (anchor) recordReading(anchor);
+        if (mode !== "source" && anchor) followTranslation(anchor);
+      }
     };
     const apply = () =>
-      void restore().catch((e) => {
-        if (!cancelled) toast.error(e.message);
-      });
+      void restore()
+        .catch((e) => {
+          if (!cancelled) toast.error(e.message);
+        })
+        .finally(() => {
+          if (!cancelled && operation === explicitFocus.current.operation)
+            modeRestoring.current = false;
+        });
     // Both PDF fit-width and translation positioning need the expanded panes.
     let frame = 0;
     if (previous !== mode) {
@@ -767,6 +785,7 @@ export function PDFReadingView({
     };
   }, []);
   const input = (active: typeof side.current) => {
+    modeRestoring.current = false;
     cancelTranslationMotion();
     if (
       mode !== "translation" &&
@@ -804,6 +823,7 @@ export function PDFReadingView({
     scrollFrame.current = requestAnimationFrame(() => {
       if (
         selecting.current ||
+        modeRestoring.current ||
         explicitFocus.current.moving ||
         translationMotion.current.moving ||
         !pane.current ||
@@ -856,7 +876,20 @@ export function PDFReadingView({
     });
   };
   const changeMode = (value: Mode) => {
+    if (value === mode) return;
+    // Capture before collapsing either pane. The last shared reading event may
+    // belong to an independently scrolled translation.
+    const anchor =
+      mode === "translation"
+        ? ((pane.current &&
+            translationReadingAnchor(pane.current, nodes.current)) ??
+          reading.current)
+        : engine?.getReadingAnchor
+          ? engine.getReadingAnchor()
+          : reading.current;
     input(value === "translation" ? "translation" : "source");
+    modeTarget.current = { anchor };
+    modeRestoring.current = true;
     setPopup(undefined);
     setMode(value);
   };
@@ -1069,6 +1102,7 @@ export function PDFReadingView({
                 location: (location, percentage, bodyReadPosition) => {
                   if (
                     state.current.mode !== "translation" &&
+                    !modeRestoring.current &&
                     side.current === "source"
                   )
                     events.location(location, percentage, bodyReadPosition);
@@ -1076,6 +1110,7 @@ export function PDFReadingView({
                 readingAnchor: (anchor) => {
                   if (
                     explicitFocus.current.moving ||
+                    modeRestoring.current ||
                     !control.current.canFollow("source") ||
                     selecting.current
                   )

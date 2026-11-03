@@ -195,6 +195,14 @@ async function click(label: string) {
   )!;
   expect(button).toBeTruthy();
   await act(async () => button.click());
+  if (["原文译文", "仅原文", "仅译文"].includes(label) && !vi.isFakeTimers()) {
+    await act(
+      async () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+  }
 }
 
 it("supports all modes and chapter navigation without PDF page locations", async () => {
@@ -597,3 +605,64 @@ it("reuses rendered Markdown across hover and reading-progress updates while acc
   expect(host.textContent).toContain("新译文。");
   expect(fixture.markdown).toHaveBeenCalledWith("新译文。");
 });
+
+it.each([
+  ["仅原文", "原文译文"],
+  ["仅原文", "仅译文"],
+  ["原文译文", "仅原文"],
+  ["原文译文", "仅译文"],
+  ["仅译文", "仅原文"],
+  ["仅译文", "原文译文"],
+])(
+  "keeps the authoritative EPUB chapter and fraction when switching %s to %s",
+  async (from, to) => {
+    adapter.getReadingAnchor = vi.fn(() => ({
+      blockId: blocks[0].id,
+      fraction: 0.25,
+    }));
+    const location = vi
+      .spyOn(adapter, "getLocation")
+      .mockReturnValue(blocks[0].location);
+    try {
+      if (from !== "仅原文") await click(from);
+      await act(async () => fixture.events!.location(blocks[1].location, 0.8));
+      if (from !== "仅原文") {
+        const pane = host.querySelector<HTMLElement>(".translation-document")!;
+        Object.defineProperty(pane, "clientHeight", {
+          value: 600,
+          configurable: true,
+        });
+        pane.getBoundingClientRect = () => new DOMRect(0, 0, 600, 600);
+        const nodes = [
+          ...pane.querySelectorAll<HTMLElement>("[data-translation-block]"),
+        ];
+        nodes[0].getBoundingClientRect = () => new DOMRect(0, -1000, 600, 200);
+        nodes[1].getBoundingClientRect = () => new DOMRect(0, 250, 600, 200);
+      }
+      vi.mocked(adapter.followBlock!).mockClear();
+      vi.mocked(adapter.goTo).mockClear();
+      await click(to);
+      const block = blocks[from === "仅译文" ? 1 : 0];
+      expect(fixture.ready!.getLocation()).toMatchObject({
+        type: "epub",
+        href: block.location.href,
+      });
+      if (to !== "仅译文") {
+        expect(adapter.goTo).toHaveBeenLastCalledWith(block.location);
+        expect(adapter.followBlock).toHaveBeenLastCalledWith({
+          blockId: block.id,
+          fraction: 0.25,
+        });
+      }
+      if (to !== "仅原文")
+        expect(
+          host
+            .querySelector("[data-translation-render-target]")
+            ?.getAttribute("data-translation-block"),
+        ).toBe(block.id);
+    } finally {
+      location.mockRestore();
+      delete adapter.getReadingAnchor;
+    }
+  },
+);

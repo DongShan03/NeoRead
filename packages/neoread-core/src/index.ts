@@ -527,6 +527,8 @@ export interface ReaderAdapter {
   getTOC(): Promise<TOCItem[]>;
   getPageCount?(): number;
   getLocation(): DocumentLocation;
+  /** Capture the visible block at the viewport midpoint before changing layout. */
+  getReadingAnchor?(): ReadingAnchor | undefined;
   goTo(location: DocumentLocation): Promise<void>;
   next(): Promise<void>;
   previous(): Promise<void>;
