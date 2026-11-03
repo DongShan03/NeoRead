@@ -306,6 +306,24 @@ export function updateLibraryPreferences(patch: Partial<LibraryPreferences>) {
     .then(() => {});
   return preferenceWrite;
 }
+/** Drain queued edits before closing, switching or taking a library snapshot. */
+export async function flushLibraryPreferences() {
+  let retried = false;
+  for (;;) {
+    const pending = preferenceWrite;
+    try {
+      await pending;
+    } catch (error) {
+      if (pending !== preferenceWrite) continue;
+      if (retried) throw error;
+      // A previous failed save must be retryable without changing the setting.
+      retried = true;
+      void updateLibraryPreferences({}).catch(() => {});
+      continue;
+    }
+    if (pending === preferenceWrite) return;
+  }
+}
 let trashRevision = 0;
 /** The trash of the current library; older responses never overwrite newer ones. */
 export async function refreshTrash() {
