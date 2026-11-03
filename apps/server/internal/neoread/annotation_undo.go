@@ -88,10 +88,6 @@ func (s *Server) recordAnnotation(next http.HandlerFunc) http.HandlerFunc {
 		s.annotationMu.Lock()
 		defer s.annotationMu.Unlock()
 		session := r.Header.Get(annotationUndoHeader)
-		if session == "" {
-			next(w, r)
-			return
-		}
 		if len(session) > 128 {
 			fail(w, 400, "撤销会话无效")
 			return
@@ -110,6 +106,10 @@ func (s *Server) recordAnnotation(next http.HandlerFunc) http.HandlerFunc {
 		}
 		change := annotationDiff(before, after)
 		if len(change.before) == 0 {
+			return
+		}
+		s.publishAnnotationChange(document)
+		if session == "" {
 			return
 		}
 		change.session, change.document = session, document
@@ -201,6 +201,7 @@ func (s *Server) undoAnnotation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "无法撤销批注")
 		return
 	}
+	s.publishAnnotationChange(document)
 	copy(s.annotationHistory[index:], s.annotationHistory[index+1:])
 	s.annotationHistory[len(s.annotationHistory)-1] = annotationChange{}
 	s.annotationHistory = s.annotationHistory[:len(s.annotationHistory)-1]
