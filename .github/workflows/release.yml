@@ -1,6 +1,10 @@
 name: Release installers
 
 on:
+  # Experimental tags build preview artifacts without publishing a release.
+  push:
+    tags:
+      - "v*-experiment.*"
   release:
     types: [published]
   workflow_dispatch:
@@ -97,8 +101,8 @@ jobs:
           merge-multiple: true
       - name: Verify complete installer set and generate checksums
         run: node scripts/release-assets.mjs
-      - name: Store checksums for manual dry runs
-        if: github.event_name == 'workflow_dispatch' && inputs.release-tag == ''
+      - name: Store checksums for preview builds
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release-tag == '')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: neoread-checksums
