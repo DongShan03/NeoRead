@@ -202,6 +202,9 @@ func exportLibraryArchive(ctx context.Context, source, destination string, optio
 	}
 	// Reading preferences travel with the library. Provider keys, connection
 	// credentials and machine-specific integration state do not.
+	if _, err = tx.Exec("DROP TABLE IF EXISTS codex_history_threads"); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(`DELETE FROM settings WHERE key NOT IN ('neoread','preferences:library','preferences:guide','preferences:shortcuts') AND key<>?`, epubMetadataMigration); err != nil {
 		return err
 	}
@@ -486,7 +489,7 @@ func importLibraryArchive(ctx context.Context, archivePath, destination, mergeSo
 		// Codex native threads live outside the library on the source machine.
 		// Rebuild them from the preserved transcript on the next question rather
 		// than resuming a missing thread or sharing the original library's writer.
-		_, err = incomingStore.DB.Exec("DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'")
+		_, err = incomingStore.DB.Exec("DELETE FROM codex_history_threads; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'")
 	}
 	incomingStore.DB.Close()
 	if err != nil {
@@ -512,7 +515,7 @@ func importLibraryArchive(ctx context.Context, archivePath, destination, mergeSo
 		}
 		// Retained documents also belong to this new independent library.
 		// Keep their transcripts, but never share the source's native Codex writer.
-		if _, e = base.DB.ExecContext(ctx, "DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'"); e != nil {
+		if _, e = base.DB.ExecContext(ctx, "DELETE FROM codex_history_threads; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'"); e != nil {
 			base.DB.Close()
 			return e
 		}

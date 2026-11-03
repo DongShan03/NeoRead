@@ -48,6 +48,13 @@ func (c *documentCodexCache) deleteDocument(doc string) {
 		c.discardLocked()
 	}
 }
+func (c *documentCodexCache) closeIdleForHistory() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entry != nil && !c.entry.active {
+		c.discardLocked()
+	}
+}
 func (c *documentCodexCache) release(entry *documentCodexEntry, healthy bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -108,7 +115,7 @@ func (c *documentCodexCache) acquire(ctx context.Context, a *documentAgent, root
 	session.finalMessagesOnly = true
 	session.baseInstructions = webInstructions(documentReadingInstructions, session.webSearch)
 	if state.NativeThread != "" {
-		if err = session.resumeDocument(ctx, state.NativeThread); err != nil {
+		if err = a.server.resumeCodexHistory(ctx, session, state.NativeThread); err != nil {
 			session.close()
 			closeMCP()
 			return nil, err

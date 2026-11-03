@@ -30,6 +30,7 @@ import (
 )
 
 type Server struct {
+	codexHistoryMu         sync.Mutex
 	webdav                 webdavState
 	libraryArchiveMu       sync.RWMutex
 	startupSettings        json.RawMessage
@@ -264,6 +265,13 @@ func (s *Server) Handler() http.Handler {
 		if !decode(w, r, &v) {
 			return
 		}
+		beforeHide := s.hideCodexHistory()
+		if value, exists := v["hideCodexHistory"]; exists {
+			if _, ok := value.(bool); !ok {
+				fail(w, 400, "Codex 历史可见性设置必须为布尔值")
+				return
+			}
+		}
 		if value, exists := v["documentContextTokens"]; exists {
 			n, ok := value.(float64)
 			if !ok || (n != 0 && n < 8192) || n > 1048576 || n != float64(int(n)) {
@@ -295,6 +303,15 @@ func (s *Server) Handler() http.Handler {
 		if err != nil {
 			fail(w, 500, "设置保存失败")
 			return
+		}
+		if beforeHide != s.hideCodexHistory() {
+			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+			err = s.applyCodexHistoryVisibility(ctx)
+			cancel()
+			if err != nil {
+				fail(w, 502, err.Error())
+				return
+			}
 		}
 		respond(w, 200, v)
 	})

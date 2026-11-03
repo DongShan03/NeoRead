@@ -187,6 +187,7 @@ func main() {
 	defer cancelRun()
 	context.AfterFunc(runContext, runtimeenv.Default.Stop)
 	server.StartWebDAV(runContext)
+	server.StartCodexHistory(runContext)
 	stopProcessing := server.StartProcessingAsync(runContext)
 	defer func() { cancelRun(); runtimeenv.Default.Stop(); stopProcessing() }()
 	if !*connector {

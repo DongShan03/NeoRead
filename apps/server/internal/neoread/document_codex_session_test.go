@@ -31,6 +31,7 @@ func runPersistentDocumentProcess() {
 		Head     int
 		Remember string
 		Source   string
+		Archived bool
 	}
 	load := func() nativeState {
 		var state nativeState
@@ -65,6 +66,19 @@ func runPersistentDocumentProcess() {
 		case "thread/start":
 			save(nativeState{})
 			reply(map[string]any{"thread": map[string]any{"id": thread, "ephemeral": false}, "model": "test"})
+		case "thread/archive", "thread/unarchive":
+			var p struct {
+				Thread string `json:"threadId"`
+			}
+			_ = json.Unmarshal(r.Params, &p)
+			target := filepath.Join(filepath.Dir(work), strings.TrimPrefix(p.Thread, "thread-"), "native-state.json")
+			previous := file
+			file = target
+			state := load()
+			state.Archived = r.Method == "thread/archive"
+			save(state)
+			file = previous
+			reply(map[string]any{"thread": map[string]any{"id": p.Thread}})
 		case "thread/resume":
 			var p struct {
 				Thread string `json:"threadId"`
@@ -72,6 +86,10 @@ func runPersistentDocumentProcess() {
 			_ = json.Unmarshal(r.Params, &p)
 			if p.Thread != thread {
 				os.Exit(4)
+			}
+			if load().Archived {
+				_ = enc.Encode(map[string]any{"id": r.ID, "error": map[string]any{"code": -32600, "message": "thread is archived"}})
+				continue
 			}
 			if failure := os.Getenv("NEOREAD_CONVERSATION_RESUME_ERROR"); failure != "" {
 				_ = enc.Encode(map[string]any{"id": r.ID, "error": json.RawMessage(failure)})

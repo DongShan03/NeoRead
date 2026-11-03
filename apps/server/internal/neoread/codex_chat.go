@@ -206,6 +206,8 @@ func (s *Server) Close() {
 	for _, task := range tasks {
 		<-task.done
 	}
+	s.codexHistoryMu.Lock()
+	s.codexHistoryMu.Unlock()
 }
 
 func (c *codexChatCache) deleteDocument(document string) {

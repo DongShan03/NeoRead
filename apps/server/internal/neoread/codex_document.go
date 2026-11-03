@@ -238,7 +238,12 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 		return GenerateResult{}, err
 	}
 	healthy := false
-	defer func() { cache.release(entry, healthy) }()
+	defer func() {
+		if a.server.archiveCodexAfterTurn(entry.session, a.corpus.DocumentID) {
+			healthy = false
+		}
+		cache.release(entry, healthy)
+	}()
 	session := entry.session
 	if session.threadID != "" {
 		if _, err = session.verifyDocumentConfig(ctx); err != nil {
@@ -273,7 +278,13 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 	if err = persist(); err != nil {
 		return GenerateResult{}, err
 	}
-	session.onThread = func(thread string) error { a.conversation.NativeThread = thread; return persist() }
+	session.onThread = func(thread string) error {
+		a.conversation.NativeThread = thread
+		if err := a.server.trackCodexThread(ctx, a.corpus.DocumentID, thread); err != nil {
+			return err
+		}
+		return persist()
+	}
 	session.onTurn = func(turn string) error { a.conversation.NativePending = turn; return persist() }
 	session.onUsage = func(usage *TokenCounts) error { a.conversation.NativeUsage = usage; return persist() }
 	defer func() { session.onThread = nil; session.onTurn = nil; session.onUsage = nil }()

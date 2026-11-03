@@ -127,6 +127,10 @@ ZIP 包含：
 
 API 厂商规则、实际强度映射、上游错误分类和请求关联字段见 [API 厂商适配与错误诊断](api-provider-compatibility.md)。新增 API 错误事件只记录安全的结构化证据，不保存厂商可能回显正文的原始错误 message。
 
+## Codex 历史可见性
+
+Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history-visibility.md)。`codex.history.visibility_applied` 只记录隐藏状态、已处理和失败数量；`archive_failed / visibility_failed` 只记录固定错误类别。不记录线程日志、原始 RPC 错误、凭据或聊天正文。
+
 ## 坚果云同步
 
 `sync.started / stage / finished` 用 `taskId` 关联一轮同步，终态记录耗时并区分完成、待选择冲突、失败和取消。阶段包括扫描、下载、等待渲染端保存、应用和上传；限流终态使用 `errorCode=rate_limited`，后续遵守上游 `Retry-After`。

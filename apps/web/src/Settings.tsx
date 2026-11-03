@@ -722,6 +722,24 @@ export function Settings({
             className="settings-panel"
             keepMounted
           >
+            <section>
+              <label className="flex items-center justify-between gap-4 text-sm">
+                <span>
+                  在 Codex 历史中隐藏阅读对话
+                  <span className="block text-xs text-muted-foreground">
+                    完成后归档，继续提问时恢复同一对话；关闭后恢复可见。NeoRead
+                    聊天记录始终保留。
+                  </span>
+                </span>
+                <Switch
+                  aria-label="在 Codex 历史中隐藏阅读对话"
+                  checked={theme.hideCodexHistory === true}
+                  onCheckedChange={(checked) =>
+                    setTheme({ hideCodexHistory: !!checked })
+                  }
+                />
+              </label>
+            </section>
             {window.neoreadDesktop?.proxySettings && (
               <ProxySettings open={open} />
             )}

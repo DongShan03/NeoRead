@@ -373,6 +373,8 @@ export interface ReaderLayout {
   stacked: boolean;
 }
 export interface ReaderTheme {
+  /** Archive NeoRead's completed Codex threads; restore the same thread before continuing. */
+  hideCodexHistory?: boolean;
   /** Ordered open documents and the selected document; null selects the library. */
   readingSession?: { documentIds: string[]; activeId: string | null };
   /** Open documents in tabs; otherwise opening one replaces the current document. */
@@ -429,6 +431,7 @@ export interface HighlightColor {
   label: string;
 }
 export const defaultTheme: ReaderTheme = {
+  hideCodexHistory: false,
   documentTabs: false,
   reducedMotion: false,
   autoCopySelection: false,

@@ -248,6 +248,33 @@ it("groups proxy settings and log export under diagnostics without a network tab
   await act(async () => exportButton.click());
   expect(exportLogs).toHaveBeenCalledOnce();
 });
+it("keeps Codex history visible by default and toggles recoverable hiding in diagnostics", async () => {
+  const previous = useReaderStore.getState().theme;
+  useReaderStore.setState({
+    theme: { ...previous, hideCodexHistory: undefined },
+  });
+  try {
+    await act(async () =>
+      root.render(<Settings open onOpenChange={() => {}} />),
+    );
+    const diagnostics = [
+      ...host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent === "诊断")!;
+    await act(async () => diagnostics.click());
+    const toggle = host.querySelector<HTMLButtonElement>(
+      '[role="switch"][aria-label="在 Codex 历史中隐藏阅读对话"]',
+    )!;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.closest("section")?.textContent).toContain("恢复同一对话");
+    await act(async () => toggle.click());
+    expect(useReaderStore.getState().theme.hideCodexHistory).toBe(true);
+    await act(async () => toggle.click());
+    expect(useReaderStore.getState().theme.hideCodexHistory).toBe(false);
+  } finally {
+    await act(async () => useReaderStore.setState({ theme: previous }));
+  }
+});
+
 // These multi-step integration cases exercise real Base UI controls and both
 // capability checks; 10s is too tight on the shared CI runner.
 it("saves the API endpoint and key, then tests the new connection", async () => {
