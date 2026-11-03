@@ -1075,6 +1075,29 @@ app
       settingsSender(event);
       return libraryWarning;
     });
+    const startLibraryCitations = () => {
+      citationService?.stop();
+      citationService = startCitationService({
+        url: serverURL,
+        token: serverToken,
+        preload: join(__dirname, "preload.cjs"),
+        record: (event) => diagnostics?.record(event),
+      });
+    };
+    const reloadLibraryWindow = async () => {
+      flushed = false;
+      closing = false;
+      documentTabActive = false;
+      linksClaimed = false;
+      openedClaimed = false;
+      if (window && !window.isDestroyed())
+        // A fresh query forces document navigation: changing only #token is a
+        // same-document jump and leaves the previous renderer's token in use.
+        await window.loadURL(
+          `${serverURL}/?librarySession=${randomBytes(8).toString("hex")}#token=${serverToken}`,
+        );
+      else await reopenMainWindow!();
+    };
     const switchLibrary = async (
       destination: string,
       prepare: () => Promise<void>,
@@ -1088,7 +1111,6 @@ app
       librarySwitching = true;
       closeAfterLibrarySwitch = false;
       let suspended = false;
-      let viewReplaced = false;
       let locationChanged = false;
       const started = performance.now();
       let phase = "prepare";
@@ -1108,9 +1130,13 @@ app
         originalWindow.setEnabled(false);
         stage("flush");
         await flushLibraryWindow(ipcMain, originalWindow.webContents);
+        linksClaimed = false;
+        openedClaimed = false;
         if (child) {
           stage("stop");
           suspended = true;
+          citationService?.stop();
+          citationService = undefined;
           await stopLibraryServer(child);
         }
       };
@@ -1119,21 +1145,22 @@ app
         stage("prepare");
         await prepare();
         if (!stopBeforePrepare) await flushAndStop();
-        const old = window!;
-        startupWindow = createStartupWindow(() => app.quit());
-        await startupWindow.load();
-        viewReplaced = true;
-        old.destroy();
         activeLibrary = destination;
         stage("connect");
-        await startServer(connection, !!entry);
+        // Keep the old view until the destination is ready, but revoke its API
+        // token so pending autosaves cannot write into the destination library.
+        await startServer(
+          { ...connection, token: randomBytes(32).toString("hex") },
+          !!entry,
+        );
         // Register the requested name before the new renderer asks for its
         // catalog; otherwise ensure() can register the UUID directory as a name.
         if (entry) await libraryCatalog.remember(entry);
         stage("runtime");
         await refreshDesktopRuntime!();
+        startLibraryCitations();
         stage("window");
-        await reopenMainWindow!();
+        await reloadLibraryWindow();
         stage("save");
         locationChanged = true;
         await saveLibraryDirectory(app.getPath("userData"), destination);
@@ -1157,27 +1184,21 @@ app
           try {
             if (locationChanged)
               await saveLibraryDirectory(app.getPath("userData"), source);
-            if (viewReplaced) {
-              if (!startupWindow) {
-                startupWindow = createStartupWindow(() => app.quit());
-                await startupWindow.load();
-              }
-              window?.destroy();
-            }
+            citationService?.stop();
+            citationService = undefined;
             if (child && child.exitCode === null && child.signalCode === null)
               await stopLibraryServer(child);
             await startServer(connection);
             await refreshDesktopRuntime!();
-            if (!window || window.isDestroyed()) {
-              await reopenMainWindow!();
-              await dialog.showMessageBox(window!, {
-                type: "error",
-                message: "切换书库失败",
-                detail: failure.message + "\n原书库已保留。",
-                buttons: ["知道了"],
-              });
-              return false;
-            }
+            startLibraryCitations();
+            await reloadLibraryWindow();
+            await dialog.showMessageBox(window!, {
+              type: "error",
+              message: "切换书库失败",
+              detail: failure.message + "\n原书库已保留。",
+              buttons: ["知道了"],
+            });
+            return false;
           } catch (restoreError) {
             diagnostics?.record(
               "library.connection_restore_failed",
@@ -1935,13 +1956,7 @@ app
     await mainWindowOpening;
     mainWindowOpening = undefined;
     if (quitRequested || quitting) return;
-    if (!recoveryServer)
-      citationService = startCitationService({
-        url,
-        token: serverToken,
-        preload: join(__dirname, "preload.cjs"),
-        record: (event) => diagnostics?.record(event),
-      });
+    if (!recoveryServer) startLibraryCitations();
     if (migration && !recoveryServer)
       await promptLegacyCleanup(
         window!,

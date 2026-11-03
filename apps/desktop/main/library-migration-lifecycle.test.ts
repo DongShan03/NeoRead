@@ -647,10 +647,21 @@ it("restores editing without stopping the old library when the final switch flus
   expect(original.setEnabled).toHaveBeenLastCalledWith(true);
   expect(original.isDestroyed()).toBe(false);
   expect(stop).not.toHaveBeenCalled();
+  expect(citationStop).not.toHaveBeenCalled();
+  expect(loadURL).toHaveBeenCalledOnce();
 });
-it("can switch to the prepared archive and back to the original library without restarting", async () => {
+it("switches libraries in the same window without replaying startup and isolates old renderer requests", async () => {
+  const original = window;
+  const { createStartupWindow } = await import("./startup-window");
+  const { startCitationService } = await import("./citation-service");
   expect(await prepareArchive()).toEqual(importedEntry);
   expect(await switchTo("imported")).toBe(true);
+  expect(window).toBe(original);
+  expect(original.isDestroyed()).toBe(false);
+  expect(original.setEnabled).toHaveBeenLastCalledWith(true);
+  expect(createStartupWindow).toHaveBeenCalledOnce();
+  expect(prepareExit).toHaveBeenCalledOnce();
+  expect(minimumDisplay).toHaveBeenCalledOnce();
   expect(serverSpawn).toHaveBeenCalledTimes(2);
   expect(serverSpawn.mock.calls[1][1]).toEqual(
     expect.arrayContaining([
@@ -660,9 +671,20 @@ it("can switch to the prepared archive and back to the original library without 
       importedEntry.directory,
     ]),
   );
-  expect(serverSpawn.mock.calls[1][2].env.NEOREAD_TOKEN).toBe(
+  const destinationToken = serverSpawn.mock.calls[1][2].env.NEOREAD_TOKEN;
+  expect(destinationToken).not.toBe(
     serverSpawn.mock.calls[0][2].env.NEOREAD_TOKEN,
   );
+  const destinationURL = new URL(loadURL.mock.calls.at(-1)![0]);
+  expect(destinationURL.origin).toBe("http://127.0.0.1:1234");
+  expect(destinationURL.hash).toBe(`#token=${destinationToken}`);
+  expect(destinationURL.search).not.toBe(
+    new URL(loadURL.mock.calls[0][0]).search,
+  );
+  expect(startCitationService).toHaveBeenLastCalledWith(
+    expect.objectContaining({ token: destinationToken }),
+  );
+  expect(citationStop).toHaveBeenCalledOnce();
   const snapshot = await handlers.get("neoread:library-catalog")!(event());
   expect(snapshot.libraries).toHaveLength(2);
   expect(await switchTo("original")).toBe(true);
@@ -672,7 +694,87 @@ it("can switch to the prepared archive and back to the original library without 
     expect.arrayContaining(["--data", "/old/library"]),
   );
   expect(saveLocation).toHaveBeenLastCalledWith("/userdata", "/old/library");
+  expect(window).toBe(original);
+  expect(original.isDestroyed()).toBe(false);
+  expect(createStartupWindow).toHaveBeenCalledOnce();
+  const switchedURLs = loadURL.mock.calls
+    .slice(1)
+    .map(([value]) => new URL(value));
+  expect(switchedURLs).toHaveLength(2);
+  expect(switchedURLs[0].search).not.toBe(switchedURLs[1].search);
+  expect(switchedURLs[1].searchParams.has("librarySession")).toBe(true);
   expect(app.relaunch).not.toHaveBeenCalled();
+});
+it.each(["connect", "window", "save"])(
+  "restores the original library in the same window when switching fails during %s",
+  async (phase) => {
+    const original = window;
+    const sourceToken = serverSpawn.mock.calls[0][2].env.NEOREAD_TOKEN;
+    const { createStartupWindow } = await import("./startup-window");
+    if (phase === "connect")
+      serverSpawn.mockImplementationOnce(() => {
+        throw new Error("connect failed");
+      });
+    else if (phase === "window")
+      loadURL.mockImplementationOnce(() => {
+        throw new Error("window failed");
+      });
+    else saveLocation.mockRejectedValueOnce(new Error("save failed"));
+
+    expect(await switchTo("imported")).toBe(false);
+    expect(window).toBe(original);
+    expect(original.isDestroyed()).toBe(false);
+    expect(original.setEnabled).toHaveBeenLastCalledWith(true);
+    expect(createStartupWindow).toHaveBeenCalledOnce();
+    expect(serverSpawn.mock.calls.at(-1)![1]).toEqual(
+      expect.arrayContaining(["--data", "/old/library"]),
+    );
+    expect(serverSpawn.mock.calls.at(-1)![2].env.NEOREAD_TOKEN).toBe(
+      sourceToken,
+    );
+    const restoredURL = new URL(loadURL.mock.calls.at(-1)![0]);
+    expect(restoredURL.origin).toBe("http://127.0.0.1:1234");
+    expect(restoredURL.hash).toBe(`#token=${sourceToken}`);
+    expect(restoredURL.search).not.toBe(
+      new URL(loadURL.mock.calls[0][0]).search,
+    );
+    const catalog = await handlers.get("neoread:library-catalog")!(event());
+    expect(catalog.activeId).toBe("original");
+    if (phase === "save")
+      expect(saveLocation).toHaveBeenLastCalledWith(
+        "/userdata",
+        "/old/library",
+      );
+    expect(showMessageBox).toHaveBeenCalledWith(
+      original,
+      expect.objectContaining({
+        message: "切换书库失败",
+        detail: expect.stringContaining("原书库已保留"),
+      }),
+    );
+    expect(app.relaunch).not.toHaveBeenCalled();
+  },
+);
+it("macOS: waits for an in-window library switch before closing and flushing the destination", async () => {
+  const original = window;
+  let finishStop!: () => void;
+  stop.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finishStop = resolve;
+      }),
+  );
+  const switching = switchTo("imported");
+  await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+  original.close();
+  expect(original.isDestroyed()).toBe(false);
+  finishStop();
+  expect(await switching).toBe(true);
+  expect(window).toBe(original);
+  expect(original.isDestroyed()).toBe(false);
+  expect(original.webContents.send).toHaveBeenLastCalledWith("neoread:flush");
+  ipc.emit("neoread:flushed", event(), null);
+  expect(original.isDestroyed()).toBe(true);
 });
 it("validates an imported library before shutdown and saves only after flush", async () => {
   const result = importLibrary();
@@ -1216,6 +1318,8 @@ it("creates an empty local library through the saved-state switch path without a
   expect(catalogRemember.mock.invocationCallOrder[0]).toBeLessThan(
     loadURL.mock.invocationCallOrder.at(-1)!,
   );
+  expect(window).toBe(old);
+  expect(old.isDestroyed()).toBe(false);
   expect(archivePrepare).not.toHaveBeenCalled();
   expect(app.relaunch).not.toHaveBeenCalled();
 });
