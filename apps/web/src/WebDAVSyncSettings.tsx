@@ -31,7 +31,7 @@ const defaults: WebDAVConfig = {
   folder: "论文库",
   deviceName: "这台设备",
   intervalMinutes: 15,
-  enabled: true,
+  enabled: false,
   passwordSet: false,
 };
 const phases: Record<string, string> = {
@@ -74,7 +74,7 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
             ? config
             : {
                 ...config,
-                enabled: !config.account,
+                enabled: false,
                 folder: local?.name || "论文库",
               },
         );
@@ -104,236 +104,236 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
       if (name !== "sync") wakeWebDAVSync();
     }
   };
+  const toggle = (enabled: boolean) => {
+    if (enabled || !useWebDAVSync.getState().config?.enabled) {
+      setDraft({ ...draft, enabled });
+      if (!enabled) setPassword("");
+      return;
+    }
+    void run("disconnect", async () => {
+      await api.disconnectWebdav();
+      setPassword("");
+      useWebDAVSync.setState({ localFailure: undefined });
+      const disconnected = await loadWebDAVSettings();
+      setDraft({ ...disconnected, folder: draft.folder, enabled: false });
+      toast.success("已关闭此书库同步，云端数据保留");
+    });
+  };
   const input = { ...draft, password };
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-sm font-medium">
-        <Cloud className="size-4" />
-        坚果云同步
-      </h3>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-medium">
+          <Cloud className="size-4" />
+          坚果云同步
+        </h3>
+        <Switch
+          aria-label="同步当前书库"
+          checked={draft.enabled}
+          disabled={loading || !!operation || running}
+          onCheckedChange={(enabled) => toggle(!!enabled)}
+        />
+      </div>
       <p className="mb-4 text-xs leading-5 text-muted-foreground">
         仅同步当前独立书库，包含其中的论文、图书、批注笔记、译文和已保存的对话。其他书库需分别开启。
       </p>
-      <div className="grid gap-3">
-        <label className="grid gap-1.5 text-sm">
-          坚果云账号
-          <Input
-            type="email"
-            autoComplete="username"
-            value={draft.account}
-            disabled={loading || !!operation || running}
-            onChange={(event) =>
-              setDraft({ ...draft, account: event.target.value })
-            }
-          />
-        </label>
-        <label className="grid gap-1.5 text-sm">
-          第三方应用密码
-          <Input
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            disabled={loading || !!operation || running}
-            placeholder={
-              draft.passwordSet
-                ? "已保存，留空保持不变"
-                : "填写坚果云生成的应用密码"
-            }
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
-        <p className="text-xs leading-5 text-muted-foreground">
-          在坚果云网页的“账户信息 → 安全选项 → 第三方应用管理”中生成应用密码。
-        </p>
-        <div className="text-sm">
-          同步目录
-          <p className="mt-1 break-all text-xs text-muted-foreground">
-            NeoRead/{draft.folder}/
+      {draft.enabled && (
+        <div className="grid gap-3">
+          <label className="grid gap-1.5 text-sm">
+            坚果云账号
+            <Input
+              type="email"
+              autoComplete="username"
+              value={draft.account}
+              disabled={loading || !!operation || running}
+              onChange={(event) =>
+                setDraft({ ...draft, account: event.target.value })
+              }
+            />
+          </label>
+          <label className="grid gap-1.5 text-sm">
+            第三方应用密码
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              disabled={loading || !!operation || running}
+              placeholder={
+                draft.passwordSet
+                  ? "已保存，留空保持不变"
+                  : "填写坚果云生成的应用密码"
+              }
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          <p className="text-xs leading-5 text-muted-foreground">
+            在坚果云网页的“账户信息 → 安全选项 → 第三方应用管理”中生成应用密码。
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            保存时创建，跟随本地书库重命名。
-          </p>
-        </div>
-        <label className="grid gap-1.5 text-sm">
-          设备名称
-          <Input
-            value={draft.deviceName}
-            disabled={loading || !!operation || running}
-            onChange={(event) =>
-              setDraft({ ...draft, deviceName: event.target.value })
-            }
-          />
-        </label>
-        <label className="grid gap-1.5 text-sm">
-          同步间隔（分钟）
-          <Input
-            type="number"
-            min={1}
-            max={525600}
-            step={1}
-            list="neoread-webdav-intervals"
-            value={draft.intervalMinutes}
-            disabled={loading || !!operation || running}
-            onChange={(event) =>
-              setDraft({
-                ...draft,
-                intervalMinutes: Number(event.target.value),
-              })
-            }
-          />
-          <datalist id="neoread-webdav-intervals">
-            {webdavIntervals.map((value) => (
-              <option value={value} key={value}>
-                {value} 分钟
-              </option>
-            ))}
-          </datalist>
-        </label>
-        <label className="flex items-center justify-between gap-3 text-sm">
-          自动同步当前书库
-          <Switch
-            checked={draft.enabled}
-            disabled={loading || !!operation || running}
-            onCheckedChange={(enabled) =>
-              setDraft({ ...draft, enabled: !!enabled })
-            }
-          />
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={
-              loading ||
-              !!operation ||
-              running ||
-              !draft.account ||
-              (!password && !draft.passwordSet)
-            }
-            onClick={() =>
-              void run("save", async () => {
-                const saved = await api.saveWebdavConfig(input);
-                setDraft(saved);
-                setPassword("");
-                useWebDAVSync.setState({ config: saved });
-                toast.success("同步设置已保存");
-              })
-            }
-          >
-            {operation === "save" && <LoaderCircle className="animate-spin" />}
-            保存
-          </Button>
-          <Button
-            variant="outline"
-            disabled={
-              loading ||
-              !!operation ||
-              running ||
-              !draft.account ||
-              (!password && !draft.passwordSet)
-            }
-            onClick={() =>
-              void run("test", async () => {
-                await api.testWebdav(input);
-                toast.success("坚果云读写正常");
-              })
-            }
-          >
-            {operation === "test" && <LoaderCircle className="animate-spin" />}
-            测试连接
-          </Button>
-          {running ? (
+          <div className="text-sm">
+            同步目录
+            <p className="mt-1 break-all text-xs text-muted-foreground">
+              NeoRead/{draft.folder}/
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              保存时创建，跟随本地书库重命名。
+            </p>
+          </div>
+          <label className="grid gap-1.5 text-sm">
+            设备名称
+            <Input
+              value={draft.deviceName}
+              disabled={loading || !!operation || running}
+              onChange={(event) =>
+                setDraft({ ...draft, deviceName: event.target.value })
+              }
+            />
+          </label>
+          <label className="grid gap-1.5 text-sm">
+            同步间隔（分钟）
+            <Input
+              type="number"
+              min={1}
+              max={525600}
+              step={1}
+              list="neoread-webdav-intervals"
+              value={draft.intervalMinutes}
+              disabled={loading || !!operation || running}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  intervalMinutes: Number(event.target.value),
+                })
+              }
+            />
+            <datalist id="neoread-webdav-intervals">
+              {webdavIntervals.map((value) => (
+                <option value={value} key={value}>
+                  {value} 分钟
+                </option>
+              ))}
+            </datalist>
+          </label>
+          <div className="flex flex-wrap gap-2">
             <Button
-              variant="outline"
-              disabled={!!operation}
+              disabled={
+                loading ||
+                !!operation ||
+                running ||
+                !draft.account ||
+                (!password && !draft.passwordSet)
+              }
               onClick={() =>
-                void run("cancel", async () => {
-                  await api.cancelWebdav();
+                void run("save", async () => {
+                  const saved = await api.saveWebdavConfig(input);
+                  setDraft(saved);
+                  setPassword("");
+                  useWebDAVSync.setState({ config: saved });
+                  toast.success("同步设置已保存");
                 })
               }
             >
-              停止同步
+              {operation === "save" && (
+                <LoaderCircle className="animate-spin" />
+              )}
+              保存
             </Button>
-          ) : (
             <Button
               variant="outline"
               disabled={
                 loading ||
                 !!operation ||
-                !draft.passwordSet ||
-                draft.libraryConfigured === false
+                running ||
+                !draft.account ||
+                (!password && !draft.passwordSet)
               }
               onClick={() =>
-                void run("sync", async () => {
-                  await startWebDAVSync();
+                void run("test", async () => {
+                  await api.testWebdav(input);
+                  toast.success("坚果云读写正常");
                 })
               }
             >
-              <RefreshCw />
-              立即同步
+              {operation === "test" && (
+                <LoaderCircle className="animate-spin" />
+              )}
+              测试连接
             </Button>
-          )}
-          {draft.passwordSet && (
-            <Button
-              variant="ghost"
-              disabled={loading || !!operation || running}
-              onClick={() =>
-                void run("disconnect", async () => {
-                  await api.disconnectWebdav();
-                  setPassword("");
-                  useWebDAVSync.setState({ localFailure: undefined });
-                  const disconnected = await loadWebDAVSettings();
-                  setDraft({
-                    ...disconnected,
-                    folder: draft.folder,
-                    enabled: false,
-                  });
-                  toast.success("已关闭此书库同步，云端数据保留");
-                })
-              }
-            >
-              关闭此书库同步
-            </Button>
-          )}
-        </div>
-        <div className="text-xs leading-5 text-muted-foreground" role="status">
-          {running && (
-            <LoaderCircle className="mr-1 inline size-3 animate-spin" />
-          )}
-          {phases[status.phase]}
-          {status.transferred > 0 && (
-            <span className="ml-2">
-              已传输 {(status.transferred / (1024 * 1024)).toFixed(1)} MiB
-            </span>
-          )}
-          {status.lastSync && (
-            <span className="ml-2">
-              上次同步：{new Date(status.lastSync).toLocaleString()}
-            </span>
-          )}
-          {status.deferred > 0 && (
-            <p>{status.deferred} 份文档正在处理，将在后续同步时继续。</p>
-          )}
-        </div>
-        {(error || status.error) && (
-          <p role="alert" className="text-xs text-destructive">
-            {error || status.error}
-          </p>
-        )}
-        {status.conflicts.map((item) => (
-          <div
-            className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
-            key={item.key}
-          >
-            <span className="min-w-0 truncate">{item.title}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setConflict(item)}
-            >
-              选择版本
-            </Button>
+            {running ? (
+              <Button
+                variant="outline"
+                disabled={!!operation}
+                onClick={() =>
+                  void run("cancel", async () => {
+                    await api.cancelWebdav();
+                  })
+                }
+              >
+                停止同步
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                disabled={
+                  loading ||
+                  !!operation ||
+                  !draft.passwordSet ||
+                  draft.libraryConfigured === false
+                }
+                onClick={() =>
+                  void run("sync", async () => {
+                    await startWebDAVSync();
+                  })
+                }
+              >
+                <RefreshCw />
+                立即同步
+              </Button>
+            )}
           </div>
-        ))}
-      </div>
+          <div
+            className="text-xs leading-5 text-muted-foreground"
+            role="status"
+          >
+            {running && (
+              <LoaderCircle className="mr-1 inline size-3 animate-spin" />
+            )}
+            {phases[status.phase]}
+            {status.transferred > 0 && (
+              <span className="ml-2">
+                已传输 {(status.transferred / (1024 * 1024)).toFixed(1)} MiB
+              </span>
+            )}
+            {status.lastSync && (
+              <span className="ml-2">
+                上次同步：{new Date(status.lastSync).toLocaleString()}
+              </span>
+            )}
+            {status.deferred > 0 && (
+              <p>{status.deferred} 份文档正在处理，将在后续同步时继续。</p>
+            )}
+          </div>
+          {status.conflicts.map((item) => (
+            <div
+              className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
+              key={item.key}
+            >
+              <span className="min-w-0 truncate">{item.title}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConflict(item)}
+              >
+                选择版本
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(error || status.error) && (
+        <p role="alert" className="mt-3 text-xs text-destructive">
+          {error || status.error}
+        </p>
+      )}
       <Dialog
         open={!!conflict}
         onOpenChange={(value) => {

@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "@neoread/api";
 import { WebDAVSyncSettings } from "./WebDAVSyncSettings";
+import { WebDAVSyncButton } from "./WebDAVSyncButton";
 import { emptyWebDAVStatus, useWebDAVSync } from "./webdav-sync";
 
 vi.mock("@neoread/api", () => ({
@@ -11,6 +12,7 @@ vi.mock("@neoread/api", () => ({
     webdavConfig: vi.fn(),
     webdavStatus: vi.fn(),
     saveWebdavConfig: vi.fn(),
+    disconnectWebdav: vi.fn(),
     testWebdav: vi.fn(async () => ({ ok: true })),
     runWebdav: vi.fn(),
     keepWebdavNotes: vi.fn(),
@@ -31,6 +33,7 @@ let host: HTMLDivElement;
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("PointerEvent", MouseEvent);
   vi.mocked(api.webdavConfig).mockResolvedValue(config);
   vi.mocked(api.webdavStatus).mockResolvedValue(emptyWebDAVStatus);
   vi.mocked(api.saveWebdavConfig).mockImplementation(async (value) => ({
@@ -52,9 +55,14 @@ afterEach(async () => {
   host.remove();
   vi.unstubAllGlobals();
 });
-const render = () =>
+const render = (withButton = false) =>
   act(async () => {
-    root.render(<WebDAVSyncSettings open />);
+    root.render(
+      <>
+        {withButton && <WebDAVSyncButton />}
+        <WebDAVSyncSettings open />
+      </>,
+    );
   });
 const input = (type: string) =>
   host.querySelector<HTMLInputElement>('input[type="' + type + '"]')!;
@@ -73,8 +81,23 @@ const click = (label: string) =>
       .find((button) => button.textContent?.trim() === label)!
       .click();
   });
+const toggle = () =>
+  act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        '[role="switch"][aria-label="同步当前书库"]',
+      )!
+      .click(),
+  );
 it("defaults to the current library and accepts custom intervals with suggestions", async () => {
-  await render();
+  await render(true);
+  expect(host.querySelector('input[type="email"]')).toBeNull();
+  expect(host.querySelector("[data-sync-state]")).toBeNull();
+  expect(
+    host.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+  ).toBe("false");
+  await toggle();
+  expect(api.saveWebdavConfig).not.toHaveBeenCalled();
   expect(input("number").disabled).toBe(false);
   expect(input("number").value).toBe("15");
   expect(host.textContent).toContain("NeoRead/论文库/");
@@ -96,6 +119,7 @@ it("defaults to the current library and accepts custom intervals with suggestion
     }),
   );
   expect(api.runWebdav).not.toHaveBeenCalled();
+  expect(host.querySelector("[data-sync-state]")).not.toBeNull();
 });
 it("uses the active independent library name without enabling other libraries", async () => {
   vi.stubGlobal("neoreadDesktop", {
@@ -108,6 +132,7 @@ it("uses the active independent library name without enabling other libraries", 
     }),
   });
   await render();
+  await toggle();
   expect(host.textContent).toContain("NeoRead/研究资料/");
   expect(api.saveWebdavConfig).not.toHaveBeenCalled();
 });
@@ -160,6 +185,7 @@ it("allows note conflicts to be deferred or kept together without forcing a dial
     phase: "scanning",
   });
   await render();
+  await toggle();
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   await click("选择版本");
   const dialogButton = (text: string) =>
@@ -190,14 +216,48 @@ it("offers a configured shared connection without enabling a different library",
     }),
   });
   await render();
+  expect(host.querySelector('input[type="email"]')).toBeNull();
+  expect(
+    host.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+  ).toBe("false");
+  await toggle();
   expect(input("email").value).toBe("reader@example.com");
   expect(host.textContent).toContain("NeoRead/研究资料/");
   expect(
     host.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
-  ).toBe("false");
+  ).toBe("true");
+  expect(api.saveWebdavConfig).not.toHaveBeenCalled();
   expect(
     [...host.querySelectorAll("button")].find(
       (button) => button.textContent?.trim() === "立即同步",
     )?.disabled,
   ).toBe(true);
+});
+
+it("turns off configured sync immediately and hides its credentials without deleting cloud data", async () => {
+  vi.mocked(api.webdavConfig).mockResolvedValue({
+    ...config,
+    account: "reader@example.com",
+    passwordSet: true,
+    enabled: true,
+  });
+  vi.mocked(api.disconnectWebdav).mockImplementation(async () => {
+    vi.mocked(api.webdavConfig).mockResolvedValue({
+      ...config,
+      account: "reader@example.com",
+      passwordSet: true,
+      libraryConfigured: false,
+    });
+  });
+  await render(true);
+  await toggle();
+  expect(api.disconnectWebdav).toHaveBeenCalledOnce();
+  expect(host.querySelector('input[type="email"]')).toBeNull();
+  expect(
+    host.querySelector("[data-sync-state]")?.getAttribute("data-sync-state"),
+  ).toBe("disabled");
+  await toggle();
+  expect(input("email").value).toBe("reader@example.com");
+  expect(input("password").value).toBe("");
+  expect(api.saveWebdavConfig).not.toHaveBeenCalled();
 });
