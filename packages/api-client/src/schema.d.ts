@@ -2477,7 +2477,7 @@ export interface paths {
                         context: string;
                         /** @description Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence. */
                         readingLocation?: components["schemas"]["DocumentLocation"];
-                        references?: {
+                        references?: ({
                             text: string;
                             /** @enum {unknown} */
                             kind?: "selection" | "section";
@@ -2488,7 +2488,11 @@ export interface paths {
                             contentHash?: string;
                             /** @enum {string} */
                             precision?: "page" | "block" | "paragraph";
-                        }[];
+                        } | {
+                            /** @constant */
+                            kind: "chat";
+                            text: string;
+                        })[];
                         /** @description Omission uses saved search settings. Explicit true requires those settings to permit search; false opts out. Saved questions retain their permission on regeneration. */
                         webSearch?: boolean;
                     };
@@ -4964,7 +4968,7 @@ export interface paths {
                         context: string;
                         /** @description Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence. */
                         readingLocation?: components["schemas"]["DocumentLocation"];
-                        references?: {
+                        references?: ({
                             text: string;
                             /** @enum {unknown} */
                             kind?: "selection" | "section";
@@ -4975,7 +4979,11 @@ export interface paths {
                             contentHash?: string;
                             /** @enum {string} */
                             precision?: "page" | "block" | "paragraph";
-                        }[];
+                        } | {
+                            /** @constant */
+                            kind: "chat";
+                            text: string;
+                        })[];
                         /** @description Omission uses saved search settings. Explicit true requires those settings to permit search; false opts out. Saved questions retain their permission on regeneration. */
                         webSearch?: boolean;
                     };
@@ -5412,7 +5420,7 @@ export interface components {
                 label: string;
                 caption?: string;
             }[];
-            references?: {
+            references?: ({
                 text: string;
                 /** @enum {unknown} */
                 kind?: "selection" | "section";
@@ -5423,7 +5431,11 @@ export interface components {
                 contentHash?: string;
                 /** @enum {string} */
                 precision?: "page" | "block" | "paragraph";
-            }[];
+            } | {
+                /** @constant */
+                kind: "chat";
+                text: string;
+            })[];
             /** @description Stable side chat session identity; omitted only by legacy clients. */
             sessionId?: string;
             /** @default false */
