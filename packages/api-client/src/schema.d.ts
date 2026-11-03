@@ -6310,6 +6310,8 @@ export interface components {
             targetText?: string;
             recovered?: boolean;
             wholeSentence?: boolean;
+            /** @description Explicit whole-sentence annotation shared by both reading panes */
+            bilingual?: boolean;
             matchedQuote?: string;
             sentenceIndexes: number[];
             start: number;
@@ -6321,6 +6323,8 @@ export interface components {
                 targetText?: string;
                 recovered?: boolean;
                 wholeSentence?: boolean;
+                /** @description Explicit whole-sentence annotation shared by both reading panes */
+                bilingual?: boolean;
                 matchedQuote?: string;
                 sentenceIndexes: number[];
                 start: number;

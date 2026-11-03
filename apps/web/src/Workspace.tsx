@@ -293,6 +293,9 @@ export function Workspace({
     if (!translationSelection) translationAnchor.current = undefined;
   }, [translationSelection]);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
+  const [hoveredSentence, setHoveredSentence] =
+    useState<ReaderSelection | null>(null);
+  const toolbarSelection = selection ?? hoveredSentence;
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const annotationSaving = useRef(false);
   const [noteSaving, setNoteSaving] = useState(false);
@@ -300,9 +303,11 @@ export function Workspace({
   const [annotationTarget, setAnnotationTarget] =
     useState<ReaderAnnotationTarget | null>(null);
   useEffect(() => {
-    if (!active || (!selection && !annotationTarget)) return;
+    if (!active || (!selection && !hoveredSentence && !annotationTarget))
+      return;
     const dismiss = () => {
       setSelection(null);
+      setHoveredSentence(null);
       setAnnotationTarget(null);
       adapter?.clearSelection();
     };
@@ -332,7 +337,7 @@ export function Workspace({
       document.removeEventListener("selectionchange", changed);
       window.removeEventListener("blur", dismiss);
     };
-  }, [active, selection, annotationTarget, adapter]);
+  }, [active, selection, hoveredSentence, annotationTarget, adapter]);
   const { deleting, remove: removeAnnotation } = useAnnotationDeletion(
     doc.id,
     (id) => {
@@ -766,7 +771,7 @@ export function Workspace({
     color = markColor,
   ) => {
     const written = kind === "note" || kind === "question";
-    const source = written ? noteSelection : selection;
+    const source = written ? noteSelection : toolbarSelection;
     const target =
       kind === "bookmark"
         ? (adapter?.getLocation() ??
@@ -797,6 +802,8 @@ export function Workspace({
               color,
             });
       setAnnotations((items) => applySavedAnnotation(items, a));
+      setHoveredSentence(null);
+      setSelection(null);
       adapter?.clearSelection();
       if (kind === "bookmark")
         toast.success("已添加书签", { id: "neoread-annotation-save" });
@@ -829,6 +836,7 @@ export function Workspace({
     ? activeAnnotation(annotations, annotationTarget.ids)
     : undefined;
   const selectAnnotation = (target: ReaderAnnotationTarget | null) => {
+    setHoveredSentence(null);
     if (target) setTranslationSelection(null);
     setHoveredAnnotation(null);
     setAnnotationTarget(target);
@@ -838,6 +846,7 @@ export function Workspace({
     selectionClipboard.annotation(annotation);
   };
   const selectText = (next: ReaderSelection | null) => {
+    setHoveredSentence(null);
     if (next) {
       setHoveredAnnotation(null);
       setTranslationSelection(null);
@@ -974,12 +983,13 @@ export function Workspace({
     });
   };
   const addQuote = () => {
-    if (selection) {
-      setQuotes((items) => [...items, selection].slice(-6));
+    if (toolbarSelection) {
+      setQuotes((items) => [...items, toolbarSelection].slice(-6));
       setRight(true);
       setRightTab("ai");
       adapter?.clearSelection();
       setSelection(null);
+      setHoveredSentence(null);
     }
   };
   const send = async (
@@ -1697,6 +1707,16 @@ export function Workspace({
                     zoom: onZoom,
                     location: saveLocation,
                     selection: selectText,
+                    sentenceHover: (next) =>
+                      setHoveredSentence(
+                        selection ||
+                          annotationTarget ||
+                          noteOpen ||
+                          translationSelection ||
+                          !active
+                          ? null
+                          : next,
+                      ),
                     annotation: selectAnnotation,
                     annotationHover: (target) =>
                       setHoveredAnnotation((current) =>
@@ -1717,7 +1737,7 @@ export function Workspace({
                 />
               );
             })()}
-            {!selection && annotationTarget && selectedAnnotation && (
+            {!toolbarSelection && annotationTarget && selectedAnnotation && (
               <AnnotationToolbar
                 annotation={selectedAnnotation}
                 anchor={annotationTarget.anchor}
@@ -1731,8 +1751,11 @@ export function Workspace({
               />
             )}
 
-            {selection?.anchor && (
-              <SelectionToolbar anchor={selection.anchor} pane={readingPane}>
+            {toolbarSelection?.anchor && (
+              <SelectionToolbar
+                anchor={toolbarSelection.anchor}
+                pane={readingPane}
+              >
                 <ColorSwatches
                   action="高亮"
                   onPick={(color) => {
@@ -1751,7 +1774,7 @@ export function Workspace({
                   onClick={() => {
                     setNoteKind("note");
                     setEditingAnnotation(null);
-                    setNoteSelection(selection);
+                    setNoteSelection(toolbarSelection);
                     setNote("");
                     setNoteOpen(true);
                     adapter?.clearSelection();
@@ -1764,7 +1787,7 @@ export function Workspace({
                   onClick={() => {
                     setNoteKind("question");
                     setEditingAnnotation(null);
-                    setNoteSelection(selection);
+                    setNoteSelection(toolbarSelection);
                     setNote("");
                     setNoteOpen(true);
                     adapter?.clearSelection();
@@ -1777,7 +1800,7 @@ export function Workspace({
                   onClick={() =>
                     void send(
                       "请解释这段文字的含义，区分原文结论与你的补充说明。",
-                      [selection],
+                      [toolbarSelection],
                     )
                   }
                 >
@@ -1790,14 +1813,15 @@ export function Workspace({
                   label="划词翻译"
                   onClick={() => {
                     translationAnchor.current =
-                      selection.anchor && readingPane.current
+                      toolbarSelection.anchor && readingPane.current
                         ? captureSelectionTranslationAnchor(
-                            selection.anchor,
+                            toolbarSelection.anchor,
                             readingPane.current,
                           )
                         : undefined;
-                    setTranslationSelection(selection);
+                    setTranslationSelection(toolbarSelection);
                     setSelection(null);
+                    setHoveredSentence(null);
                     adapter?.clearSelection();
                   }}
                 >
@@ -2102,7 +2126,9 @@ export function Workspace({
         onClose={() => setTranslationSelection(null)}
       />
       <AnnotationHoverCard
-        target={active && !selection && !noteOpen ? hoveredAnnotation : null}
+        target={
+          active && !toolbarSelection && !noteOpen ? hoveredAnnotation : null
+        }
         annotations={annotations}
         onEdit={editAnnotationNote}
       />

@@ -103,7 +103,7 @@ export function epubSentenceLocation(
   const slice = epubSentenceSlice(block, sentences, indexes);
   if (!slice) return block.location;
   const locator = JSON.parse(block.location.locator);
-  locator.locations.sourceSlice = slice;
+  locator.locations = { ...locator.locations, sourceSlice: slice };
   return {
     ...block.location,
     blockId: block.id,

@@ -1,5 +1,6 @@
 import { useTranslationRendering } from "./useTranslationRendering";
 import { useSentenceMarks } from "./useSentenceMarks";
+import { prepareSentenceAnnotation } from "./sentence-annotation";
 import { useTranslations } from "./useTranslations";
 import { readerLayout, updateReaderLayout } from "../neoread-layout";
 import {
@@ -558,6 +559,8 @@ export function EPUBReadingView({
                   setChapter(initial.href.split("#")[0]);
                 }
                 const overrides: Partial<ReaderAdapter> = {
+                  prepareAnnotation: async (value) =>
+                    prepareSentenceAnnotation(value),
                   goTo: go,
                   next: () => step(1),
                   previous: () => step(-1),

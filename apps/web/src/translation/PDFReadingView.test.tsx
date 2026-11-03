@@ -271,7 +271,7 @@ it("switches modes without recreating the PDF or marking the opposite selection"
   expect(host.querySelector(".translation-document")).toBeNull();
   expect(adapter.destroy).not.toHaveBeenCalled();
 });
-it("keeps the translated selection and navigation metadata without marking the original", async () => {
+it("keeps native translation selection local until saving a whole-sentence annotation", async () => {
   const highlights = new Map<string, Set<Range>>();
   vi.stubGlobal("CSS", { highlights });
   vi.stubGlobal(
@@ -329,7 +329,11 @@ it("keeps the translated selection and navigation metadata without marking the o
   const selected = fixture.ready!.getSelection()!;
   expect(selected.location.sentenceLink).toBeUndefined();
   const prepared = await fixture.ready!.prepareAnnotation!(selected);
-  expect(prepared.location.translation).toEqual(selected.location.translation);
+  expect(prepared.location.translation).toMatchObject(
+    selected.location.translation!,
+  );
+  expect(prepared.location.translation?.bilingual).toBe(true);
+  expect(prepared.location.translation?.ranges?.[0].bilingual).toBe(true);
   expect(prepared.location.sentenceLink).toBeUndefined();
   await click("取消同步效果");
   vi.mocked(adapter.focusBlock!).mockClear();

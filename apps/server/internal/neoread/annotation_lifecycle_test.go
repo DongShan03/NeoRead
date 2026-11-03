@@ -163,3 +163,45 @@ func TestManualMigrationPreservesUnmatchedLegacyAnnotations(t *testing.T) {
 		t.Fatal("unmatched note was altered")
 	}
 }
+
+func TestBilingualSentenceAnnotationKeepsOneIdentityThroughRecoveryAndRetranslation(t *testing.T) {
+	s, p, m := completedTranslationFixture(t)
+	a := scopedAnnotationFixture(t, s, m)
+	mark := recoveredMark(t, a)
+	for i := range mark.Ranges {
+		mark.Ranges[i].Bilingual = true
+	}
+	mark.translationMarkRange = mark.Ranges[0]
+	a.Location = json.RawMessage(jsonText(map[string]any{"type": "pdf", "page": 1, "translation": mark}))
+	if _, err := s.Store.DB.Exec("UPDATE annotations SET body=? WHERE id=?", jsonText(a), a.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		out := request(t, s, "POST", "/api/documents/doc/annotations/recover", strings.NewReader(`{"force":true}`))
+		if out.Code != 200 || !strings.Contains(out.Body.String(), `"checked":true`) {
+			t.Fatal(out.Code, out.Body.String())
+		}
+	}
+	if err := s.queueRetranslation(p, m, translationRunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	m.Blocks[0].ID = "p1-b99"
+	current := newTranslation(m.Blocks[0])
+	current.Status = "complete"
+	current.Sentences = []TranslationSentence{{Source: m.Blocks[0].Text, Target: "新的完整译文"}}
+	if err := s.saveTranslation("doc", current, m); err != nil {
+		t.Fatal(err)
+	}
+	var saved Annotation
+	if err := json.Unmarshal([]byte(storedAnnotationBody(t, s, a.ID)), &saved); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := s.Store.DB.QueryRow("SELECT count(*) FROM annotations WHERE document_id='doc'").Scan(&count); err != nil || count != 1 {
+		t.Fatal("shared note was split", count, err)
+	}
+	recovered := recoveredMark(t, saved)
+	if saved.ID != a.ID || saved.Note != a.Note || !recovered.Ranges[0].Bilingual || !recovered.Ranges[0].WholeSentence || recovered.Ranges[0].BlockID != "p1-b99" || recovered.Ranges[0].TargetText != "新的完整译文" {
+		t.Fatal("shared identity or anchor lost", saved, recovered)
+	}
+}

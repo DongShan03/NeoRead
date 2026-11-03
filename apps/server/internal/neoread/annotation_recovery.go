@@ -28,6 +28,7 @@ type translationMarkRange struct {
 	TargetText      string          `json:"targetText,omitempty"`
 	Recovered       bool            `json:"recovered,omitempty"`
 	WholeSentence   bool            `json:"wholeSentence,omitempty"`
+	Bilingual       bool            `json:"bilingual,omitempty"`
 	MatchedQuote    string          `json:"matchedQuote,omitempty"`
 }
 type translationMark struct {

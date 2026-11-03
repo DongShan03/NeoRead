@@ -8265,6 +8265,11 @@
                   "targetText": { "type": "string" },
                   "recovered": { "type": "boolean" },
                   "wholeSentence": { "type": "boolean" },
+                  "bilingual":
+                    {
+                      "type": "boolean",
+                      "description": "Explicit whole-sentence annotation shared by both reading panes",
+                    },
                   "matchedQuote": { "type": "string" },
                   "sentenceIndexes":
                     {
@@ -8296,6 +8301,11 @@
                               "targetText": { "type": "string" },
                               "recovered": { "type": "boolean" },
                               "wholeSentence": { "type": "boolean" },
+                              "bilingual":
+                                {
+                                  "type": "boolean",
+                                  "description": "Explicit whole-sentence annotation shared by both reading panes",
+                                },
                               "matchedQuote": { "type": "string" },
                               "sentenceIndexes":
                                 {

@@ -45,6 +45,7 @@ vi.mock("@neoread/api", () => ({
     })),
     recoverAnnotations: vi.fn(async () => ({ checked: true })),
     annotations: vi.fn(async () => []),
+    annotate: vi.fn(),
     annotationStream: vi.fn(async (_id, signal, callback) => {
       callback("revision");
       await new Promise<void>((resolve) =>
@@ -913,4 +914,67 @@ it("keeps chat quotations in the existing quote chips through sending and withdr
   expect(host.querySelector(".quote-chips")?.textContent).toContain(
     "first line",
   );
+});
+
+it("uses the existing toolbar to save a hovered sentence without a native selection", async () => {
+  await act(async () => render(0));
+  const selected: import("@neoread/core").ReaderSelection = {
+    text: "完整译文。",
+    anchor: { x: 30, top: 20, bottom: 40 },
+    location: {
+      type: "pdf",
+      page: 1,
+      translation: {
+        blockId: "p1-b1",
+        sourceHash: "hash",
+        sentenceIndexes: [0],
+        start: 0,
+        end: 0,
+        recovered: true,
+        wholeSentence: true,
+        bilingual: true,
+        sourceText: "Whole sentence.",
+      },
+    },
+  };
+  vi.mocked(api.annotate).mockResolvedValue({
+    id: "shared-sentence",
+    documentId: doc.id,
+    kind: "highlight",
+    color: "#e6b94c",
+    quote: selected.text,
+    note: "",
+    createdAt: "",
+    location: selected.location,
+  });
+  window.getSelection()!.removeAllRanges();
+  await act(async () => panels.readerEvents!.sentenceHover!(selected));
+  expect(
+    host.querySelector('.selection-bar [aria-label="添加批注"]'),
+  ).not.toBeNull();
+  await act(async () => document.dispatchEvent(new Event("selectionchange")));
+  expect(host.querySelector(".selection-bar")).not.toBeNull();
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        '.selection-bar [aria-label="黄色高亮"]',
+      )!
+      .click(),
+  );
+  expect(api.annotate).toHaveBeenCalledExactlyOnceWith(
+    doc.id,
+    expect.objectContaining({
+      quote: selected.text,
+      location: selected.location,
+    }),
+  );
+  expect(host.querySelector(".selection-bar")).toBeNull();
+  expect(window.getSelection()?.toString()).toBe("");
+  await act(async () => panels.readerEvents!.sentenceHover!(selected));
+  await act(async () =>
+    document.body.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true }),
+    ),
+  );
+  expect(host.querySelector(".selection-bar")).toBeNull();
 });

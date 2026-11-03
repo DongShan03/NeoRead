@@ -45,6 +45,8 @@ export type TranslationRecoveryAnchor = {
   targetText?: string;
   recovered?: boolean;
   wholeSentence?: boolean;
+  /** Explicit whole-sentence annotation, shared by the source and translation. */
+  bilingual?: boolean;
   matchedQuote?: string;
 };
 export type TranslationLocation = TranslationRecoveryAnchor & {
@@ -521,6 +523,8 @@ export interface ReaderEvents {
     bodyReadPosition?: number,
   ) => void;
   selection: (selection: ReaderSelection | null) => void;
+  /** Dwell preview for whole-sentence actions; does not change native selection. */
+  sentenceHover?: (selection: ReaderSelection | null) => void;
 }
 export interface ReaderAdapter {
   open(document: Document): Promise<void>;

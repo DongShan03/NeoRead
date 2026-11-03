@@ -56,6 +56,7 @@ import {
 } from "./translation-viewport";
 import { blockImageCache } from "./block-images";
 import { useSentenceMarks } from "./useSentenceMarks";
+import { prepareSentenceAnnotation } from "./sentence-annotation";
 import { translatedSelection as captureTranslationSelection } from "./selection";
 import { installTranslationSelectionHighlight } from "./selection-highlight";
 import { translationFont } from "../appearance";
@@ -612,12 +613,8 @@ export function PDFReadingView({
     facade.current = new Proxy(adapter, {
       get(target, key) {
         if (key === "prepareAnnotation")
-          return async (value: ReaderSelection) => {
-            if (value.location.type !== "pdf") return value;
-            // Keep navigation metadata, but never persist a cross-side mark.
-            const { sentenceLink: _, ...location } = value.location;
-            return { ...value, location };
-          };
+          return async (value: ReaderSelection) =>
+            prepareSentenceAnnotation(value);
         if (key === "goTo")
           return (l: DocumentLocation) => actions.current.go(l);
         if (key === "search")

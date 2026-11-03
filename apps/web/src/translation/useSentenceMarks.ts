@@ -9,9 +9,13 @@ import type {
   ReaderAdapter,
   ReaderEvents,
   ReaderAnnotationTarget,
+  ReaderSelection,
   SearchResult,
   TranslationBlock,
 } from "@neoread/core";
+import { sentenceAnchor } from "@neoread/core";
+import { hoveredSentenceSelection } from "./sentence-annotation";
+import { isSelectionToolbar } from "../readers/selection-anchor";
 import { translatedAnnotationRanges } from "./annotations";
 import { sourcePassage, translatedSentenceRanges } from "./sentence-links";
 import { blockRange, resolveEPUBLocation } from "../readers/epub-web-location";
@@ -32,7 +36,7 @@ const hit = (range: Range, x: number, y: number) =>
       y <= r.bottom,
   );
 
-/** Saved marks stay on their origin side; hover may still link sentences. */
+/** Partial marks stay local; explicitly complete sentences share one annotation. */
 export function useSentenceMarks(
   root: RefObject<HTMLDivElement | null>,
   engine: ReaderAdapter | undefined,
@@ -122,6 +126,11 @@ export function useSentenceMarks(
     let anchor: { x: number; y: number } | undefined;
     let activeRanges: Range[] = [];
     let activeAnnotationTarget: ReaderAnnotationTarget | null = null;
+    let activeSentence: ReaderSelection | null = null;
+    const sentence = (value: ReaderSelection | null) => {
+      activeSentence = value;
+      latest.current.events.sentenceHover?.(value);
+    };
     const cancelEnter = () => {
       clearTimeout(enterTimer);
       enterTimer = undefined;
@@ -137,6 +146,7 @@ export function useSentenceMarks(
         leaveTimer = undefined;
         activeRanges = [];
         activeAnnotationTarget = null;
+        sentence(null);
         hover.clear();
       }, 500);
     };
@@ -154,6 +164,7 @@ export function useSentenceMarks(
       cancelLeave();
       activeRanges = [];
       activeAnnotationTarget = null;
+      sentence(null);
       hover.clear(true);
     };
     const targetCache = new Map<string, Range[]>();
@@ -176,6 +187,39 @@ export function useSentenceMarks(
       names = [];
       marks = translatedAnnotationRanges(host, annotations, translations);
       for (const annotation of annotations) {
+        const translated = annotation.location.translation;
+        if (translated && annotation.kind !== "bookmark") {
+          for (const part of translated.ranges ?? [translated]) {
+            if (!part.bilingual || !part.wholeSentence || !part.sourceText)
+              continue;
+            const translation = translations.find(
+              (t) =>
+                t.blockId === part.blockId &&
+                t.sourceHash === part.sourceHash &&
+                t.status === "complete",
+            );
+            const normalize = (text: string) =>
+              text.replace(/[\s\u00ad]/g, "").toLowerCase();
+            if (
+              !translation ||
+              !part.sentenceIndexes.length ||
+              part.sentenceIndexes.some((i) => !translation.sentences[i]) ||
+              normalize(
+                part.sentenceIndexes
+                  .map((i) => sentenceAnchor(translation.sentences[i]))
+                  .join(""),
+              ) !== normalize(part.sourceText)
+            )
+              continue;
+            for (const index of part.sentenceIndexes)
+              marks.push(
+                ...sourceRanges(translation, index).map((range) => ({
+                  annotation,
+                  range,
+                })),
+              );
+          }
+        }
         if (
           annotation.location.type === "epub" &&
           !annotation.location.translation &&
@@ -452,8 +496,25 @@ export function useSentenceMarks(
         matches,
         activeRanges.flatMap((range) => Array.from(range.getClientRects())),
       );
-      if (matches.length) hover.clear(true);
-      else hover.show(`${t.blockId}:${index}:${fromTranslation}`, ranges);
+      if (matches.length) {
+        hover.clear(true);
+        sentence(null);
+      } else {
+        hover.show(`${t.blockId}:${index}:${fromTranslation}`, ranges);
+        const block = blocks.find((block) => block.id === t!.blockId);
+        sentence(
+          block
+            ? (hoveredSentenceSelection(
+                host,
+                block,
+                t,
+                index,
+                fromTranslation ? "translation" : "source",
+                activeRanges,
+              ) ?? null)
+            : null,
+        );
+      }
     };
     const move = (event: PointerEvent) => {
       if (event.buttons || window.getSelection()?.isCollapsed === false) {
@@ -509,6 +570,27 @@ export function useSentenceMarks(
       interruptHover();
       pressed =
         event.button === 0 ? { x: event.clientX, y: event.clientY } : undefined;
+    };
+    // The shared toolbar is a sibling of the reader. Keep the dwell preview
+    // alive while moving into it, and dismiss it on outside clicks or blur.
+    const outsideMove = (event: PointerEvent) => {
+      if (!pointer.current && !activeRanges.length) return;
+      if (activeSentence && isSelectionToolbar(event.target)) {
+        cancelLeave();
+        return;
+      }
+      if (!host.contains(event.target as Node)) clearHover();
+    };
+    const outsideDown = (event: PointerEvent) => {
+      if (!pointer.current && !activeRanges.length) return;
+      if (
+        !host.contains(event.target as Node) &&
+        !isSelectionToolbar(event.target)
+      )
+        interruptHover();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") interruptHover();
     };
     const click = (event: MouseEvent) => {
       const start = pressed;
@@ -569,6 +651,10 @@ export function useSentenceMarks(
     host.addEventListener("pointerdown", down, true);
     host.addEventListener("click", click, true);
     host.addEventListener("scroll", interruptHover, true);
+    document.addEventListener("pointermove", outsideMove);
+    document.addEventListener("pointerdown", outsideDown, true);
+    document.addEventListener("keydown", escape);
+    window.addEventListener("blur", interruptHover);
     return () => {
       observer.disconnect();
       resize.disconnect();
@@ -580,8 +666,13 @@ export function useSentenceMarks(
       host.removeEventListener("pointerdown", down, true);
       host.removeEventListener("click", click, true);
       host.removeEventListener("scroll", interruptHover, true);
+      document.removeEventListener("pointermove", outsideMove);
+      document.removeEventListener("pointerdown", outsideDown, true);
+      document.removeEventListener("keydown", escape);
+      window.removeEventListener("blur", interruptHover);
       repaint.current = undefined;
       latest.current.events.annotationHover?.(null);
+      sentence(null);
       hover.destroy();
       names.forEach((name) => registry.delete(name));
       registry.delete(searchName);

@@ -54,6 +54,7 @@ const events = {
   selection: vi.fn(),
   annotation: vi.fn(),
   annotationHover: vi.fn(),
+  sentenceHover: vi.fn(),
 };
 let host: HTMLDivElement, root: Root;
 const registry = new Map<string, Set<Range>>();
@@ -176,6 +177,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   events.annotation.mockClear();
   events.annotationHover.mockClear();
+  events.sentenceHover.mockClear();
   window.getSelection()?.removeAllRanges();
 });
 const hover = () =>
@@ -591,4 +593,90 @@ it("segments untranslated EPUB source and rejects mismatched translation anchors
   );
   await pointer("[data-sentence]", "pointermove", 205);
   expect(texts(hover())).toEqual(["翻译句子。"]);
+});
+
+it.each([
+  [false, "source"],
+  [false, "translation"],
+  [true, "source"],
+  [true, "translation"],
+] as const)(
+  "offers a whole-sentence action and shares one saved note on both sides (EPUB: %s, origin: %s)",
+  async (epub, origin) => {
+    await act(async () => root.render(<App epub={epub} />));
+    const source = epub ? "[data-epub-run]" : "[data-source]";
+    await pointer(
+      origin === "source" ? source : "[data-sentence]",
+      "pointermove",
+      origin === "source" ? 5 : 205,
+    );
+    const selected = events.sentenceHover.mock
+      .lastCall?.[0] as import("@neoread/core").ReaderSelection;
+    expect(selected?.text).toBe(
+      origin === "source" ? "Original sentence." : "翻译句子。",
+    );
+    expect(selected.location.translation).toMatchObject({
+      wholeSentence: true,
+      bilingual: true,
+    });
+    expect(window.getSelection()?.toString()).toBe("");
+    const annotation: Annotation = {
+      id: "shared-note",
+      documentId: "doc",
+      kind: "note",
+      color: "#e6b94c",
+      quote: selected.text,
+      note: "同一条批注",
+      createdAt: "",
+      location: selected.location,
+    };
+    await act(async () =>
+      root.render(<App epub={epub} annotations={[annotation]} />),
+    );
+    const marks = [...registry.entries()].filter(([name]) =>
+      name.includes("-highlight-"),
+    );
+    expect(marks.flatMap(([, ranges]) => texts(ranges)).sort()).toEqual(
+      ["Original sentence.", "翻译句子。"].sort(),
+    );
+    for (const [selector, x] of [
+      [source, 5],
+      ["[data-sentence]", 205],
+    ] as const) {
+      await pointer(selector, "pointerdown", x);
+      await pointer(selector, "click", x);
+      expect(events.annotation).toHaveBeenLastCalledWith(
+        expect.objectContaining({ ids: ["shared-note"] }),
+      );
+    }
+  },
+);
+
+it("keeps the dwell toolbar alive while entering it and clears it on outside actions", async () => {
+  await act(async () => root.render(<App />));
+  const toolbar = document.createElement("div");
+  toolbar.className = "selection-bar";
+  document.body.append(toolbar);
+  try {
+    await pointer("[data-sentence]", "pointermove", 205);
+    expect(events.sentenceHover.mock.lastCall?.[0]).toBeTruthy();
+    await pointer("[data-sentence]", "pointerleave", 205);
+    await act(async () => {
+      toolbar.dispatchEvent(new MouseEvent("pointermove", { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(events.sentenceHover.mock.lastCall?.[0]).toBeTruthy();
+    await act(async () =>
+      document.body.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true }),
+      ),
+    );
+    expect(events.sentenceHover).toHaveBeenLastCalledWith(null);
+    expect(hover()).toBeUndefined();
+    await pointer("[data-sentence]", "pointermove", 205);
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(events.sentenceHover).toHaveBeenLastCalledWith(null);
+  } finally {
+    toolbar.remove();
+  }
 });
