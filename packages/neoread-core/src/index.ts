@@ -942,6 +942,15 @@ export type {
 } from "./proxy-settings";
 export type { UpdateProgress } from "./update-progress";
 export type { CommandLineStatus } from "./command-line";
+export {
+  webdavIntervals,
+  webdavBusy,
+  type WebDAVConfig,
+  type WebDAVConfigInput,
+  type WebDAVStatus,
+  type WebDAVConflict,
+  type WebDAVVariant,
+} from "./webdav-sync";
 
 export interface ChatRun {
   id: string;

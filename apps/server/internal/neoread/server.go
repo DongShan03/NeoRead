@@ -30,6 +30,7 @@ import (
 )
 
 type Server struct {
+	webdav                 webdavState
 	libraryArchiveMu       sync.RWMutex
 	startupSettings        json.RawMessage
 	processingReady        <-chan struct{}
@@ -131,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/library/archive/export", s.exportLibraryHTTP)
 	mux.HandleFunc("POST /api/library/archive/import", s.importLibraryHTTP)
+	s.registerWebDAV(mux)
 	mux.HandleFunc("GET /api/documents", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.Store.Documents()
 		if e != nil {

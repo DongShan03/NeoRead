@@ -284,6 +284,40 @@ export const api = {
     >("/api/connector/status"),
   connectorRevision: () =>
     request<{ revision: number }>("/api/connector/revision"),
+  webdavConfig: () =>
+    request<import("@neoread/core").WebDAVConfig>("/api/sync/webdav/config"),
+  saveWebdavConfig: (config: import("@neoread/core").WebDAVConfigInput) =>
+    request<import("@neoread/core").WebDAVConfig>("/api/sync/webdav/config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+  disconnectWebdav: () =>
+    request<void>("/api/sync/webdav/config", { method: "DELETE" }),
+  testWebdav: (config: import("@neoread/core").WebDAVConfigInput) =>
+    request<{ ok: boolean }>("/api/sync/webdav/test", {
+      method: "POST",
+      body: JSON.stringify(config),
+    }),
+  webdavStatus: () =>
+    request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/status"),
+  runWebdav: () =>
+    request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/run", {
+      method: "POST",
+    }),
+  cancelWebdav: () =>
+    request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/cancel", {
+      method: "POST",
+    }),
+  applyWebdav: (token: string) =>
+    request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/apply", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  resolveWebdav: (key: string, conflict: string, version: string) =>
+    request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/resolve", {
+      method: "POST",
+      body: JSON.stringify({ key, conflict, version }),
+    }),
   snapshotStatus: (id: string) =>
     request<{ available: boolean; sourceUrl?: string }>(
       `/api/documents/${encodeURIComponent(id)}/snapshot`,

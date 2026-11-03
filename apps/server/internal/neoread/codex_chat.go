@@ -190,6 +190,7 @@ func (a codexChatAdapter) Stream(ctx context.Context, req GenerateRequest, emit 
 	})
 }
 func (s *Server) Close() {
+	s.stopWebDAV()
 	s.documentMu.Lock()
 	s.documentClosed = true
 	var tasks []*documentTask

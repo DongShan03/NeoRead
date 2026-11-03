@@ -180,6 +180,7 @@ func main() {
 	runContext, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
 	context.AfterFunc(runContext, runtimeenv.Default.Stop)
+	server.StartWebDAV(runContext)
 	stopProcessing := server.StartProcessingAsync(runContext)
 	defer func() { cancelRun(); runtimeenv.Default.Stop(); stopProcessing() }()
 	if !*connector {
