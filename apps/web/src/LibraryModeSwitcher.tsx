@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { LibraryCatalogSnapshot } from "../../../packages/neoread-core/src/library-archive";
@@ -6,6 +6,14 @@ import { Input } from "@neoread/ui/components/input";
 import { doubleClickWindow } from "./DetailSheet";
 import type { LibraryMode } from "@neoread/core";
 import { Button } from "@neoread/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@neoread/ui/components/dialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -35,6 +43,8 @@ export function LibraryModeSwitcher({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("论文库");
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saving = useRef(false);
   const canceled = useRef(false);
@@ -73,6 +83,17 @@ export function LibraryModeSwitcher({
       saving.current = false;
     }
   };
+  const create = async () => {
+    if (busy || !desktop?.createLibrary || !newName.trim()) return;
+    setBusy(true);
+    try {
+      if (await desktop.createLibrary(newName.trim())) setCreating(false);
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   if (editing)
     return (
       <Input
@@ -96,89 +117,150 @@ export function LibraryModeSwitcher({
       />
     );
   return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={(next, details) => {
-        if (next)
-          void desktop
-            ?.libraryCatalog?.()
-            .then(setCatalog)
-            .catch((error) => toast.error(error.message));
-        clearTimeout(timer.current);
-        if (
-          next &&
-          active &&
-          details.reason === "trigger-press" &&
-          details.event instanceof MouseEvent
-        )
-          timer.current = setTimeout(() => setOpen(true), doubleClickWindow);
-        else setOpen(next);
-      }}
-    >
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            className="library-mode-trigger"
-            aria-label={`切换书库，当前为${name}`}
-            disabled={busy}
-            title={active ? "双击重命名" : undefined}
-            onDoubleClick={(event) => {
-              if (!active || !desktop?.renameLibrary) return;
-              event.preventDefault();
-              clearTimeout(timer.current);
-              setOpen(false);
-              canceled.current = false;
-              setDraft(name);
-              setEditing(true);
-            }}
-          />
-        }
+    <>
+      <DropdownMenu
+        open={open}
+        onOpenChange={(next, details) => {
+          if (next)
+            void desktop
+              ?.libraryCatalog?.()
+              .then(setCatalog)
+              .catch((error) => toast.error(error.message));
+          clearTimeout(timer.current);
+          if (
+            next &&
+            active &&
+            details.reason === "trigger-press" &&
+            details.event instanceof MouseEvent
+          )
+            timer.current = setTimeout(() => setOpen(true), doubleClickWindow);
+          else setOpen(next);
+        }}
       >
-        <span className="min-w-0 truncate">{name}</span>
-        <ChevronDown className="size-4 text-muted-foreground" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-60">
-        {catalog?.libraries.map((entry) => (
-          <DropdownMenuItem
-            key={entry.id}
-            disabled={busy}
-            onClick={() => {
-              if (entry.id === catalog.activeId) return;
-              setBusy(true);
-              void desktop
-                ?.switchLibrary?.(entry.id)
-                .catch((error) => toast.error(error.message))
-                .finally(() => setBusy(false));
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              className="library-mode-trigger"
+              aria-label={`切换书库，当前为${name}`}
+              disabled={busy}
+              title={active ? "双击重命名" : undefined}
+              onDoubleClick={(event) => {
+                if (!active || !desktop?.renameLibrary) return;
+                event.preventDefault();
+                clearTimeout(timer.current);
+                setOpen(false);
+                canceled.current = false;
+                setDraft(name);
+                setEditing(true);
+              }}
+            />
+          }
+        >
+          <span className="min-w-0 truncate">{name}</span>
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-60">
+          {catalog?.libraries.map((entry) => (
+            <DropdownMenuItem
+              key={entry.id}
+              disabled={busy}
+              onClick={() => {
+                if (entry.id === catalog.activeId) return;
+                setBusy(true);
+                void desktop
+                  ?.switchLibrary?.(entry.id)
+                  .catch((error) => toast.error(error.message))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              {entry.id === catalog.activeId && <Check className="size-4" />}
+            </DropdownMenuItem>
+          ))}
+          {desktop?.createLibrary && (
+            <DropdownMenuItem
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                setNewName("论文库");
+                setCreating(true);
+              }}
+            >
+              <Plus className="size-4" />
+              新建书库
+            </DropdownMenuItem>
+          )}
+          {(!!catalog?.libraries.length || !!desktop?.createLibrary) && (
+            <DropdownMenuSeparator />
+          )}
+          {(Object.keys(libraryModes) as LibraryMode[]).map((key) => (
+            <DropdownMenuItem
+              key={key}
+              className="library-mode-item"
+              onClick={() => onChange(key)}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm">
+                  {catalog
+                    ? key === "papers"
+                      ? "论文"
+                      : "图书"
+                    : libraryModes[key].label}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {libraryModes[key].description}
+                </span>
+              </span>
+              {key === mode && <Check className="size-4" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog
+        open={creating}
+        onOpenChange={(value) => {
+          if (!busy) setCreating(value);
+        }}
+      >
+        <DialogContent>
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void create();
             }}
           >
-            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            {entry.id === catalog.activeId && <Check className="size-4" />}
-          </DropdownMenuItem>
-        ))}
-        {!!catalog?.libraries.length && <DropdownMenuSeparator />}
-        {(Object.keys(libraryModes) as LibraryMode[]).map((key) => (
-          <DropdownMenuItem
-            key={key}
-            className="library-mode-item"
-            onClick={() => onChange(key)}
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm">
-                {catalog
-                  ? key === "papers"
-                    ? "论文"
-                    : "图书"
-                  : libraryModes[key].label}
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                {libraryModes[key].description}
-              </span>
-            </span>
-            {key === mode && <Check className="size-4" />}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            <DialogHeader>
+              <DialogTitle>新建书库</DialogTitle>
+              <DialogDescription>
+                新书库独立保存，默认关闭同步。
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              aria-label="书库名称"
+              autoFocus
+              maxLength={80}
+              value={newName}
+              disabled={busy}
+              onChange={(event) => setNewName(event.target.value)}
+            />
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setCreating(false)}
+              >
+                取消
+              </Button>
+              <Button type="submit" disabled={busy || !newName.trim()}>
+                {busy ? "正在创建…" : "创建并切换"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

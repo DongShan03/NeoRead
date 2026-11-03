@@ -56,6 +56,7 @@ let archiveTransfer: ReturnType<typeof vi.fn>;
 let archivePrepare: ReturnType<typeof vi.fn>;
 let archiveDownload: ReturnType<typeof vi.fn>;
 let catalogRemember: ReturnType<typeof vi.fn>;
+let catalogAllocate: ReturnType<typeof vi.fn>;
 const event = () => ({
   sender: window.webContents,
   senderFrame: window.webContents.mainFrame,
@@ -161,6 +162,11 @@ beforeEach(async ({ task }) => {
     prepareLibraryArchive: archivePrepare,
   }));
   catalogRemember = vi.fn(async () => {});
+  catalogAllocate = vi.fn(async () => ({
+    id: "imported",
+    name: "archive",
+    directory: "/userdata/libraries/imported",
+  }));
   vi.doMock("./library-catalog", () => ({
     LibraryCatalog: class {
       cachedName = () => "论文库";
@@ -175,11 +181,7 @@ beforeEach(async ({ task }) => {
           },
         ],
       }));
-      allocate = vi.fn(async () => ({
-        id: "imported",
-        name: "archive",
-        directory: "/userdata/libraries/imported",
-      }));
+      allocate = catalogAllocate;
       remember = catalogRemember;
       rename = vi.fn();
     },
@@ -274,6 +276,7 @@ beforeEach(async ({ task }) => {
   }));
   vi.doMock("node:child_process", () => ({ spawn: serverSpawn }));
   vi.doMock("node:fs/promises", () => ({
+    mkdir: vi.fn(async () => {}),
     readFile: vi.fn(),
     realpath: vi.fn(async (path: string) => path),
     lstat: async () => {
@@ -1185,4 +1188,47 @@ it("acknowledges a discarded note warning and continues closing without a retry 
       buttons: ["知道了"],
     }),
   );
+});
+
+it("creates an empty local library through the saved-state switch path without an archive or cloud connection", async () => {
+  const old = window;
+  old.webContents.send.mockClear();
+  const creating = handlers.get("neoread:create-library")!(event(), "研究库");
+  await vi.waitFor(() =>
+    expect(old.webContents.send).toHaveBeenCalledWith("neoread:flush"),
+  );
+  expect(catalogAllocate).toHaveBeenCalledWith("/old/library", "研究库");
+  expect(saveLocation).not.toHaveBeenCalled();
+  ipc.emit("neoread:flushed", event(), null);
+  expect(await creating).toBe(true);
+  expect(serverSpawn.mock.calls[1][1]).toEqual(
+    expect.arrayContaining(["--data", importedEntry.directory]),
+  );
+  expect(saveLocation).toHaveBeenCalledWith(
+    "/userdata",
+    importedEntry.directory,
+  );
+  expect(catalogRemember).toHaveBeenCalledWith(importedEntry);
+  expect(catalogRemember.mock.invocationCallOrder[0]).toBeLessThan(
+    loadURL.mock.invocationCallOrder.at(-1)!,
+  );
+  expect(archivePrepare).not.toHaveBeenCalled();
+  expect(app.relaunch).not.toHaveBeenCalled();
+});
+
+it("preserves the current library and pending reading state when a new library cannot finish saving", async () => {
+  const old = window;
+  old.webContents.send.mockClear();
+  const creating = handlers.get("neoread:create-library")!(event(), "研究库");
+  const rejected = expect(creating).rejects.toThrow("save failed");
+  await vi.waitFor(() =>
+    expect(old.webContents.send).toHaveBeenCalledWith("neoread:flush"),
+  );
+  ipc.emit("neoread:flushed", event(), "save failed");
+  await rejected;
+  expect(stop).not.toHaveBeenCalled();
+  expect(saveLocation).not.toHaveBeenCalled();
+  expect(catalogRemember).not.toHaveBeenCalled();
+  expect(old.isDestroyed()).toBe(false);
+  expect(old.setEnabled).toHaveBeenLastCalledWith(true);
 });

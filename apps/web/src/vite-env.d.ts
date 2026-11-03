@@ -28,6 +28,7 @@ interface Window {
       import("../../../packages/neoread-core/src/library-archive").LibraryCatalogSnapshot
     >;
     switchLibrary?: (id: string) => Promise<boolean>;
+    createLibrary?: (name: string) => Promise<boolean>;
     renameLibrary?: (
       id: string,
       name: string,

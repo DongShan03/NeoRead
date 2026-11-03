@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld("neoreadDesktop", {
   restart: () => proxyRequest("neoread:restart"),
   libraryLocation: () => proxyRequest("neoread:library-location"),
   libraryCatalog: () => proxyRequest("neoread:library-catalog"),
+  createLibrary: (name: string) => proxyRequest("neoread:create-library", name),
   switchLibrary: (id: string) => proxyRequest("neoread:switch-library", id),
   renameLibrary: (id: string, name: string) =>
     proxyRequest("neoread:rename-library", id, name),

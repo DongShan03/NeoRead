@@ -131,6 +131,10 @@ API 厂商规则、实际强度映射、上游错误分类和请求关联字段�
 
 Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history-visibility.md)。`codex.history.visibility_applied` 只记录隐藏状态、已处理和失败数量；`archive_failed / visibility_failed` 只记录固定错误类别。不记录线程日志、原始 RPC 错误、凭据或聊天正文。
 
+## 本地书库新建
+
+新建书库沿用 `library.switch_started / switch_stage / switch_completed / switch_failed` 的保存、停止旧服务、连接和加载阶段；分配目录或切换失败另记 `library.create_failed`，只含固定错误类别，不记录书库名称或路径。
+
 ## 坚果云同步
 
 `sync.started / stage / finished` 用 `taskId` 关联一轮同步，终态记录耗时并区分完成、待选择冲突、失败和取消。阶段包括扫描、下载、等待渲染端保存、应用和上传；限流终态使用 `errorCode=rate_limited`，后续遵守上游 `Retry-After`。

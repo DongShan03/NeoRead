@@ -14,7 +14,7 @@ import {
 import { spawn, type ChildProcess } from "node:child_process";
 import { join, resolve, basename } from "node:path";
 import { createInterface } from "node:readline";
-import { readFile, realpath, lstat } from "node:fs/promises";
+import { readFile, realpath, lstat, mkdir } from "node:fs/promises";
 import {
   libraryDirectory,
   migrateLibrary,
@@ -32,6 +32,7 @@ import {
 import { flushLibraryWindow } from "./library-flush";
 import {
   libraryArchiveFilename,
+  uniqueLibraryName,
   type LibraryEntry,
 } from "../../../packages/neoread-core/src/library-archive";
 import { LibraryCatalog } from "./library-catalog";
@@ -1125,6 +1126,9 @@ app
         activeLibrary = destination;
         stage("connect");
         await startServer(connection);
+        // Register the requested name before the new renderer asks for its
+        // catalog; otherwise ensure() can register the UUID directory as a name.
+        if (entry) await libraryCatalog.remember(entry);
         stage("runtime");
         await refreshDesktopRuntime!();
         stage("window");
@@ -1132,7 +1136,6 @@ app
         stage("save");
         locationChanged = true;
         await saveLibraryDirectory(app.getPath("userData"), destination);
-        if (entry) await libraryCatalog.remember(entry);
         diagnostics?.logs.record("desktop", {
           level: "info",
           event: "library.switch_completed",
@@ -1200,6 +1203,34 @@ app
     ipcMain.handle("neoread:library-catalog", (event) => {
       settingsSender(event);
       return libraryCatalog.list(activeLibrary || "");
+    });
+    ipcMain.handle("neoread:create-library", async (event, name: unknown) => {
+      settingsSender(event);
+      if (typeof name !== "string") throw new Error("书库名称无效");
+      const label = uniqueLibraryName(name, []);
+      if (choosingLibrary || closing || restartRequested || librarySwitching)
+        return false;
+      if (recoveryServer || !activeLibrary)
+        throw new Error("请先通过恢复页面切换书库。");
+      choosingLibrary = true;
+      try {
+        const entry = await libraryCatalog.allocate(activeLibrary, label);
+        return await switchLibrary(
+          entry.directory,
+          () => mkdir(entry.directory),
+          false,
+          entry,
+        );
+      } catch (error) {
+        diagnostics?.logs.record("desktop", {
+          level: "error",
+          event: "library.create_failed",
+          errorCode: "create",
+        });
+        throw error;
+      } finally {
+        choosingLibrary = false;
+      }
     });
     ipcMain.handle(
       "neoread:rename-library",
