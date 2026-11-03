@@ -270,10 +270,10 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 		for key, entry := range manifest.Entries {
 			candidates[key] = syncCandidates(candidates[key], entry)
 			state.Clock.include(entry.Clock)
+			if entry.Deleted {
+				continue
+			}
 			for _, file := range entry.Body.Files {
-				if entry.Deleted {
-					continue
-				}
 				for _, chunk := range file.Chunks {
 					state.Uploaded[chunk.Hash] = true
 				}
