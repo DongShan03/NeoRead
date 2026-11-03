@@ -8,8 +8,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"neoread.local/server/internal/runtimeenv"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -263,8 +263,12 @@ func streamPiChat(ctx context.Context, c APIConnection, req completionRequest, i
 				return GenerateResult{}, generationError(ErrorProtocol, "会话记录不一致，历史已保留")
 			}
 		}
-		current := *in.Chat
-		current.History = history
+		// Flatten only prompt data; the live chat owns its tool mutex and state.
+		current := chatInput{
+			History: history, Title: in.Chat.Title, Question: in.Chat.Question,
+			Summary: in.Chat.Summary, CurrentText: in.Chat.CurrentText,
+			ReadingLocation: in.Chat.ReadingLocation,
+		}
 		request.Prompt = current.legacyPrompt() + readingLocationPrompt(current.ReadingLocation)
 		request.Entries = state.PiEntries
 		in.Chat.piConversation = &state
