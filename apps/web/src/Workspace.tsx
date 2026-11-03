@@ -151,7 +151,7 @@ import { PaperNote } from "./PaperNote";
 import { ExportDocumentDialog } from "./ExportDocumentDialog";
 import { EPUBReadingView } from "./translation/EPUBReadingView";
 import { PDFReadingView } from "./translation/PDFReadingView";
-import { useReaderStore } from "./store";
+import { refreshAIConfig, useReaderStore } from "./store";
 import { useShallow } from "zustand/react/shallow";
 import { scheduleProgress, flushProgress } from "./progress";
 import { Slider } from "@neoread/ui/components/slider";
@@ -204,10 +204,9 @@ export function Workspace({
   onBack: () => void;
   onSettings: () => void;
 }) {
-  const { aiConfig, setAIConfig, aiModelSaving } = useReaderStore(
+  const { aiConfig, aiModelSaving } = useReaderStore(
     useShallow((state) => ({
       aiConfig: state.aiConfig,
-      setAIConfig: state.setAIConfig,
       aiModelSaving: state.aiModelSaving,
     })),
   );
@@ -596,18 +595,13 @@ export function Workspace({
   }, [composerKey]);
   useEffect(() => {
     let alive = true;
-    void api
-      .aiConfig()
-      .then((config) => {
-        if (alive) setAIConfig(config);
-      })
-      .catch((error) => {
-        if (alive) toast.error(error.message);
-      });
+    void refreshAIConfig().catch((error) => {
+      if (alive) toast.error(error.message);
+    });
     return () => {
       alive = false;
     };
-  }, [setAIConfig]);
+  }, []);
   const emptySession = useMemo(() => new ChatSession(doc.id), [doc.id]);
   const session = currentSession
     ? getChatSession(doc.id, currentSession.id)

@@ -167,6 +167,35 @@ const button = (text: string) =>
   [...document.querySelectorAll("button")].find(
     (el) => el.textContent?.trim() === text,
   )!;
+
+it("keeps newer model settings when the initial config response arrives late", async () => {
+  let finish!: (config: Awaited<ReturnType<typeof api.aiConfig>>) => void;
+  vi.mocked(api.aiConfig).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => render(0));
+  const newer: Awaited<ReturnType<typeof api.aiConfig>> = {
+    primary: "claude",
+    models: { claude: "new-model" },
+    capabilities: {},
+    api: { url: "", model: "", hasKey: false },
+    textAPI: { url: "", model: "", hasKey: false },
+    imageAPI: { url: "", model: "", hasKey: false },
+  };
+  await act(async () => useReaderStore.getState().setAIConfig(newer));
+  await act(async () =>
+    finish({
+      ...newer,
+      primary: "codex",
+      models: { codex: "old-model" },
+    }),
+  );
+  expect(useReaderStore.getState().aiConfig).toBe(newer);
+});
+
 beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
@@ -193,6 +222,7 @@ beforeEach(() => {
 });
 
 it("updates the active outline heading when reading moves within one PDF page", async () => {
+  vi.useFakeTimers();
   vi.mocked(api.blocks).mockResolvedValueOnce(
     [0.1, 0.7].map((y, i) => ({
       id: `heading-${i}`,
@@ -203,6 +233,8 @@ it("updates the active outline heading when reading moves within one PDF page", 
     })),
   );
   await act(async () => render(0));
+  // Settle the initial annotation snapshot before measuring scroll renders.
+  await act(async () => vi.advanceTimersByTimeAsync(100));
   const heading = (name: string) =>
     host.querySelector<HTMLElement>(`[aria-label="目录：${name}"]`)!;
   await act(async () =>
