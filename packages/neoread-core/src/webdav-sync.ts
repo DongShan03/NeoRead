@@ -1,5 +1,6 @@
 export interface WebDAVConfig {
   libraryConfigured?: boolean;
+  readonly remoteId?: string;
   account: string;
   folder: string;
   deviceName: string;
