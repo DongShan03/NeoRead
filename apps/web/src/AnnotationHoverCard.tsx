@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Annotation, ReaderAnnotationTarget } from "@neoread/core";
-import { Pencil } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@neoread/ui/components/button";
 import {
   Popover,
@@ -12,10 +12,14 @@ export function AnnotationHoverCard({
   target,
   annotations,
   onEdit,
+  onDelete,
+  deleting,
 }: {
   target: ReaderAnnotationTarget | null;
   annotations: Annotation[];
   onEdit: (annotation: Annotation) => void;
+  onDelete: (id: string) => void;
+  deleting?: ReadonlySet<string>;
 }) {
   const [shown, setShown] = useState<ReaderAnnotationTarget | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -107,20 +111,29 @@ export function AnnotationHoverCard({
               key={annotation.id}
               className="border-b pb-2 last:border-0 last:pb-0"
             >
-              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start whitespace-pre-wrap break-words p-0 text-left text-sm font-normal leading-relaxed"
+                aria-label="编辑批注内容"
+                disabled={deleting?.has(annotation.id)}
+                onClick={() => {
+                  close();
+                  onEdit(annotation);
+                }}
+              >
                 {annotation.note}
-              </p>
+              </Button>
               <div className="mt-1 flex justify-end">
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label="编辑批注"
+                  aria-label="删除批注"
+                  disabled={deleting?.has(annotation.id)}
                   onClick={() => {
-                    close();
-                    onEdit(annotation);
+                    onDelete(annotation.id);
                   }}
                 >
-                  <Pencil className="size-3.5" />
+                  <Trash2 className="size-3.5" />
                 </Button>
               </div>
             </div>

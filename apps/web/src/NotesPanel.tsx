@@ -8,7 +8,6 @@ import {
   Download,
   Link,
   Loader2,
-  Pencil,
   Search,
   Sparkles,
   StickyNote,
@@ -133,19 +132,6 @@ function NoteCard({
             (a.answerId ? " · 已回答" : a.resolved ? " · 已解决" : "")}
         </Badge>
         <span className="flex items-center">
-          {a.kind !== "bookmark" && !editing && (
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label={question ? "编辑问题" : "编辑批注"}
-              onClick={() => {
-                setDraft(a.note);
-                setEditing(true);
-              }}
-            >
-              <Pencil />
-            </Button>
-          )}
           <Button
             size="icon-xs"
             variant="ghost"
@@ -207,6 +193,19 @@ function NoteCard({
             </Button>
           </div>
         </div>
+      ) : a.kind !== "bookmark" ? (
+        <Button
+          variant="ghost"
+          className="h-auto w-full justify-start whitespace-pre-wrap break-words text-left text-sm font-normal"
+          aria-label={question ? "编辑问题" : "编辑批注"}
+          disabled={deleting}
+          onClick={() => {
+            setDraft(a.note);
+            setEditing(true);
+          }}
+        >
+          {a.note || "添加批注…"}
+        </Button>
       ) : (
         a.note && <p>{a.note}</p>
       )}

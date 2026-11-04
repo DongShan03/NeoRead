@@ -2132,6 +2132,8 @@ export function Workspace({
         }
         annotations={annotations}
         onEdit={editAnnotationNote}
+        onDelete={(id) => void removeAnnotation(id)}
+        deleting={deleting}
       />
       <LinkPreviewPanel
         key={`link-preview-${doc.id}`}
@@ -2155,6 +2157,8 @@ export function Workspace({
       )}
       <Dialog
         open={active && noteOpen}
+        modal={false}
+        disablePointerDismissal
         onOpenChange={(open) => {
           if (noteSaving) return;
           setNoteOpen(open);
@@ -2164,7 +2168,11 @@ export function Workspace({
           }
         }}
       >
-        <DialogContent>
+        <DialogContent
+          showOverlay={false}
+          finalFocus={false}
+          className="w-80 gap-3"
+        >
           <DialogHeader>
             <DialogTitle>
               {noteKind === "question"
@@ -2181,7 +2189,7 @@ export function Workspace({
                 : "为当前选区添加批注"}
             </DialogDescription>
           </DialogHeader>
-          <blockquote className="note-preview">
+          <blockquote className="note-preview max-h-24 overflow-y-auto">
             {noteSelection && (
               <AnnotationQuote
                 quote={noteSelection.text}

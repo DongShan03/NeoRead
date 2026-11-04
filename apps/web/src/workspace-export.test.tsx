@@ -169,6 +169,74 @@ const button = (text: string) =>
     (el) => el.textContent?.trim() === text,
   )!;
 
+it("keeps a non-modal annotation draft open while reading elsewhere and saves against its original selection", async () => {
+  await act(async () => render(0));
+  const selected = {
+    text: "Original sentence.",
+    location: { type: "pdf" as const, page: 1, y: 0.2 },
+    anchor: { x: 30, top: 20, bottom: 40 },
+  };
+  await act(async () => panels.readerEvents!.selection(selected));
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        '.selection-bar [aria-label="添加批注"]',
+      )!
+      .click(),
+  );
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.getAttribute("aria-modal")).not.toBe("true");
+  expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+  const field = dialog.querySelector<HTMLTextAreaElement>("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!.call(field, "Keep this draft");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const outside = document.createElement("button");
+  const clicked = vi.fn();
+  outside.addEventListener("click", clicked);
+  host.append(outside);
+  await act(async () => {
+    outside.focus();
+    outside.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, button: 0 }),
+    );
+    outside.click();
+    panels.readerEvents!.selection({
+      ...selected,
+      text: "Another sentence.",
+      location: { type: "pdf", page: 2 },
+    });
+  });
+  expect(clicked).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(outside);
+  expect(document.querySelector('[role="dialog"] textarea')).toBe(field);
+  expect(field.value).toBe("Keep this draft");
+  vi.mocked(api.annotate).mockResolvedValueOnce({
+    id: "new-note",
+    documentId: doc.id,
+    kind: "note",
+    quote: selected.text,
+    location: selected.location,
+    note: "Keep this draft",
+    color: "#e6b94c",
+    createdAt: "2026-11-04",
+  });
+  await act(async () => button("保存批注").click());
+  expect(api.annotate).toHaveBeenCalledWith(
+    doc.id,
+    expect.objectContaining({
+      quote: selected.text,
+      location: selected.location,
+      note: "Keep this draft",
+    }),
+  );
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
 it("keeps newer model settings when the initial config response arrives late", async () => {
   let finish!: (config: Awaited<ReturnType<typeof api.aiConfig>>) => void;
   vi.mocked(api.aiConfig).mockImplementationOnce(

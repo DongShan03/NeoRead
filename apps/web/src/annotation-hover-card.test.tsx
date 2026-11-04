@@ -13,6 +13,7 @@ const annotations = [
   { id: "b", note: "第二条批注" },
 ] as Annotation[];
 const edit = vi.fn();
+const remove = vi.fn();
 let root: Root, host: HTMLDivElement;
 const render = async (
   value: ReaderAnnotationTarget | null,
@@ -20,7 +21,12 @@ const render = async (
 ) => {
   await act(async () =>
     root.render(
-      <AnnotationHoverCard target={value} annotations={notes} onEdit={edit} />,
+      <AnnotationHoverCard
+        target={value}
+        annotations={notes}
+        onEdit={edit}
+        onDelete={remove}
+      />,
     ),
   );
   await act(async () => {
@@ -38,6 +44,7 @@ beforeEach(() => {
     },
   );
   edit.mockClear();
+  remove.mockClear();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -56,13 +63,24 @@ it("shows all notes without stealing focus and edits the chosen note", async () 
   expect(document.body.textContent).toContain("具体批注内容");
   expect(document.body.textContent).toContain("第二条批注");
   expect(document.activeElement).not.toBe(
-    document.querySelector('[aria-label="编辑批注"]'),
+    document.querySelector('[aria-label="编辑批注内容"]'),
   );
   const buttons = document.querySelectorAll<HTMLButtonElement>(
-    '[aria-label="编辑批注"]',
+    '[aria-label="编辑批注内容"]',
   );
   await act(async () => buttons[1].click());
   expect(edit).toHaveBeenCalledExactlyOnceWith(annotations[1]);
+  expect(remove).not.toHaveBeenCalled();
+});
+
+it("deletes only the chosen note without opening its editor", async () => {
+  await render(target);
+  const buttons = document.querySelectorAll<HTMLButtonElement>(
+    '[aria-label="删除批注"]',
+  );
+  await act(async () => buttons[1].click());
+  expect(remove).toHaveBeenCalledExactlyOnceWith("b");
+  expect(edit).not.toHaveBeenCalled();
 });
 it("allows crossing into the card and closes after leaving", async () => {
   await render(target);
