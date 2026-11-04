@@ -281,6 +281,18 @@ func applySyncRecords(ctx context.Context, tx *sql.Tx, key string, before, after
 	if before == nil {
 		before = emptySyncDocument()
 	}
+	for recordKey, record := range before.Records {
+		if !strings.HasPrefix(recordKey, "chat/") || syncHash(record["messages"]) == syncHash(after.Records[recordKey]["messages"]) {
+			continue
+		}
+		// Provider continuations are device-local. A replaced transcript must
+		// resume from its newly saved messages rather than replay an old thread.
+		session := strings.TrimPrefix(recordKey, "chat/")
+		prefix := "session:" + session + ":"
+		if _, err := tx.ExecContext(ctx, "DELETE FROM document_conversations WHERE document_id=? AND substr(provider,1,?)=?", strings.TrimPrefix(key, "document/"), len(prefix), prefix); err != nil {
+			return err
+		}
+	}
 	// Deletions run children-first; transcript changes replace one session's
 	// ordered messages as a unit, never all conversations in a document.
 	order := slices.Clone(syncTables)
