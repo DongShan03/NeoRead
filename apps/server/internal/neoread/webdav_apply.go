@@ -192,8 +192,26 @@ func execSyncRow(ctx context.Context, tx *sql.Tx, name string, schema syncTable,
 			var old, sections map[string]json.RawMessage
 			_ = json.Unmarshal([]byte(previous), &old)
 			_ = json.Unmarshal([]byte(fmtSyncString(row["value"])), &sections)
+			shared, err := sharedPreferenceScope(ctx, tx)
+			if err != nil {
+				return err
+			}
+			var original map[string]any
+			if shared && previous != "" && json.Unmarshal([]byte(previous), &original) != nil {
+				return errors.New("本地书库设置无效")
+			}
 			for key := range sections {
 				delete(old, key)
+			}
+			if shared {
+				body, _ := json.Marshal(old)
+				local := map[string]any{}
+				_ = json.Unmarshal(body, &local)
+				if local == nil {
+					local = map[string]any{}
+				}
+				body, _ = json.Marshal(mergeApplicationPreference("preferences:library", local, globalPreference("preferences:library", original)))
+				_ = json.Unmarshal(body, &old)
 			}
 			if len(old) > 0 {
 				body, _ := json.Marshal(old)

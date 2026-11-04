@@ -776,6 +776,19 @@ func TestWebDAVLibraryOrganizationDoesNotOverrideApplicationDisplayPreferences(t
 	if papers["showAuthors"] != false || papers["categories"].([]any)[0] != "共享分类" {
 		t.Fatal("sync overwrote machine display settings or lost organization", papers)
 	}
+	if err := a.saveApplicationPreference("preferences:library", map[string]any{"papers": map[string]any{"showAuthors": true}}); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	runSync(t, b)
+	prefs, err = readPreference(b.Store.DB, "preferences:library")
+	if err != nil {
+		t.Fatal(err)
+	}
+	papers = prefs["papers"].(map[string]any)
+	if _, exists := papers["categories"]; exists || papers["showAuthors"] != false {
+		t.Fatal("remote organization deletion lost app-wide display settings", papers)
+	}
 }
 func TestWebDAVRemoteFolderFollowsRenameAndOtherDevicesDiscoverIt(t *testing.T) {
 	remote, directory := testDAV(t)
