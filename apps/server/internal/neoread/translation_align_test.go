@@ -10,7 +10,9 @@ import (
 func sentencesJSON(sources ...string) string {
 	sentences := []TranslationSentence{}
 	for _, source := range sources {
-		sentences = append(sentences, TranslationSentence{Source: source, Target: "译文。"})
+		for _, part := range translationSentenceParts(source) {
+			sentences = append(sentences, TranslationSentence{Source: strings.TrimSpace(part), Target: "译文。"})
+		}
 	}
 	data, _ := json.Marshal(map[string]any{"sentences": sentences})
 	return string(data)
