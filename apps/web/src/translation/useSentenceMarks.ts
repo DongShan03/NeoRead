@@ -692,7 +692,11 @@ export function useSentenceMarks(
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ["data-neoread-math"],
+      attributeFilter: [
+        "data-neoread-math",
+        "data-neoread-math-token",
+        "data-neoread-math-alias",
+      ],
     });
     const resize = new PDFResizeObserver(host, paint, interruptHover);
     repaint.current = paint;

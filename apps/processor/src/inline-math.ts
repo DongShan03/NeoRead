@@ -9,6 +9,9 @@ const accents: Record<string, string> = {
 };
 const tex = (text: string) =>
   Array.from(text, (letter) => {
+    if (letter === "{") return String.raw`\{`;
+    if (letter === "}") return String.raw`\}`;
+    if (letter === "⨆") return String.raw`\bigsqcup `;
     if (/[𝐀-𝐳]/u.test(letter)) return `\\mathbf{${letter.normalize("NFKD")}}`;
     if (/[𝒜-𝒵ℬℰℱℋℐℒℳℛ]/u.test(letter))
       return `\\mathcal{${letter.normalize("NFKD")}}`;
@@ -100,6 +103,29 @@ function mathText(spans: TextSpan[]) {
 /** Prose baselines define lines; small scripts and overlapping accents belong
  * to those lines rather than being sorted into adjacent sentences. */
 export function joinInlineText(spans: TextSpan[]) {
+  // Overprinted footnote symbols can produce duplicate PDF text items. Keep
+  // genuinely repeated adjacent glyphs; remove only the same overlapping item.
+  const seen = new Map<string, TextSpan[]>();
+  spans = spans.filter((span) => {
+    if (!span.math || !/^[*∗†‡]$/.test(span.text)) return true;
+    const previous = seen.get(span.text) ?? [];
+    const tolerance = span.fontSize! * 0.03;
+    if (
+      previous.some(
+        (s) =>
+          s.math &&
+          Math.abs(s.fontSize! - span.fontSize!) < tolerance &&
+          Math.abs(s.bounds.x - span.bounds.x) < tolerance &&
+          Math.abs(s.bounds.y - span.bounds.y) < tolerance &&
+          Math.abs(s.bounds.width - span.bounds.width) < tolerance &&
+          Math.abs(s.bounds.height - span.bounds.height) < tolerance,
+      )
+    )
+      return false;
+    previous.push(span);
+    seen.set(span.text, previous);
+    return true;
+  });
   const weighted = [...spans].sort((a, b) => a.fontSize! - b.fontSize!);
   const total = weighted.reduce((sum, s) => sum + s.text.length, 0);
   let weight = 0;
@@ -137,7 +163,49 @@ export function joinInlineText(spans: TextSpan[]) {
       const flush = () => {
         if (math.length) parts.push(mathText(math.splice(0)));
       };
-      for (const span of line.spans.sort((a, b) => a.bounds.x - b.bounds.x)) {
+      const ordered = line.spans.sort((a, b) => a.bounds.x - b.bounds.x);
+      for (let i = 0; i < ordered.length; i++) {
+        const span = ordered[i],
+          parent = ordered[i - 1];
+        if (
+          parent &&
+          !parent.math &&
+          /\p{L}{2}/u.test(parent.text) &&
+          span.fontSize! < parent.fontSize! * 0.85 &&
+          span.baseline! < parent.baseline! - parent.fontSize! * 0.07 &&
+          parent.baseline! - span.baseline! < parent.fontSize! * 0.65 &&
+          span.bounds.x - parent.bounds.x - parent.bounds.width <=
+            parent.fontSize! * 0.5 &&
+          span.bounds.x - parent.bounds.x - parent.bounds.width >=
+            -parent.fontSize! * 0.35 &&
+          /^[\d*∗†‡,]+$/.test(span.text)
+        ) {
+          flush();
+          let marker = span.text;
+          while (i + 1 < ordered.length) {
+            const next = ordered[i + 1],
+              last = ordered[i];
+            if (
+              !/^[\d*∗†‡,]+$/.test(next.text) ||
+              Math.abs(next.baseline! - span.baseline!) >
+                span.fontSize! * 0.1 ||
+              Math.abs(next.fontSize! - span.fontSize!) >
+                span.fontSize! * 0.1 ||
+              next.bounds.x - last.bounds.x - last.bounds.width >
+                span.fontSize! * 0.5
+            )
+              break;
+            marker += next.text;
+            i++;
+          }
+          marker = marker
+            .replace(/∗/g, "*")
+            .replace(/†/g, "\\dagger ")
+            .replace(/‡/g, "\\ddagger ")
+            .trim();
+          parts[parts.length - 1] += `$^{${marker}}$`;
+          continue;
+        }
         const script = line.spans.some((parent) => {
           const gap = span.bounds.x - parent.bounds.x - parent.bounds.width;
           return (

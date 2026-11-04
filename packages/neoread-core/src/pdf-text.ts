@@ -24,3 +24,10 @@ export function pdfFontHeight(style?: { ascent?: number; descent?: number }) {
     ? Math.max(1, pdfFontAscent(style) - descent)
     : 1;
 }
+
+// OMX/CMEX slot 0x46 is the large square-union operator, not a Latin F.
+export function pdfMathOperator(text: string, fontName: string) {
+  return /^CMEX\d+$/i.test(fontName.replace(/^[A-Z]{6}\+/, "")) && text === "F"
+    ? "⨆"
+    : undefined;
+}

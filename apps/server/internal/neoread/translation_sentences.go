@@ -9,14 +9,21 @@ import (
 )
 
 var sentenceAbbreviation = regexp.MustCompile(`(?i)(?:\bet al\.|\be\.g\.|\bi\.e\.|\b(?:fig|eq|sec|vol|no|vs|app)\.)$`)
-var mathDecoration = regexp.MustCompile(`\\(bar|overline|hat|widehat|tilde|widetilde|dot|ddot|mathcal|mathbb|mathbf)\b`)
+var mathDecoration = regexp.MustCompile(`\\(bar|overline|hat|widehat|tilde|widetilde|dot|ddot|mathcal|mathbb|mathbf|bigsqcup|sqcup|sum|dagger|ddagger)`)
 
 func matchingMathDecorations(source, target string) bool {
 	counts := func(text string) map[string]int {
 		result := map[string]int{}
-		for _, match := range mathDecoration.FindAllStringSubmatch(text, -1) {
-			name := match[1]
+		text = strings.NewReplacer("⨆", `\sqcup`, "⊔", `\sqcup`, "∑", `\sum`, "†", `\dagger`, "‡", `\ddagger`).Replace(text)
+		for _, match := range mathDecoration.FindAllStringSubmatchIndex(text, -1) {
+			// TeX control words end before _, ^ or braces, but not before another letter.
+			if match[3] < len(text) && (text[match[3]] >= 'a' && text[match[3]] <= 'z' || text[match[3]] >= 'A' && text[match[3]] <= 'Z') {
+				continue
+			}
+			name := text[match[2]:match[3]]
 			switch name {
+			case "bigsqcup":
+				name = "sqcup"
 			case "overline":
 				name = "bar"
 			case "widehat":

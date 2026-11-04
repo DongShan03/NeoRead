@@ -1,6 +1,7 @@
 import {
   pdfFontAscent,
   pdfFontHeight,
+  pdfMathOperator,
 } from "../../../packages/neoread-core/src/pdf-text";
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { TextSpan } from "./layout";
@@ -29,10 +30,12 @@ export async function extractTextSpans(
     const h = Math.hypot(transform[2], transform[3]);
     const ascent = pdfFontAscent(content.styles[item.fontName]);
     const font = (fonts.get(item.fontName) ?? "").replace(/^[A-Z]{6}\+/, "");
+    const operator = pdfMathOperator(item.str, font);
     return [
       {
         text: mathFontText(item.str, fonts.get(item.fontName) ?? ""),
-        baseline: transform[5] / height,
+        // CMEX large-operator glyph origins sit 0.75 em above the prose baseline.
+        baseline: (transform[5] + (operator ? h * 0.75 : 0)) / height,
         fontSize: h / height,
         math:
           /^(?:CMMI|CMSY|MSBM|CMEX)\d+$/i.test(font) ||
@@ -55,6 +58,8 @@ const doubleStruck = Array.from("𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃�
 // These TeX symbol fonts encode mathematical alphabets as ASCII capitals.
 // Only restore the known font encodings; ordinary prose and math italic stay intact.
 export function mathFontText(text: string, fontName: string) {
+  const operator = pdfMathOperator(text, fontName);
+  if (operator) return operator;
   const name = fontName.replace(/^[A-Z]{6}\+/, "");
   if (/^CMEX\d+$/i.test(name) && /^[b-g]$/.test(text))
     return text <= "d" ? "ˆ" : "˜";

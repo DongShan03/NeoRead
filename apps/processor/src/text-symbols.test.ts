@@ -11,6 +11,8 @@ it("preserves TeX mathematical alphabets without changing ordinary italic letter
   expect(mathFontText("e", "YIEXCM+CMEX10")).toBe("˜");
   expect(mathFontText("c", "YIEXCM+CMEX10")).toBe("ˆ");
   expect(mathFontText("Text", "Times-Roman")).toBe("Text");
+  expect(mathFontText("F", "OXAILR+CMEX10")).toBe("⨆");
+  expect(mathFontText("F", "CMMI10")).toBe("F");
 });
 
 it("reads a CMSY font through PDF.js before assigning its extracted T to prose", async () => {

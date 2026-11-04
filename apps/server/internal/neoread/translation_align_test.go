@@ -38,6 +38,20 @@ func TestScientificAbbreviationsDoNotRejectAlreadySentenceWiseTranslations(t *te
 	}
 }
 
+func TestTranslationPreservesSquareUnionAndFootnoteSymbols(t *testing.T) {
+	for _, pair := range [][2]string{
+		{`Let $q=\bigsqcup_j q_j$.`, `令 $q=\sum_j q_j$。`},
+		{`Author$^{1\ddagger}$`, `Author$^{1\dagger\dagger}$`},
+	} {
+		if matchingMathDecorations(pair[0], pair[1]) {
+			t.Fatal("different mathematical symbols accepted", pair)
+		}
+	}
+	if !matchingMathDecorations(`Let $q=\bigsqcup_j q_j$.`, `令 $q=\sqcup_j q_j$。`) {
+		t.Fatal("equivalent square-union notation was rejected")
+	}
+}
+
 func TestJailBoundLegacyParagraphRestoresSentencePairs(t *testing.T) {
 	body, err := os.ReadFile("../../../web/src/readers/fixtures/jailbound-sentence-alignment.json")
 	if err != nil {

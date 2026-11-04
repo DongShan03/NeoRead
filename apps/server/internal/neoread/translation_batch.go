@@ -77,6 +77,7 @@ func translationPrompt(doc Document, m translationInput, batch translationBatch,
 blockId 和 sourceHash 必须与同一个输入段落严格对应。不能合并、拆分或遗漏段落。sentences 按顺序完整覆盖该段 source，不能改写措辞、增补或遗漏原文；一句原文可以对应多句中文。保留术语、数值、公式和代码。图题仅翻译图题，不补写图表或图片内部内容。
 sentences 数组的每一项只能包含一句原文及该句译文；禁止把多句原文或整个段落合在同一项中。缩写、引用和小数中的句点不是分句边界。
 原文已经提供的 LaTeX 公式须保持结构：不丢失均值横线、帽号、波浪号或数学字体，不增添上下标，不将一个变量的上下标转移到其他变量。
+保留原文运算符的含义，例如 \bigsqcup 不能改写为 \sum。作者脚注中的数字和 *、\dagger、\ddagger 合并到同一个上标片段，例如 $^{1*}$、$^{1\dagger}$；不要拆成相邻的多个 $...$ 片段，不要把一个 \ddagger 改为两个 \dagger。
 ` + sourceRule + `
 译文 target 中的行内数学（变量、下标、上标、集合、运算符等）一律写成 KaTeX 可解析的 LaTeX，用 $...$ 包裹，例如 $T_i$、$MVSG(s, \ll)$、$O(n\log n)$。原文中被提取打散的下标（如 "𝑇 … 𝑖"）在能确定时还原为 $T_i$；不确定时照抄原文符号，不要猜。保留数学字母的字体语义，例如 𝒯、ℝ 分别写成 $\mathcal{T}$、$\mathbb{R}$，不能简化为普通 T、R。不要使用 Unicode 数学斜体或上下标字符代替 LaTeX。普通文本中的美元符号写成 \$。不要输出 $$ 独立公式：独立公式块已由公式图片单独转换。字符串在 JSON 中，反斜杠必须转义：\ll 写作 \\ll，\$ 写作 \\$。sentences.source 仍按原文复制，不写成 LaTeX。
 字符串内部的换行必须写为 JSON 转义，物理换行仅用于分隔完整 JSON 对象。标题、作者、frontMatter、contextBefore、contextAfter 仅为参考上下文，不为它们额外输出行。只翻译 paragraphs 列出的段落。

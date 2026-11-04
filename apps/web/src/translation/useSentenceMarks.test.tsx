@@ -27,6 +27,11 @@ vi.mock("./sentence-hover", () => ({
 }));
 import { useSentenceMarks } from "./useSentenceMarks";
 import { sentenceLink } from "./sentence-links";
+import midas from "../../../processor/src/fixtures/midas-sentence-math.json";
+import {
+  sentenceTextRanges,
+  sentenceMathOffsets,
+} from "../readers/pdf-sentence-matching";
 const t: TranslationBlock = {
   blockId: "p1-b1",
   sourceHash: "hash",
@@ -282,6 +287,100 @@ it("highlights both sentence texts in either direction, clears on drag, and keep
   expect(window.getSelection()?.toString()).toBe("");
   await pointer("[data-sentence]", "pointerdown", 210, 1);
   expect(hover()).toBeUndefined();
+});
+
+it("paints the reported MIDAS sentence on both sides with one annotation", async () => {
+  let native = "";
+  const math = new Set<number>(),
+    glyphs = new Set<string>();
+  for (const span of midas.spans)
+    for (const c of span.text.toLowerCase()) {
+      if (/\s/.test(c)) continue;
+      if (span.math) {
+        math.add(native.length);
+        glyphs.add(c);
+      }
+      native += span.math && span.text === "F" ? "⨆" : c;
+    }
+  const normalize = (text: string) => text.toLowerCase().replace(/\s/g, "");
+  const previous = engine.sentenceRanges;
+  engine.sentenceRanges = (passages) => {
+    const text = host.querySelector("[data-source]")!.firstChild!;
+    if (text.textContent !== native) return [];
+    return passages.flatMap((passage) =>
+      sentenceTextRanges(
+        native,
+        normalize(midas.legacy),
+        passage.sources.map(normalize),
+        passage.sourceOffset,
+        {
+          text: math,
+          block: sentenceMathOffsets(midas.legacy, glyphs),
+          sources: passage.sources.map((s) => sentenceMathOffsets(s, glyphs)),
+          operatorGlyphs: new Set(["f"]),
+        },
+      ).map(({ start, end }) => {
+        const range = document.createRange();
+        range.setStart(text, start);
+        range.setEnd(text, end);
+        return range;
+      }),
+    );
+  };
+  try {
+    const translation = {
+      ...t,
+      sentences: [{ source: midas.sentence, target: "翻译句子。" }],
+    };
+    const annotation: Annotation = {
+      id: "midas",
+      documentId: "doc",
+      kind: "highlight",
+      quote: "翻译句子。",
+      note: "",
+      color: "#ffcc66",
+      createdAt: "",
+      location: {
+        type: "pdf",
+        page: 1,
+        translation: {
+          blockId: t.blockId,
+          sourceHash: t.sourceHash,
+          sentenceIndexes: [0],
+          wholeSentence: true,
+          bilingual: true,
+          sourceText: midas.sentence,
+          start: 0,
+          end: 5,
+        },
+      },
+    };
+    await act(async () =>
+      root.render(
+        <App
+          translations={[translation]}
+          sourceBlocks={[{ ...blocks[0], text: midas.legacy }]}
+          annotations={[annotation]}
+        />,
+      ),
+    );
+    await act(async () => {
+      host.querySelector("[data-source]")!.textContent = native;
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const mark = [...registry.entries()].find(([name]) =>
+      name.includes("-highlight-"),
+    )!;
+    expect(texts(mark[1])).toContain("翻译句子。");
+    expect(
+      texts(mark[1]).some(
+        (text) => text.startsWith("formally,let") && text.endsWith("."),
+      ),
+    ).toBe(true);
+    expect(texts(mark[1])).toHaveLength(2);
+  } finally {
+    engine.sentenceRanges = previous;
+  }
 });
 it("keeps legacy translated marks single-sided regardless of hover association", async () => {
   const annotation: Annotation = {

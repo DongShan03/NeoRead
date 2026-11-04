@@ -1,0 +1,474 @@
+{
+  "spans": [
+    {
+      "text": "Threat model.",
+      "baseline": 0.569425505050505,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529374,
+        "y": 0.5607459671717172,
+        "width": 0.10008180522875816,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "We assume a black-box or gray-box adversary who cannot access",
+      "baseline": 0.569425505050505,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.2870521924836598,
+        "y": 0.5608969156565656,
+        "width": 0.4428636160130723,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "Θ",
+      "baseline": 0.569425505050505,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.7358087189542476,
+        "y": 0.560695651010101,
+        "width": 0.012661618104575162,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "or internal",
+      "baseline": 0.569425505050505,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.7543469687581692,
+        "y": 0.5608969156565656,
+        "width": 0.06918472222222224,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "activations but can query the model and observe outputs. The adversary may alter text",
+      "baseline": 0.5832626262626263,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529374,
+        "y": 0.5747340368686868,
+        "width": 0.5664682267973855,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "t",
+      "baseline": 0.5832626262626263,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.7474480310457505,
+        "y": 0.5745327722222222,
+        "width": 0.005878259575163399,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": ", supply or",
+      "baseline": 0.5832626262626263,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.7533262906209139,
+        "y": 0.5747340368686868,
+        "width": 0.07021028398692805,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "replace images",
+      "baseline": 0.5970997474747475,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529374,
+        "y": 0.5885711580808081,
+        "width": 0.09768882777777779,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "i",
+      "baseline": 0.5970997474747475,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.2787337470588233,
+        "y": 0.5883698934343434,
+        "width": 0.005608032189542484,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": ", or use surrogate models for offline selection. Prior work often embeds malicious",
+      "baseline": 0.5970997474747475,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.2843417792483658,
+        "y": 0.5885711580808081,
+        "width": 0.5391850281045754,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "semantics into a single modality, which is easily flagged by detectors. In contrast, we distribute risk",
+      "baseline": 0.6109368686868687,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529374,
+        "y": 0.6024082792929293,
+        "width": 0.6470643584967314,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "across multiple visual items and the text channel, ensuring each component is innocuous on its own",
+      "baseline": 0.6247739898989899,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529374,
+        "y": 0.6162454005050505,
+        "width": 0.6470643584967314,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "while the fused representation reconstructs the forbidden intent. Formally, let",
+      "baseline": 0.6386111111111111,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529374,
+        "y": 0.6300825217171717,
+        "width": 0.5050810297385623,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "{",
+      "baseline": 0.6386111111111111,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.6858166526143782,
+        "y": 0.6291768308080808,
+        "width": 0.00813937908496732,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "i",
+      "baseline": 0.6386111111111111,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.6939560316993455,
+        "y": 0.6298812570707071,
+        "width": 0.005608032189542484,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "k",
+      "baseline": 0.6404974747474749,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.6995718954248362,
+        "y": 0.6343865944444445,
+        "width": 0.006920243039215685,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "}",
+      "baseline": 0.6386111111111111,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.7075816993464048,
+        "y": 0.6291768308080808,
+        "width": 0.00813937908496732,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "n",
+      "baseline": 0.6340454545454546,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.7157205882352937,
+        "y": 0.6279345742424243,
+        "width": 0.008047218235294118,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "k",
+      "baseline": 0.6421729797979798,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.7157205882352937,
+        "y": 0.6360620994949495,
+        "width": 0.006920243039215685,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "=1",
+      "baseline": 0.6421729797979798,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.7229143136274505,
+        "y": 0.6360620994949495,
+        "width": 0.01648300931372549,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "be an image",
+      "baseline": 0.6386111111111111,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.7444787581699343,
+        "y": 0.6300825217171717,
+        "width": 0.07904964967320263,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "sequence and",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529374,
+        "y": 0.6439196429292929,
+        "width": 0.0872378650326797,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "{",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.2677781428104572,
+        "y": 0.6430139520202021,
+        "width": 0.00813937908496732,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "q",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.2759175218954245,
+        "y": 0.6437183782828283,
+        "width": 0.007266837647058823,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "j",
+      "baseline": 0.6543345959595961,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.28318464052287545,
+        "y": 0.6482237156565658,
+        "width": 0.005386462843137254,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "}",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.29004411764705845,
+        "y": 0.6430139520202021,
+        "width": 0.00813937908496732,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "m",
+      "baseline": 0.6478825757575758,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.2981830065359473,
+        "y": 0.6417716954545455,
+        "width": 0.011551210882352942,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "j",
+      "baseline": 0.6557222222222223,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.2981830065359473,
+        "y": 0.6496113419191921,
+        "width": 0.005386462843137254,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "=1",
+      "baseline": 0.6557222222222223,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.30423038506535915,
+        "y": 0.6496113419191921,
+        "width": 0.01648300931372549,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "fragments of",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.32559477124182973,
+        "y": 0.6439196429292929,
+        "width": 0.08272864901960782,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "q",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.41239310980392124,
+        "y": 0.6437183782828283,
+        "width": 0.007266837647058823,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "with",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.4243156722875814,
+        "y": 0.6439196429292929,
+        "width": 0.028943632026143792,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "q",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.4573289938562087,
+        "y": 0.6437183782828283,
+        "width": 0.007266837647058823,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "=",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.4696910828104571,
+        "y": 0.6437183782828283,
+        "width": 0.012661618104575162,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "F",
+      "baseline": 0.643013888888889,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.48688235294117604,
+        "y": 0.6425107272727273,
+        "width": 0.013565089183006536,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "j",
+      "baseline": 0.6562222222222223,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.5004477124183003,
+        "y": 0.6501113419191921,
+        "width": 0.005386462843137254,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "q",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": true,
+      "bounds": {
+        "x": 0.5100196078431369,
+        "y": 0.6437183782828283,
+        "width": 0.007266837647058823,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "j",
+      "baseline": 0.6543345959595962,
+      "fontSize": 0.00880530303030303,
+      "math": true,
+      "bounds": {
+        "x": 0.517287581699346,
+        "y": 0.6482237156565659,
+        "width": 0.005386462843137254,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": ". We construct",
+      "baseline": 0.6524482323232323,
+      "fontSize": 0.012579040404040405,
+      "math": false,
+      "bounds": {
+        "x": 0.524147058823529,
+        "y": 0.6439196429292929,
+        "width": 0.09415633725490201,
+        "height": 0.012579040404040405
+      }
+    }
+  ],
+  "legacy": "Threat model. We assume a black-box or gray-box adversary who cannot access Θ or internal activations but can query the model and observe outputs. The adversary may alter text t , supply or replace images i , or use surrogate models for offline selection. Prior work often embeds malicious semantics into a single modality, which is easily flagged by detectors. In contrast, we distribute risk across multiple visual items and the text channel, ensuring each component is innocuous on its own while the fused representation reconstructs the forbidden intent. Formally, let ${i_{k}}^{n}$ be an image Fk=1 sequence and ${q_{j}}_{j=1}^{m}$ fragments of q with $q=_{j}q_{j}$ . We construct",
+  "sentence": "Formally, let ${i_{k}}^{n}$ be an image Fk=1 sequence and ${q_{j}}_{j=1}^{m}$ fragments of q with $q=_{j}q_{j}$ ."
+}

@@ -8,6 +8,7 @@ import {
   sentenceTextRanges,
   sentenceMathOffsets,
 } from "./pdf-sentence-matching";
+import { pdfMathOperator } from "../../../../packages/neoread-core/src/pdf-text";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFViewer } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { isPDFPageDecoration, sentenceAnchor } from "@neoread/core";
@@ -491,6 +492,11 @@ export class PDFReadingNavigation {
         (/^CMBX\d+$/i.test(name) && Array.from(item.str).length === 1)
       )
         divs[index].setAttribute("data-neoread-math", "");
+      if (/^CMR\d+$/i.test(name) && /^[\d˜ˆ¯˙¨=+()\[\],.\-]+$/.test(item.str))
+        divs[index].setAttribute("data-neoread-math-token", "");
+      const operator = pdfMathOperator(item.str, name);
+      if (operator)
+        divs[index].setAttribute("data-neoread-math-alias", operator);
     });
     this.mathLayers.add(layer);
   }
@@ -662,7 +668,10 @@ export class PDFReadingNavigation {
     const nodes: Array<{ node: Text; offset: number; group: number }> = [],
       chars: string[] = [];
     const math = new Set<number>(),
-      glyphs = new Set<string>();
+      glyphs = new Set<string>(),
+      inlineMath = new Set<number>(),
+      inlineGlyphs = new Set<string>(),
+      operatorGlyphs = new Set<string>();
     const walker = document.createTreeWalker(
       node.querySelector(".textLayer") ?? document.createElement("div"),
       NodeFilter.SHOW_TEXT,
@@ -694,11 +703,24 @@ export class PDFReadingNavigation {
         continue;
       }
       for (let i = 0; i < (text.textContent?.length ?? 0); i++) {
-        const c = text.textContent![i];
+        let c = text.textContent![i];
         if (/[\s\u00ad]/.test(c)) continue;
         if (parent?.closest("[data-neoread-math]") && /[\p{L}\p{N}]/u.test(c)) {
           math.add(chars.length);
           glyphs.add(c.normalize("NFKD").toLowerCase());
+        }
+        if (parent?.closest("[data-neoread-math], [data-neoread-math-token]")) {
+          inlineMath.add(chars.length);
+          inlineGlyphs.add(c.normalize("NFKD").toLowerCase());
+        }
+        const alias = parent?.getAttribute("data-neoread-math-alias");
+        if (
+          alias &&
+          text.textContent!.length === 1 &&
+          block.text.includes("$")
+        ) {
+          operatorGlyphs.add(c.toLowerCase());
+          c = alias;
         }
         chars.push(c.toLowerCase());
         nodes.push({ node: text as Text, offset: i, group });
@@ -717,6 +739,9 @@ export class PDFReadingNavigation {
         text: math,
         block: sentenceMathOffsets(block.text, glyphs),
         sources: sources.map((source) => sentenceMathOffsets(source, glyphs)),
+        inlineText: inlineMath,
+        inlineBlock: sentenceMathOffsets(block.text, inlineGlyphs),
+        operatorGlyphs,
       },
     )) {
       // PDF DOM order can interleave columns. Never let a Range bridge text

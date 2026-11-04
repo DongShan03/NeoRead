@@ -2,6 +2,68 @@ import { expect, it } from "vitest";
 import { joinInlineText } from "./inline-math";
 import type { TextSpan } from "./layout";
 import omni from "./fixtures/omni-safety-inline-math.json";
+import authors from "./fixtures/midas-author-footnotes.json";
+import formally from "./fixtures/midas-sentence-math.json";
+import { extractTextSpans } from "./text";
+import type { PDFPageProxy } from "pdfjs-dist";
+
+it("combines MIDAS author footnotes and removes only the overprinted double dagger", () => {
+  const text = joinInlineText(authors);
+  expect(text).toContain(String.raw`Yilian Liu$^{1*}$`);
+  expect(text).toContain(String.raw`Guoshun Nan$^{1\dagger}$`);
+  expect(text).toContain(String.raw`Jiuyang Lyu$^{1\ddagger}$`);
+  expect(text).not.toContain(String.raw`\ddagger \ddagger`);
+  expect(text).toContain(String.raw`Zhongyi Zhai$^{3}$`);
+});
+
+it("keeps separately placed repeated footnote symbols", () => {
+  expect(
+    joinInlineText([
+      span("Author Name", 0, 10, 10, 50, false),
+      span("1", 50, 6, 7, 4, false),
+      span("‡", 54, 6, 7, 4),
+      span("‡", 58, 6, 7, 4),
+    ]),
+  ).toBe(String.raw`Author Name$^{1\ddagger \ddagger}$`);
+});
+
+it("keeps MIDAS lower limits beside their braces and resolves the CMEX operator origin", async () => {
+  const styles = Object.fromEntries(
+    formally.spans.map((s, i) => [
+      `f${i}`,
+      { ascent: (s.baseline! - s.bounds.y) / s.fontSize! },
+    ]),
+  );
+  const page = {
+    getViewport: () => ({ width: 1, height: 1, transform: [1, 0, 0, 1, 0, 0] }),
+    getTextContent: async () => ({
+      styles,
+      items: formally.spans.map((s, i) => ({
+        str: s.text,
+        fontName: `f${i}`,
+        transform: [s.fontSize, 0, 0, s.fontSize, s.bounds.x, s.baseline],
+        width: s.bounds.width,
+      })),
+    }),
+    getOperatorList: async () => ({}),
+    commonObjs: {
+      get: (id: string) => ({
+        name:
+          formally.spans[Number(id.slice(1))].text === "F"
+            ? "CMEX10"
+            : formally.spans[Number(id.slice(1))].math
+              ? "CMMI10"
+              : "Times-Roman",
+      }),
+    },
+  } as unknown as PDFPageProxy;
+  const spans = await extractTextSpans(page);
+  const text = joinInlineText(spans);
+  expect(text).toContain(String.raw`\{i_{k}\}_{k=1}^{n}`);
+  expect(text).toContain(String.raw`\{q_{j}\}_{j=1}^{m}`);
+  expect(text).toContain(String.raw`q=\bigsqcup _{j}q_{j}`);
+  expect(text).not.toContain("Fk=1");
+});
 
 it("keeps Omni-Safety's mean bars and layer superscripts on h rather than v", () => {
   const text = joinInlineText(omni.spans);

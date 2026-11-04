@@ -370,7 +370,7 @@ func parseTranslationSource(raw, source string, repairPDF bool) ([]TranslationSe
 	out.Sentences = pairs
 	for _, sentence := range pairs {
 		if !matchingMathDecorations(sentence.Source, sentence.Target) {
-			return nil, errors.New("译文改变了公式重音、字体或上下标，请重试此段")
+			return nil, errors.New("译文改变了公式符号、重音、字体或上下标，请重试此段")
 		}
 	}
 	normalize := func(v string) string { return strings.Join(strings.Fields(v), "") }

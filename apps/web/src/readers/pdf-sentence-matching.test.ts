@@ -1,5 +1,82 @@
 import { expect, it } from "vitest";
-import { sentenceTextRanges } from "./pdf-sentence-matching";
+import {
+  sentenceTextRanges,
+  sentenceMathOffsets,
+} from "./pdf-sentence-matching";
+import midas from "../../../processor/src/fixtures/midas-sentence-math.json";
+
+function midasNative(spans = midas.spans) {
+  let text = "";
+  const offsets = new Set<number>(),
+    glyphs = new Set<string>(),
+    operatorGlyphs = new Set<string>();
+  for (const span of spans)
+    for (const original of span.text) {
+      if (/\s/.test(original)) continue;
+      let char = original.toLowerCase();
+      if (span.math) {
+        offsets.add(text.length);
+        glyphs.add(char);
+      }
+      if (span.text === "F" && span.math) {
+        char = "⨆";
+        operatorGlyphs.add("f");
+      }
+      text += char;
+    }
+  return {
+    text,
+    math: {
+      text: offsets,
+      block: sentenceMathOffsets(midas.legacy, glyphs),
+      sources: [sentenceMathOffsets(midas.sentence, glyphs)],
+      operatorGlyphs,
+    },
+  };
+}
+
+it("maps the reported MIDAS sentence despite a legacy lower limit moved into prose", () => {
+  const native = midasNative();
+  const source = normalized(midas.legacy),
+    sentence = normalized(midas.sentence);
+  const start = native.text.indexOf("formally,let"),
+    end = native.text.indexOf(".weconstruct", start) + 1;
+  expect(start).toBeGreaterThan(0);
+  expect(
+    sentenceTextRanges(native.text, source, [sentence], 0, native.math),
+  ).toEqual([{ start, end }]);
+  const following = "weconstruct";
+  expect(
+    sentenceTextRanges(native.text, source, [following], 0, {
+      ...native.math,
+      sources: [new Set()],
+    }),
+  ).toEqual([{ start: end, end: native.text.length }]);
+});
+
+it("does not use MIDAS's paragraph projection when a variable or the surrounding prose differs", () => {
+  const changed = midas.spans.map((span, i) =>
+    i === midas.spans.length - 2 ? { ...span, text: "l" } : span,
+  );
+  for (const spans of [
+    changed,
+    midas.spans.map((s) => ({
+      ...s,
+      text: s.text.replace("Formally, let", "Unrelated clause"),
+    })),
+  ]) {
+    const native = midasNative(spans);
+    expect(
+      sentenceTextRanges(
+        native.text,
+        normalized(midas.legacy),
+        [normalized(midas.sentence)],
+        0,
+        native.math,
+      ),
+    ).toEqual([]);
+  }
+});
 
 const normalized = (s: string) => s.toLowerCase().replace(/\s/g, "");
 const source = normalized(

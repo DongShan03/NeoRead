@@ -12,6 +12,15 @@ export function sentenceMathOffsets(text: string, glyphs: Set<string>) {
     const start = text.slice(0, match.index).replace(/[\s\u00ad]/g, "").length;
     for (let i = 0; i < match[0].length; i++) offsets.add(start + i);
   }
+  // Legacy line sorting can leave an operator plus a lower limit (Fk=1)
+  // between prose words. Require its letters to exist in native math fonts.
+  for (const match of text.matchAll(
+    /(?<![\p{L}\p{N}])([a-z]{1,3})=\d+(?![\p{L}\p{N}])/giu,
+  )) {
+    if (![...match[1]].every((c) => glyphs.has(c.toLowerCase()))) continue;
+    const start = text.slice(0, match.index).replace(/[\s\u00ad]/g, "").length;
+    for (let i = 0; i < match[0].length; i++) offsets.add(start + i);
+  }
   return offsets;
 }
 
@@ -19,6 +28,9 @@ type SentenceMath = {
   text: Set<number>;
   block: Set<number>;
   sources: Set<number>[];
+  inlineText?: Set<number>;
+  inlineBlock?: Set<number>;
+  operatorGlyphs?: Set<string>;
 };
 
 function prose(text: string, math?: Set<number>) {
@@ -123,6 +135,82 @@ function inlineMathProjection(text: string, block: string) {
   return { starts, ends };
 }
 
+// Match the complete prose and variable/number multiset before assigning any
+// sentence range. This handles script order changes and legacy math fragments
+// moved into prose, while preserving native PDF offsets and sentence boundaries.
+function reorderedMathProjection(
+  text: string,
+  block: string,
+  math?: SentenceMath,
+) {
+  if (!math || !block.includes("$")) return;
+  const nativeMathOffsets = math.inlineText ?? math.text;
+  const sourceMathOffsets = math.inlineBlock ?? math.block;
+  if (!nativeMathOffsets.size) return;
+  const flags = Array.from({ length: block.length }, (_, i) =>
+    sourceMathOffsets.has(i),
+  );
+  for (const match of block.matchAll(/(?<!\\)\$(?:\\.|[^$])+\$/g)) {
+    for (let i = match.index!; i < match.index! + match[0].length; i++)
+      flags[i] = true;
+  }
+  let sourceProse = "",
+    sourceMath = "";
+  for (let i = 0; i < block.length; i++) {
+    if (flags[i]) sourceMath += block[i];
+    else {
+      sourceProse += block[i];
+    }
+  }
+  if (sourceProse.length < 32) return;
+  const native = prose(text, nativeMathOffsets),
+    at = uniqueIndex(native.value, sourceProse);
+  if (at < 0) return;
+  let first = native.starts[at],
+    last = native.ends[at + sourceProse.length - 1];
+  if (flags[0]) while (first > 0 && nativeMathOffsets.has(first - 1)) first--;
+  if (flags.at(-1))
+    while (last < text.length && nativeMathOffsets.has(last)) last++;
+  const key = (value: string, legacy = false) => {
+    if (legacy && math.operatorGlyphs?.has("f"))
+      value = value.replace(/f(?=(?:[a-z]=\d+|[_^]))/gi, "⨆");
+    return Array.from(
+      value
+        .replace(/\\(?:bigsqcup|sqcup)(?![a-z])/gi, "⨆")
+        .replace(/\\sum(?![a-z])/gi, "∑")
+        .replace(/\\[a-z]+/gi, "")
+        .replace(/[˜ˆ¯˙¨]/g, "")
+        .normalize("NFKD")
+        .toLowerCase(),
+    )
+      .filter((c) => /[\p{L}\p{N}⨆∑]/u.test(c))
+      .sort()
+      .join("");
+  };
+  const nativeMath = text
+    .slice(first, last)
+    .split("")
+    .filter((_c, i) => nativeMathOffsets.has(first + i))
+    .join("");
+  if (key(sourceMath, true) !== key(nativeMath)) return;
+  const starts: number[] = [],
+    ends: number[] = [];
+  let previous = first,
+    plain = 0;
+  for (let i = 0; i < block.length; i++) {
+    if (!flags[i]) {
+      starts[i] = native.starts[at + plain];
+      ends[i] = native.ends[at + plain];
+      previous = ends[i];
+      plain++;
+    } else {
+      starts[i] = previous;
+      ends[i] = plain < sourceProse.length ? native.starts[at + plain] : last;
+    }
+  }
+  return { starts, ends };
+}
+
 export function sentenceTextRanges(
   text: string,
   block: string,
@@ -130,7 +218,9 @@ export function sentenceTextRanges(
   sourceOffset = 0,
   math?: SentenceMath,
 ): Array<{ start: number; end: number }> {
-  const inline = inlineMathProjection(text, block);
+  const inline =
+    inlineMathProjection(text, block) ??
+    reorderedMathProjection(text, block, math);
   const paragraphStart = uniqueIndex(text, block);
   const pdfProse = prose(text, math?.text),
     blockProse = prose(block, math?.block);
