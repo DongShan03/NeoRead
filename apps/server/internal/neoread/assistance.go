@@ -26,14 +26,15 @@ func (s *Server) getAssistance(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) setAssistance(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Action  string `json:"action"`
-		Restart bool   `json:"restart,omitempty"`
+		Action       string `json:"action"`
+		Restart      bool   `json:"restart,omitempty"`
+		ClearHistory bool   `json:"clearHistory,omitempty"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
 	if req.Action == "retranslate" {
-		s.requestRetranslation(w, r, req.Restart)
+		s.requestRetranslation(w, r, req.Restart, req.ClearHistory)
 		return
 	}
 	if req.Action == "prioritize" {

@@ -12,6 +12,99 @@ import (
 	"testing"
 )
 
+func TestFreshRetranslationRemovesAllOldParseAndTranslationResults(t *testing.T) {
+	s, p, m := translationFixture(t)
+	old := newTranslation(m.Blocks[0])
+	old.Status = "complete"
+	old.Sentences = []TranslationSentence{{Source: m.Blocks[0].Text, Target: "旧译文。"}}
+	if err := s.saveTranslation("doc", old); err != nil {
+		t.Fatal(err)
+	}
+	historical := old
+	historical.SourceHash = "historical"
+	if err := s.saveTranslation("doc", historical); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec("INSERT INTO translation_previous(document_id,block_id,source_hash,body) VALUES(?,?,?,?)", "doc", old.BlockID, old.SourceHash, jsonText(old)); err != nil {
+		t.Fatal(err)
+	}
+	note := scopedAnnotationFixture(t, s, m)
+	root := filepath.Join(s.Store.Root, "cache")
+	for _, dir := range []string{"doc/translation-failures", "doc/analysis/old-assets", "doc-previous-legacy", "other/analysis"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, "keep.txt"), []byte("old"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.queueFreshRetranslation(p, snapshotTranslationOptions(s.aiConfig())); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"translations", "translation_previous"} {
+		var count int
+		if err := s.Store.DB.QueryRow("SELECT COUNT(*) FROM " + table + " WHERE document_id='doc'").Scan(&count); err != nil || count != 0 {
+			t.Fatal(table, count, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "doc")); !os.IsNotExist(err) {
+		t.Fatal("old project cache remained", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "doc-previous-legacy")); !os.IsNotExist(err) {
+		t.Fatal("old backup remained", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "other", "analysis", "keep.txt")); err != nil {
+		t.Fatal("other project files were removed", err)
+	}
+	if _, err := s.Store.Document("doc"); err != nil {
+		t.Fatal("original document was removed", err)
+	}
+	var saved Annotation
+	if err := json.Unmarshal([]byte(storedAnnotationBody(t, s, note.ID)), &saved); err != nil || saved.Note != note.Note || saved.CreatedAt != note.CreatedAt {
+		t.Fatal("user annotation was removed or changed", saved, err)
+	}
+	options, err := s.retranslationOptions(&Processing{DocumentID: "doc", Retranslating: true})
+	if err != nil || !options.ClearHistory || !options.CleanupDone {
+		t.Fatal(options, err)
+	}
+}
+
+func TestFreshRetranslationRollbackAndBusyRejectionKeepExistingContent(t *testing.T) {
+	s, p, _ := completedTranslationFixture(t)
+	path := filepath.Join(s.analysisDir("doc"), "manifest.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`CREATE TRIGGER reject_fresh_reset BEFORE INSERT ON translation_restarts BEGIN SELECT RAISE(FAIL,'disk failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.queueFreshRetranslation(p, translationRunOptions{}); err == nil {
+		t.Fatal("failed reset was accepted")
+	}
+	assertVisibleOldTranslation(t, s)
+	after, _ := os.ReadFile(path)
+	if string(after) != string(before) {
+		t.Fatal("transaction failure removed the cache")
+	}
+	if _, err := s.Store.DB.Exec("DROP TRIGGER reject_fresh_reset"); err != nil {
+		t.Fatal(err)
+	}
+	work, finish, err := s.beginDocumentTask(t.Context(), "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := request(t, s, "POST", "/api/documents/doc/assistance", strings.NewReader(`{"action":"retranslate","clearHistory":true}`))
+	if response.Code != 409 || work.Err() != nil || s.blockedProcessing["doc"] || s.reparsingDocuments["doc"] {
+		t.Fatal("busy rejection disrupted the task or left the document blocked", response.Code, work.Err())
+	}
+	finish()
+	response = request(t, s, "POST", "/api/documents/doc/assistance", strings.NewReader(`{"action":"retranslate","clearHistory":true}`))
+	if response.Code != 200 || s.blockedProcessing["doc"] || s.reparsingDocuments["doc"] {
+		t.Fatal("retry could not start after busy rejection", response.Code, response.Body.String())
+	}
+}
+
 func completedTranslationFixture(t *testing.T) (*Server, Processing, layoutManifest) {
 	t.Helper()
 	s, p, m := translationFixture(t)

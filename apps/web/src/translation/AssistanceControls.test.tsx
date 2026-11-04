@@ -118,10 +118,10 @@ it("keeps completion visible and requires confirmation before retranslation", as
   await render(1, ready);
   expect(host.textContent).toContain("翻译完成");
   const restart = () =>
-    host.querySelector<HTMLButtonElement>('[aria-label="重新翻译"]')!;
+    host.querySelector<HTMLButtonElement>('[aria-label="重新解析翻译"]')!;
   await act(async () => restart().click());
   expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-    "重新翻译全文？",
+    "重新解析翻译全文？",
   );
   expect(api.setAssistance).not.toHaveBeenCalled();
   const dialogButton = (text: string) =>
@@ -137,7 +137,7 @@ it("keeps completion visible and requires confirmation before retranslation", as
   });
   await act(async () => restart().click());
   vi.mocked(api.setAssistance).mockRejectedValueOnce(new Error("暂时无法开始"));
-  await act(async () => dialogButton("开始重新翻译").click());
+  await act(async () => dialogButton("开始重新解析翻译").click());
   expect(host.textContent).toContain("翻译完成");
   expect(toast.error).toHaveBeenCalledWith("暂时无法开始");
   expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
@@ -147,10 +147,13 @@ it("keeps completion visible and requires confirmation before retranslation", as
     status: "queued",
     updatedAt: "2026-10-17T00:00:00Z",
   });
-  await act(async () => dialogButton("开始重新翻译").click());
-  expect(api.setAssistance).toHaveBeenLastCalledWith("book", "retranslate");
+  await act(async () => dialogButton("开始重新解析翻译").click());
+  expect(api.setAssistance).toHaveBeenLastCalledWith("book", "retranslate", {
+    restart: true,
+    clearHistory: true,
+  });
   expect(host.textContent).toContain("暂停重译");
-  expect(host.querySelector('[aria-label="重新翻译"]')).toBeNull();
+  expect(host.querySelector('[aria-label="重新解析翻译"]')).toBeNull();
 });
 
 it("offers continuation when an interrupted retranslation still has readable old text", async () => {
@@ -160,7 +163,7 @@ it("offers continuation when an interrupted retranslation still has readable old
     startedAt: "2026-10-17T00:00:00Z",
   });
   expect(host.textContent).toContain("继续重译");
-  expect(host.querySelector('[aria-label="重新翻译"]')).toBeNull();
+  expect(host.querySelector('[aria-label="重新解析翻译"]')).toBeNull();
 });
 
 it("a book translates the current chapter instead of the whole document", async () => {

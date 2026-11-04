@@ -218,21 +218,33 @@ const menuItem = (label: string) =>
 
 it("queues full reparse and translation for every selected paper after confirmation", async () => {
   await act(async () => usePaperUI.getState().startPicking(["a", "b"]));
-  await act(async () => button("重新翻译").click());
+  await act(async () =>
+    row("Attention Is All You Need").dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 30,
+        clientY: 30,
+      }),
+    ),
+  );
+  await act(async () => menuItem("重新解析翻译").click());
+  expect(host.textContent).not.toContain("重新翻译");
   expect(api.setAssistance).not.toHaveBeenCalled();
-  expect(document.body.textContent).toContain("重新解析并翻译 2 篇论文");
+  expect(document.body.textContent).toContain("将清理 2 篇论文");
   vi.mocked(api.setAssistance).mockRejectedValueOnce(
     new Error("paper is busy"),
   );
   const confirm = [
     ...document.querySelectorAll<HTMLButtonElement>("button"),
-  ].find((b) => b.textContent?.trim() === "重新解析并翻译")!;
+  ].find((b) => b.textContent?.trim() === "重新解析翻译")!;
   await act(async () => confirm.click());
   expect(api.setAssistance).toHaveBeenCalledWith("a", "retranslate", {
     restart: true,
+    clearHistory: true,
   });
   expect(api.setAssistance).toHaveBeenCalledWith("b", "retranslate", {
     restart: true,
+    clearHistory: true,
   });
   expect(api.setAssistance).toHaveBeenCalledTimes(2);
   expect(toast.success).toHaveBeenCalledWith(

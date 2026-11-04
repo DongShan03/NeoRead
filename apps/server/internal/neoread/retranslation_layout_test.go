@@ -82,6 +82,63 @@ func prepareReparseDocument(t *testing.T, s *Server) {
 	}
 }
 
+func TestFreshRetranslationUsesOnlyNewPDFResultsForPapersAndBooks(t *testing.T) {
+	for _, library := range []string{"papers", "books"} {
+		t.Run(library, func(t *testing.T) {
+			s, _, old := completedTranslationFixture(t)
+			prepareReparseDocument(t, s)
+			if _, err := s.Store.DB.Exec("UPDATE documents SET library=? WHERE id='doc'", library); err != nil {
+				t.Fatal(err)
+			}
+			fresh := old
+			fresh.Blocks = append([]PDFBlock(nil), old.Blocks...)
+			fresh.Blocks[0].Text = "Newly parsed sentence."
+			calls := reparseFixture(t, fresh)
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				batch := readTranslationInput(t, r).Batch
+				var reply strings.Builder
+				for _, paragraph := range batch.Paragraphs {
+					if paragraph.Source == old.Blocks[0].Text {
+						t.Error("old parse was sent to translator")
+					}
+					reply.WriteString(translationParagraphLine(paragraph))
+				}
+				writeAPIReply(w, reply.String())
+			}))
+			defer provider.Close()
+			configureTranslationTest(t, s, provider.URL)
+			response := request(t, s, "POST", "/api/documents/doc/assistance", strings.NewReader(`{"action":"retranslate","clearHistory":true}`))
+			if response.Code != 200 {
+				t.Fatal(response.Code, response.Body.String())
+			}
+			var p Processing
+			if err := json.Unmarshal(response.Body.Bytes(), &p); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.readTranslationSource("doc"); !os.IsNotExist(err) {
+				t.Fatal("old layout remained", err)
+			}
+			if err := s.processTranslation(t.Context(), &p); err != nil || p.Status != "complete" {
+				t.Fatal(p, err)
+			}
+			layout, err := s.readLayout("doc")
+			if err != nil || layout.Blocks[0].Text != fresh.Blocks[0].Text {
+				t.Fatal(layout, err)
+			}
+			data, _ := os.ReadFile(calls)
+			if string(data) != "parse\n" {
+				t.Fatal("did not parse the full PDF once", string(data))
+			}
+			if library == "books" {
+				var status string
+				if err := s.Store.DB.QueryRow("SELECT status FROM book_layout_jobs WHERE document_id='doc'").Scan(&status); err != nil || status != "complete" {
+					t.Fatal("background book parser will repeat full parse", status, err)
+				}
+			}
+		})
+	}
+}
+
 func TestRetranslationReparsesBeforeSendingNewTextAndAlgorithmImage(t *testing.T) {
 	s, _, old := completedTranslationFixture(t)
 	prepareReparseDocument(t, s)

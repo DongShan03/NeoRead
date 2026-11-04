@@ -3570,6 +3570,12 @@
                                       "default": false,
                                       "description": "Explicit full reparse and translation restart, also for paused papers or papers without prior completed translations",
                                     },
+                                  "clearHistory":
+                                    {
+                                      "type": "boolean",
+                                      "default": false,
+                                      "description": "Clear all document parse and translation history before starting a fresh parse and translation, retaining original files and user records",
+                                    },
                                 },
                             },
                         },

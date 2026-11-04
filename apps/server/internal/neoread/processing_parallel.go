@@ -61,7 +61,7 @@ func aggregateProcessing(p *Processing) {
 // under one document lifetime.
 func (s *Server) processTranslation(ctx context.Context, p *Processing) error {
 	m, err := s.readTranslationSource(p.DocumentID)
-	if err != nil {
+	if err != nil && !p.Retranslating {
 		p.Translating = &ProcessingStage{Status: "failed", Detail: err.Error()}
 		aggregateProcessing(p)
 		return errors.Join(err, s.Store.saveProcessing(*p))

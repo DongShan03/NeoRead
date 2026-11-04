@@ -1,23 +1,30 @@
 package neoread
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // Task choices and layout progress are persisted. Connections, capabilities
 // and secrets come from the configured provider when the job runs or resumes.
 type translationRunOptions struct {
 	// One full layout parse per explicit restart; retries resume the same run.
-	LayoutRun   string `json:"layoutRun,omitempty"`
-	LayoutReady bool   `json:"layoutReady,omitempty"`
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
-	Effort      string `json:"effort"`
-	Prompt      string `json:"prompt"`
+	LayoutRun    string `json:"layoutRun,omitempty"`
+	LayoutReady  bool   `json:"layoutReady,omitempty"`
+	ClearHistory bool   `json:"clearHistory,omitempty"`
+	CleanupDone  bool   `json:"cleanupDone,omitempty"`
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	Effort       string `json:"effort"`
+	Prompt       string `json:"prompt"`
 }
 
 func snapshotTranslationOptions(c AIConfig) translationRunOptions {
@@ -30,7 +37,7 @@ func snapshotTranslationOptions(c AIConfig) translationRunOptions {
 }
 
 func (o *translationRunOptions) apply(c AIConfig) AIConfig {
-	if o == nil {
+	if o == nil || o.Provider == "" {
 		return c
 	}
 	c.Primary = o.Provider
@@ -86,6 +93,8 @@ func (s *Server) translationPrevious(documentID string) (map[string]bool, error)
 
 func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, restart ...bool) {
 	fullRestart := len(restart) > 0 && restart[0]
+	fresh := len(restart) > 1 && restart[1]
+	fullRestart = fullRestart || fresh
 	lock := s.annotationRecoveryLock(r.PathValue("id"))
 	if !lock.TryLock() {
 		fail(w, 409, "正在检查批注，请稍后重新翻译")
@@ -93,7 +102,7 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, re
 	}
 	defer lock.Unlock()
 	config := s.aiConfig()
-	if !validAgent(config.Primary) || !(primaryCapable(config, taskTranslation) || capable(config, "text-api", false)) {
+	if !fresh && (!validAgent(config.Primary) || !(primaryCapable(config, taskTranslation) || capable(config, "text-api", false))) {
 		fail(w, 409, "请先配置并检测翻译模型")
 		return
 	}
@@ -104,17 +113,21 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, re
 		fail(w, 404, "文档不存在")
 		return
 	}
-	if d.Type != "pdf" || d.Library == "books" {
+	if !fresh && (d.Type != "pdf" || d.Library == "books") {
 		fail(w, 400, "全文重译仅适用于论文；图书请按章节翻译")
 		return
 	}
 	m, err := s.readTranslationSource(d.ID)
-	if err != nil {
+	if err != nil && !fresh {
 		fail(w, 409, "正文仍在解析中")
 		return
 	}
 	s.processingMu.Lock()
 	p, err := s.Store.processing(d.ID)
+	if fresh && errors.Is(err, sql.ErrNoRows) {
+		p = initialDocumentProcessing(d, "")
+		err = s.Store.saveProcessing(p)
+	}
 	if err != nil || !fullRestart && p.Status != "complete" {
 		s.processingMu.Unlock()
 		fail(w, 409, "请等待当前翻译完成后再重新翻译")
@@ -132,6 +145,17 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, re
 	if task != nil {
 		<-task.done
 	}
+	if fresh {
+		finish, e := s.beginDocumentReparse(d)
+		if e != nil {
+			s.processingMu.Lock()
+			delete(s.blockedProcessing, d.ID)
+			s.processingMu.Unlock()
+			fail(w, 409, e.Error())
+			return
+		}
+		defer finish()
+	}
 	s.processingMu.Lock()
 	defer s.processingMu.Unlock()
 	defer delete(s.blockedProcessing, d.ID)
@@ -140,7 +164,9 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, re
 	if err == nil {
 		m, err = s.readTranslationSource(d.ID)
 	}
-	if err == nil {
+	if fresh && p.DocumentID != "" {
+		err = s.queueFreshRetranslation(p, snapshotTranslationOptions(config))
+	} else if err == nil {
 		err = s.queueRetranslation(p, m, snapshotTranslationOptions(config), fullRestart)
 	}
 	if err != nil {
@@ -153,6 +179,106 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, re
 		return
 	}
 	respond(w, 200, p)
+}
+
+func (s *Server) queueFreshRetranslation(p Processing, options translationRunOptions) error {
+	options.LayoutRun, options.LayoutReady, options.ClearHistory, options.CleanupDone = id(), false, true, false
+	s.translationMu.Lock()
+	s.Store.processingWriteMu.Lock()
+	tx, err := s.Store.DB.Begin()
+	if err != nil {
+		s.Store.processingWriteMu.Unlock()
+		s.translationMu.Unlock()
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query("SELECT body FROM translations WHERE document_id=? UNION ALL SELECT body FROM translation_previous WHERE document_id=?", p.DocumentID, p.DocumentID)
+	var previous []TranslationBlock
+	if err == nil {
+		for rows.Next() {
+			var body string
+			var item TranslationBlock
+			if err = rows.Scan(&body); err != nil {
+				break
+			}
+			if err = json.Unmarshal([]byte(body), &item); err != nil {
+				break
+			}
+			if item.Status == "complete" {
+				previous = append(previous, item)
+			}
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		rows.Close()
+	}
+	if err == nil {
+		err = captureAnnotationAnchors(tx, p.DocumentID, previous)
+	}
+	for _, table := range []string{"translations", "translation_previous", "translation_restarts", "document_corpora", "document_corpus_jobs", "search_index", "document_passages_fts", "book_layout_jobs"} {
+		if err != nil {
+			break
+		}
+		_, err = tx.Exec("DELETE FROM "+table+" WHERE document_id=?", p.DocumentID)
+	}
+	p.Enabled, p.Retranslating, p.ManualTranslation = true, true, false
+	p.AutoTranslateMaxPages = nil
+	p.Chapter = nil
+	p.LayoutRevision = ""
+	p.CompletedAt = ""
+	p.Warning = ""
+	p.PagesDone = 0
+	p.TranslationsDone = 0
+	p.TranslationsTotal = 0
+	p.Translating = &ProcessingStage{Status: "queued", Detail: "等待清理并重新解析翻译"}
+	aggregateProcessing(&p)
+	if err == nil {
+		_, err = tx.Exec("INSERT INTO translation_restarts(document_id,options) VALUES(?,?)", p.DocumentID, jsonText(options))
+	}
+	if err == nil {
+		_, err = tx.Exec("INSERT INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?) ON CONFLICT(document_id) DO UPDATE SET phase=excluded.phase,status=excluded.status,body=excluded.body", p.DocumentID, p.Phase, p.Status, jsonText(p))
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	s.Store.processingWriteMu.Unlock()
+	s.translationMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err = s.clearDocumentParseFiles(p.DocumentID); err != nil {
+		// The reset is already committed. Keep the accepted job recoverable;
+		// its worker retries cleanup before parsing and reports any failure.
+		s.diagnosticEvent(slog.LevelWarn, "document.reset.cleanup_deferred", "documentId", p.DocumentID, "errorCode", errorKind(err))
+		return nil
+	}
+	options.CleanupDone = true
+	_, err = s.Store.DB.Exec("UPDATE translation_restarts SET options=? WHERE document_id=?", jsonText(options), p.DocumentID)
+	return err
+}
+
+func (s *Server) clearDocumentParseFiles(documentID string) error {
+	if filepath.Base(documentID) != documentID || documentID == "." || documentID == ".." {
+		return errors.New("文档编号无效")
+	}
+	root := filepath.Join(s.Store.Root, "cache")
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == documentID || strings.HasPrefix(name, documentID+"-reparse-") || strings.HasPrefix(name, documentID+"-previous-") {
+			if err = os.RemoveAll(filepath.Join(root, name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) queueRetranslation(p Processing, m translationInput, options translationRunOptions, allowEmpty ...bool) error {

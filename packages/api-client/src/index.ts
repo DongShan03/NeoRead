@@ -533,7 +533,7 @@ export const api = {
   setAssistance: (
     id: string,
     action: "start" | "pause" | "resume" | "retranslate" | "prioritize",
-    options?: { restart?: boolean },
+    options?: { restart?: boolean; clearHistory?: boolean },
   ) =>
     request<Processing>(`/api/documents/${id}/assistance`, {
       method: "POST",

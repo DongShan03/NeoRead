@@ -53,7 +53,7 @@ export function BookMenuItems({
       </K.Item>
       <K.Item onClick={() => void reparseDocument(doc)}>
         <RefreshCw />
-        重新解析
+        重新解析翻译
       </K.Item>
       {doc.type === "pdf" && (
         <K.Item onClick={() => void exportAnnotatedPDFWithToast(doc)}>

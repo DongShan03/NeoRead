@@ -32,6 +32,47 @@ func (s *Server) refreshRetranslationLayout(ctx context.Context, p *Processing) 
 	if err != nil || options == nil {
 		return err
 	}
+	document, err := s.Store.Document(p.DocumentID)
+	if err != nil {
+		return err
+	}
+	if options.ClearHistory && document.Type == "epub" {
+		if options.LayoutReady {
+			return nil
+		}
+		if !options.CleanupDone {
+			if err = s.clearDocumentParseFiles(p.DocumentID); err != nil {
+				return err
+			}
+			options.CleanupDone = true
+			if _, err = s.Store.DB.Exec("UPDATE translation_restarts SET options=? WHERE document_id=?", jsonText(options), p.DocumentID); err != nil {
+				return err
+			}
+		}
+		if err = s.reparseEPUB(ctx, document); err != nil {
+			return err
+		}
+		input, err := s.readTranslationSource(p.DocumentID)
+		if err != nil {
+			return err
+		}
+		tx, err := s.Store.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		for _, item := range input.translationItems() {
+			item.Status = "pending"
+			if _, err = tx.Exec("INSERT INTO translations(document_id,block_id,source_hash,status,body) VALUES(?,?,?,?,?)", p.DocumentID, item.BlockID, item.SourceHash, item.Status, jsonText(item)); err != nil {
+				return err
+			}
+		}
+		options.LayoutReady, options.CleanupDone = true, true
+		if _, err = tx.Exec("UPDATE translation_restarts SET options=? WHERE document_id=?", jsonText(options), p.DocumentID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if options.LayoutReady {
 		// A previous run can have committed readiness before publishing body_end.
 		// Retry that publication as well, including papers with an older boundary.
@@ -49,12 +90,31 @@ func (s *Server) refreshRetranslationLayout(ctx context.Context, p *Processing) 
 	if options.LayoutRun == "" {
 		return nil
 	}
+	if document.Library == "books" {
+		lock := s.bookLayoutLock(document.ID)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	if !validLayoutRun(options.LayoutRun) {
 		return errors.New("重译版面任务无效")
+	}
+	if options.ClearHistory && !options.CleanupDone {
+		if err = s.clearDocumentParseFiles(p.DocumentID); err != nil {
+			return err
+		}
+		options.CleanupDone = true
+		if _, err = s.Store.DB.Exec("UPDATE translation_restarts SET options=? WHERE document_id=?", jsonText(options), p.DocumentID); err != nil {
+			return err
+		}
 	}
 	dir := s.analysisDir(p.DocumentID)
 	manifestPath := filepath.Join(dir, "manifest.json")
 	m, raw, err := readLayoutFile(manifestPath)
+	if options.ClearHistory && os.IsNotExist(err) {
+		m = layoutManifest{}
+		raw = map[string]json.RawMessage{}
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -62,7 +122,7 @@ func (s *Server) refreshRetranslationLayout(ctx context.Context, p *Processing) 
 	_ = json.Unmarshal(raw["retranslationRun"], &published)
 	if published != options.LayoutRun {
 		d, err := s.Store.Document(p.DocumentID)
-		if err != nil || d.Type != "pdf" || d.Library == "books" {
+		if err != nil || d.Type != "pdf" || d.Library == "books" && !options.ClearHistory {
 			return errors.New("全文版面重解析仅适用于 PDF 论文")
 		}
 		fingerprint, err := s.corpusFingerprint(d)
@@ -117,9 +177,11 @@ func (s *Server) refreshRetranslationLayout(ctx context.Context, p *Processing) 
 	}
 	defer tx.Rollback()
 	for _, item := range m.translationItems() {
-		if _, err = tx.Exec(`INSERT OR IGNORE INTO translation_previous(document_id,block_id,source_hash,body)
+		if !options.ClearHistory {
+			if _, err = tx.Exec(`INSERT OR IGNORE INTO translation_previous(document_id,block_id,source_hash,body)
 SELECT document_id,block_id,source_hash,body FROM translations WHERE document_id=? AND block_id=? AND source_hash=? AND status='complete'`, p.DocumentID, item.BlockID, item.SourceHash); err != nil {
-			return err
+				return err
+			}
 		}
 		if _, err = tx.Exec(`INSERT INTO translations(document_id,block_id,source_hash,status,body) VALUES(?,?,?,?,?)
 ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET status=excluded.status,body=excluded.body`, p.DocumentID, item.BlockID, item.SourceHash, item.Status, jsonText(item)); err != nil {
@@ -133,6 +195,12 @@ ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET status=excluded.stat
 	if _, err = tx.Exec(`INSERT INTO document_corpus_jobs(document_id,status) VALUES(?,'queued')
 ON CONFLICT(document_id) DO UPDATE SET status='queued'`, p.DocumentID); err != nil {
 		return err
+	}
+	if document.Library == "books" {
+		if _, err = tx.Exec(`INSERT INTO book_layout_jobs(document_id,status,pages_done,pages_total) VALUES(?,'complete',?,?)
+ON CONFLICT(document_id) DO UPDATE SET status='complete',pages_done=excluded.pages_done,pages_total=excluded.pages_total`, p.DocumentID, m.Pages, m.Pages); err != nil {
+			return err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return err

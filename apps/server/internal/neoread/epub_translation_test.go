@@ -5,9 +5,63 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestFreshEPUBTranslationRebuildsCacheAndQueuesEveryParagraph(t *testing.T) {
+	s := testServer(t)
+	response := upload(t, s, "book.epub", sample(t, "the-art-of-reading.epub"))
+	var doc Document
+	if response.Code != 201 || json.Unmarshal(response.Body.Bytes(), &doc) != nil {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	old, err := s.readEPUBBlocks(doc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := newTranslation(PDFBlock{ID: old[0].ID, Text: old[0].Text})
+	stale.Status = "complete"
+	stale.Sentences = []TranslationSentence{{Source: old[0].Text, Target: "旧译文。"}}
+	if err := s.saveTranslation(doc.ID, stale); err != nil {
+		t.Fatal(err)
+	}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reply strings.Builder
+		for _, paragraph := range readTranslationInput(t, r).Batch.Paragraphs {
+			reply.WriteString(translationParagraphLine(paragraph))
+		}
+		writeAPIReply(w, reply.String())
+	}))
+	defer provider.Close()
+	configureTranslationTest(t, s, provider.URL)
+	response = request(t, s, "POST", "/api/documents/"+doc.ID+"/assistance", strings.NewReader(`{"action":"retranslate","restart":true,"clearHistory":true}`))
+	var p Processing
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &p) != nil {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(s.Store.Root, "cache", doc.ID)); !os.IsNotExist(err) {
+		t.Fatal("old EPUB cache remained", err)
+	}
+	if err := s.processTranslation(t.Context(), &p); err != nil || p.Status != "complete" {
+		t.Fatal(p, err)
+	}
+	blocks, err := s.readEPUBBlocks(doc.ID)
+	if err != nil || len(blocks) != len(old) {
+		t.Fatal("EPUB cache not rebuilt", blocks, err)
+	}
+	items, err := s.translations(doc.ID, blocks)
+	if err != nil || len(items) != len(blocks.translationParagraphs()) {
+		t.Fatal("paragraphs were omitted", items, err)
+	}
+	for _, item := range items {
+		if item.Status != "complete" || len(item.Sentences) == 0 || item.Sentences[0].Target == "旧译文。" {
+			t.Fatal("old or untranslated paragraph remained", item)
+		}
+	}
+}
 
 func TestEPUBTextBlocksPreserveNestedTextAndUTF16(t *testing.T) {
 	source := `<html><body><div>Before <strong>😀</strong><p> Same <em>words</em>. </p>After<p>Same <em>words</em>.</p></div></body></html>`

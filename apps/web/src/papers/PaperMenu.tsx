@@ -96,6 +96,7 @@ export interface PaperMenuActions {
   move: (doc: Document) => void;
   trash: (docs: Document[]) => void;
   newCategory: (docs: Document[]) => void;
+  reparseTranslate?: (docs: Document[]) => void;
   newTag: (docs: Document[]) => void;
   addAttachment?: (doc: Document, kind: "file" | "link") => void;
 }
@@ -250,6 +251,19 @@ export function PaperMenuItems({
       )}
       <CitationMenuItems kind={kind} docs={docs} nested />
       {extra}
+      {docs.every((doc) => doc.type === "pdf") &&
+        (actions.reparseTranslate || one) && (
+          <K.Item
+            onClick={() =>
+              actions.reparseTranslate
+                ? actions.reparseTranslate(docs)
+                : void reparseDocument(one!)
+            }
+          >
+            <RefreshCw />
+            重新解析翻译
+          </K.Item>
+        )}
       {one && (
         <>
           <K.Separator />
@@ -268,10 +282,6 @@ export function PaperMenuItems({
                 优先翻译
               </K.Item>
             )}
-          <K.Item onClick={() => void reparseDocument(one)}>
-            <RefreshCw />
-            重新解析
-          </K.Item>
           <K.Item
             onClick={() =>
               void copyText(neoreadLink({ id: one.id }), "已复制阅读链接")

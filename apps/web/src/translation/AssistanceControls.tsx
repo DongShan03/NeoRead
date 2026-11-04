@@ -15,6 +15,7 @@ import {
 } from "@neoread/ui/components/alert-dialog";
 import { toast } from "sonner";
 import type { PageRange } from "./chapters";
+import { useReaderStore } from "../store";
 
 type Action = "start" | "pause" | "resume" | "chapter";
 
@@ -164,8 +165,8 @@ export function AssistanceControls({
                 variant="ghost"
                 size="icon-sm"
                 disabled={busy}
-                title="重新翻译"
-                aria-label="重新翻译"
+                title="重新解析翻译"
+                aria-label="重新解析翻译"
               />
             }
           >
@@ -173,10 +174,10 @@ export function AssistanceControls({
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>重新翻译全文？</AlertDialogTitle>
+              <AlertDialogTitle>重新解析翻译全文？</AlertDialogTitle>
               <AlertDialogDescription>
-                将重新解析全文版面，并使用当前 Agent
-                翻译模型和已保存的翻译提示词重新翻译。解析成功前保留现有内容；仍能对应原文的旧译文会在新结果完成后逐段替换。
+                将清理历史解析、图片、公式和译文，再按当前 Agent
+                模型重新解析翻译。原文件、笔记、批注和聊天记录保留。
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -190,10 +191,12 @@ export function AssistanceControls({
                     const next = await api.setAssistance(
                       documentId,
                       "retranslate",
+                      { restart: true, clearHistory: true },
                     );
                     if (operation === serial.current) {
                       setConfirming(false);
                       setSaved(next);
+                      useReaderStore.getState().closeTabs([documentId]);
                     }
                   } catch (e) {
                     if (operation === serial.current)
@@ -203,7 +206,7 @@ export function AssistanceControls({
                   }
                 }}
               >
-                {busy ? "正在开始…" : "开始重新翻译"}
+                {busy ? "正在开始…" : "开始重新解析翻译"}
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>

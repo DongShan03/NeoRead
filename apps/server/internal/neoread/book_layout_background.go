@@ -111,7 +111,7 @@ func (s *Server) bookLayoutWorker(ctx context.Context) {
 		err := s.Store.DB.QueryRowContext(ctx, `SELECT j.document_id FROM book_layout_jobs j
  JOIN documents d ON d.id=j.document_id LEFT JOIN document_processing p ON p.document_id=d.id
  WHERE j.status IN ('queued','running') AND d.type='pdf' AND d.library='books' AND d.deleted_at='' AND NOT
- (COALESCE(p.phase,'')='learning' AND p.status IN ('queued','running'))
+ ((COALESCE(p.phase,'')='learning' OR COALESCE(json_extract(p.body,'$.retranslating'),0)=1) AND p.status IN ('queued','running'))
  ORDER BY j.priority DESC, j.rowid LIMIT 1`).Scan(&documentID)
 		if err != nil {
 			continue

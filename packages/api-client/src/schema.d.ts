@@ -3242,6 +3242,11 @@ export interface paths {
                          * @default false
                          */
                         restart?: boolean;
+                        /**
+                         * @description Clear all document parse and translation history before starting a fresh parse and translation, retaining original files and user records
+                         * @default false
+                         */
+                        clearHistory?: boolean;
                     };
                 };
             };

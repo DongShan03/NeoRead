@@ -314,10 +314,20 @@ export function PaperLibrary({
     try {
       const results = await Promise.allSettled(
         retranslatingDocs.map((doc) =>
-          api.setAssistance(doc.id, "retranslate", { restart: true }),
+          api.setAssistance(doc.id, "retranslate", {
+            restart: true,
+            clearHistory: true,
+          }),
         ),
       );
       const queued = results.filter((r) => r.status === "fulfilled").length;
+      useReaderStore
+        .getState()
+        .closeTabs(
+          retranslatingDocs
+            .filter((_doc, i) => results[i].status === "fulfilled")
+            .map((doc) => doc.id),
+        );
       if (queued) toast.success(`已将 ${queued} 篇论文加入重新解析与翻译队列`);
       const failures = results.flatMap((r, i) =>
         r.status === "rejected"
@@ -577,6 +587,7 @@ export function PaperLibrary({
   };
   const actions: PaperMenuActions = {
     open: openDocument,
+    reparseTranslate: (docs) => setRetranslatingDocs(docs),
     addAttachment: (doc, kind) => {
       useAttachments.setState({ selected: null });
       ui.select(doc.id);
@@ -988,20 +999,7 @@ export function PaperLibrary({
                     )}
                     {exportingPDFs ? "正在导出…" : "导出"}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    title="重新解析并重新翻译选中的论文"
-                    disabled={!pickedPDFs.length || queueingRetranslations}
-                    onClick={() => setRetranslatingDocs([...pickedPDFs])}
-                  >
-                    {queueingRetranslations ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Languages />
-                    )}
-                    重新翻译
-                  </Button>
+
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
@@ -1334,10 +1332,10 @@ export function PaperLibrary({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>重新翻译选中的论文</DialogTitle>
+            <DialogTitle>重新解析翻译</DialogTitle>
             <DialogDescription>
-              将使用当前翻译模型重新解析并翻译 {retranslatingDocs?.length ?? 0}{" "}
-              篇论文。新译文完成前保留旧译文，批注和笔记保留。
+              将清理 {retranslatingDocs?.length ?? 0}{" "}
+              篇论文的历史解析、图片、公式和译文，再按当前模型重新解析翻译。原文件、笔记、批注和聊天记录保留。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1353,7 +1351,7 @@ export function PaperLibrary({
               onClick={() => void retranslatePicked()}
             >
               {queueingRetranslations && <Loader2 className="animate-spin" />}
-              重新解析并翻译
+              重新解析翻译
             </Button>
           </DialogFooter>
         </DialogContent>
