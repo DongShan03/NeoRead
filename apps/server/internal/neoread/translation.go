@@ -330,6 +330,16 @@ func parseTranslationSource(raw, source string, repairPDF bool) ([]TranslationSe
 		joined.WriteString(sentence.Source)
 		joined.WriteByte(' ')
 	}
+	pairs, err := translationSentencePairs(out.Sentences)
+	if err != nil {
+		return nil, err
+	}
+	out.Sentences = pairs
+	for _, sentence := range pairs {
+		if !matchingMathDecorations(sentence.Source, sentence.Target) {
+			return nil, errors.New("译文改变了公式重音、字体或上下标，请重试此段")
+		}
+	}
 	normalize := func(v string) string { return strings.Join(strings.Fields(v), "") }
 	if normalize(joined.String()) == normalize(source) {
 		return out.Sentences, nil

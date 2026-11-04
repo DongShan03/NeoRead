@@ -416,6 +416,14 @@ function TranslationContent({
               />
             </div>
           ))}
+          {translation.error && (
+            <div className="translation-pending" role="status">
+              <span>{translation.error}</span>
+              <Button variant="ghost" size="sm" onClick={retry}>
+                重新翻译此段
+              </Button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="translation-pending" role="status">

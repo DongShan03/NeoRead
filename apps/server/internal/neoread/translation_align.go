@@ -19,6 +19,12 @@ func repairCachedTranslationAnchors(block TranslationBlock, source string) Trans
 	if block.Status != "complete" || len(block.Sentences) == 0 {
 		return block
 	}
+	pairs, err := translationSentencePairs(block.Sentences)
+	if err != nil {
+		block.Error = "旧译文未逐句对应，请重新翻译此段"
+		return block
+	}
+	block.Sentences = pairs
 	var joined strings.Builder
 	for _, sentence := range block.Sentences {
 		if sentence.Anchor != "" {

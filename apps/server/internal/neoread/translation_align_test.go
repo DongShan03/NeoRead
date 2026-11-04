@@ -2,6 +2,7 @@ package neoread
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,67 @@ func sentencesJSON(sources ...string) string {
 }
 
 func compact(s string) string { return strings.Join(strings.Fields(s), "") }
+
+func TestJailBoundLegacyParagraphRestoresSentencePairs(t *testing.T) {
+	body, err := os.ReadFile("../../../web/src/readers/fixtures/jailbound-sentence-alignment.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Block     PDFBlock              `json:"block"`
+		Sentences []TranslationSentence `json:"sentences"`
+	}
+	if err := json.Unmarshal(body, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	target := ""
+	for _, sentence := range fixture.Sentences {
+		target += sentence.Target
+	}
+	cached := TranslationBlock{BlockID: fixture.Block.ID, SourceHash: translationHash(fixture.Block.Text), Status: "complete", Sentences: []TranslationSentence{{Source: fixture.Block.Text, Target: target}}}
+	restored := repairCachedTranslationAnchors(cached, fixture.Block.Text)
+	if restored.Error != "" || len(restored.Sentences) != 3 {
+		t.Fatal("paragraph remained one pair", restored)
+	}
+	for i, sentence := range restored.Sentences {
+		if sentence.Source != fixture.Sentences[i].Source || sentence.Target != fixture.Sentences[i].Target {
+			t.Fatal("incorrect sentence pair", i, sentence)
+		}
+	}
+	if len(cached.Sentences) != 1 {
+		t.Fatal("reading modified cached data")
+	}
+	parsed, err := parseTranslation(jsonText(map[string]any{"sentences": cached.Sentences}), fixture.Block.Text)
+	if err != nil || len(parsed) != 3 {
+		t.Fatal("fresh reply kept a paragraph pair", parsed, err)
+	}
+}
+
+func TestSentenceSegmentationKeepsMathAndCitations(t *testing.T) {
+	source := "We used the dataset Liu et al. [2024c], with a 0.3 threshold. The next step is unchanged."
+	if parts := translationSentenceParts(source); len(parts) != 2 {
+		t.Fatal(parts)
+	}
+	target := `使用 $\\text{Prob. A} = 0.3$ 作为阈值。下一步保持不变。`
+	if parts := translationSentenceParts(target); len(parts) != 2 {
+		t.Fatal(parts)
+	}
+	if _, err := translationSentencePairs([]TranslationSentence{{Source: "First sentence. Second sentence.", Target: "合并成一句。"}}); err == nil {
+		t.Fatal("guessed an ambiguous sentence mapping")
+	}
+}
+
+func TestTranslationRejectsLostMeanBarsAndInventedLayerSuperscripts(t *testing.T) {
+	source := `The refusal vector is $\mathbf{v}_{\mathrm{refu}}=\mathbf{v}_{\mathrm{text}}=\bar{\mathbf{h}}_{\mathrm{harm}}^{(l)}-\bar{\mathbf{h}}_{\mathrm{safe}}^{(l)}$.`
+	good := `拒绝向量是 $\mathbf{v}_{\mathrm{refu}}=\mathbf{v}_{\mathrm{text}}=\bar{\mathbf{h}}_{\mathrm{harm}}^{(l)}-\bar{\mathbf{h}}_{\mathrm{safe}}^{(l)}$。`
+	bad := `拒绝向量是 $\mathbf{v}_{\mathrm{refu}}^{(l)}=\mathbf{v}_{\mathrm{text}}^{(l)}=\mathbf{h}_{\mathrm{harm}}^{(l)}-\mathbf{h}_{\mathrm{safe}}^{(l)}$。`
+	for _, target := range []string{good, bad} {
+		_, err := parseTranslation(jsonText(map[string]any{"sentences": []TranslationSentence{{Source: source, Target: target}}}), source)
+		if (err == nil) != (target == good) {
+			t.Fatal(target, err)
+		}
+	}
+}
 
 // Extracted from a VLDB paper: math italics with subscripts moved out of place.
 const garbledParagraph = "Let 𝑇 be a set of transactions that depend on directly or tran- 𝑖 𝑡 𝑖 sitively, where for all 𝑡 in 𝑇 , there exists a path from 𝑖 𝑡 to in 𝑖 𝑡 𝑀𝑉 𝑆𝐺 ( 𝑠, ≪) through any types of edges, wr , rw , and ww . We refer to 𝑇 as the followers of 𝑡 𝑖."

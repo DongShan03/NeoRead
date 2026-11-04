@@ -4,8 +4,42 @@ import type {
   PDFSentenceLink,
   ReaderSelection,
   TranslationBlock,
+  TranslationLocation,
 } from "@neoread/core";
 import { sentenceAnchor } from "@neoread/core";
+
+// A legacy paragraph-sized pair can become several sentence pairs without
+// changing its source hash. Relocate saved marks by their source text.
+export function sentenceIndexesForMark(
+  part: Pick<TranslationLocation, "sourceText" | "sentenceIndexes">,
+  translation: TranslationBlock,
+): number[] {
+  if (!part.sourceText) return part.sentenceIndexes;
+  const normalize = (text: string) =>
+    text.replace(/[\s\u00ad]/g, "").toLowerCase();
+  const source = normalize(part.sourceText);
+  for (const texts of [
+    translation.sentences.map(sentenceAnchor),
+    translation.sentences.map((s) => s.source),
+  ]) {
+    if (
+      part.sentenceIndexes.every((i) => !!texts[i]) &&
+      normalize(part.sentenceIndexes.map((i) => texts[i]).join("")) === source
+    )
+      return part.sentenceIndexes;
+    const values = texts.map(normalize),
+      full = values.join("");
+    const start = full.indexOf(source);
+    if (start < 0 || full.indexOf(source, start + 1) >= 0) continue;
+    let offset = 0;
+    return values.flatMap((text, index) => {
+      const begin = offset;
+      offset += text.length;
+      return begin < start + source.length && offset > start ? [index] : [];
+    });
+  }
+  return [];
+}
 
 export function sentenceLink(
   links: PDFSentenceLink[],

@@ -18,7 +18,11 @@ import { sentenceAnchor } from "@neoread/core";
 import { hoveredSentenceSelection } from "./sentence-annotation";
 import { isSelectionToolbar } from "../readers/selection-anchor";
 import { translatedAnnotationRanges } from "./annotations";
-import { sourcePassage, translatedSentenceRanges } from "./sentence-links";
+import {
+  sourcePassage,
+  translatedSentenceRanges,
+  sentenceIndexesForMark,
+} from "./sentence-links";
 import { blockRange, resolveEPUBLocation } from "../readers/epub-web-location";
 import { epubSentenceSlice } from "./epub-links";
 import { searchRanges } from "./search-ranges";
@@ -232,19 +236,19 @@ export function useSentenceMarks(
             );
             const normalize = (text: string) =>
               text.replace(/[\s\u00ad]/g, "").toLowerCase();
+            const indexes = translation
+              ? sentenceIndexesForMark(part, translation)
+              : [];
             if (
               !translation ||
-              !part.sentenceIndexes.length ||
-              part.sentenceIndexes.some((i) => !translation.sentences[i]) ||
+              !indexes.length ||
               (normalize(
-                part.sentenceIndexes
+                indexes
                   .map((i) => sentenceAnchor(translation.sentences[i]))
                   .join(""),
               ) !== normalize(part.sourceText) &&
                 normalize(
-                  part.sentenceIndexes
-                    .map((i) => translation.sentences[i].source)
-                    .join(""),
+                  indexes.map((i) => translation.sentences[i].source).join(""),
                 ) !== normalize(part.sourceText))
             ) {
               if (annotation.location.type === "pdf")
@@ -256,7 +260,7 @@ export function useSentenceMarks(
                 );
               continue;
             }
-            for (const index of part.sentenceIndexes)
+            for (const index of indexes)
               marks.push(
                 ...sourceRanges(translation, index).map((range) => ({
                   annotation,
@@ -461,7 +465,7 @@ export function useSentenceMarks(
           "[data-translation-block]",
         )?.dataset.translationBlock;
         t = translations.find(
-          (t) => t.blockId === blockId && t.status === "complete",
+          (t) => t.blockId === blockId && t.status === "complete" && !t.error,
         );
         index = Number(translated.dataset.sentence);
         fromTranslation = true;
@@ -493,7 +497,7 @@ export function useSentenceMarks(
               y <= b.bounds.y + b.bounds.height,
         );
         t = translations.find(
-          (t) => t.blockId === block?.id && t.status === "complete",
+          (t) => t.blockId === block?.id && t.status === "complete" && !t.error,
         );
         if (!t && block?.text && !block.image) {
           t = {
@@ -687,6 +691,8 @@ export function useSentenceMarks(
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ["data-neoread-math"],
     });
     const resize = new PDFResizeObserver(host, paint, interruptHover);
     repaint.current = paint;

@@ -2,6 +2,74 @@
 import { expect, it } from "vitest";
 import type { Annotation, TranslationBlock } from "@neoread/core";
 import { textRange, translatedAnnotationRanges } from "./annotations";
+import jailbound from "../readers/fixtures/jailbound-sentence-alignment.json";
+
+it("preserves an old paragraph mark while new JailBound marks cover only one sentence", () => {
+  const host = document.createElement("div");
+  const node = document.createElement("section");
+  node.dataset.translationBlock = jailbound.block.id;
+  for (const [index, sentence] of jailbound.sentences.entries()) {
+    const span = document.createElement("span");
+    span.dataset.sentence = String(index);
+    span.textContent = sentence.target;
+    node.append(span);
+  }
+  host.append(node);
+  const translation: TranslationBlock = {
+    blockId: jailbound.block.id,
+    sourceHash: "same",
+    status: "complete",
+    sentences: jailbound.sentences,
+  };
+  const target = jailbound.sentences.map((s) => s.target).join("");
+  const mark = {
+    blockId: translation.blockId,
+    sourceHash: translation.sourceHash,
+    sentenceIndexes: [0],
+    start: 0,
+    end: 0,
+    recovered: true,
+    wholeSentence: true,
+    sourceText: jailbound.block.text,
+  };
+  const annotation: Annotation = {
+    id: "old",
+    documentId: "doc",
+    kind: "highlight",
+    color: "#e6b94c",
+    quote: target,
+    note: "",
+    createdAt: "",
+    location: { type: "pdf", page: 6, translation: mark },
+  };
+  expect(
+    translatedAnnotationRanges(
+      host,
+      [annotation],
+      [translation],
+    )[0].range.toString(),
+  ).toBe(target);
+  const single = {
+    ...annotation,
+    id: "single",
+    quote: jailbound.sentences[1].target,
+    location: {
+      ...annotation.location,
+      translation: {
+        ...mark,
+        sentenceIndexes: [1],
+        sourceText: jailbound.sentences[1].source,
+      },
+    },
+  };
+  expect(
+    translatedAnnotationRanges(
+      host,
+      [single],
+      [translation],
+    )[0].range.toString(),
+  ).toBe(jailbound.sentences[1].target);
+});
 
 it("restores a translated mark across formatted text nodes without changing text", () => {
   const host = document.createElement("div");

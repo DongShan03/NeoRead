@@ -62,14 +62,15 @@ export function translatedSelection(
       sourceHash: translation.sourceHash,
       sentenceIndexes,
       wholeSentence:
+        !translation.error &&
         quote ===
-        sentenceIndexes
-          .map(
-            (i) =>
-              node.querySelector(`[data-sentence="${i}"]`)?.textContent ?? "",
-          )
-          .join("")
-          .trim(),
+          sentenceIndexes
+            .map(
+              (i) =>
+                node.querySelector(`[data-sentence="${i}"]`)?.textContent ?? "",
+            )
+            .join("")
+            .trim(),
       sourceText: sentenceIndexes
         .map((i) => sentenceAnchor(translation.sentences[i]))
         .join(""),

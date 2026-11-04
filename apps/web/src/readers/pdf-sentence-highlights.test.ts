@@ -5,6 +5,7 @@ import type { PDFViewer } from "pdfjs-dist/web/pdf_viewer.mjs";
 import type { PDFBlock, TranslationBlock } from "@neoread/core";
 import { translatedSelection } from "../translation/selection";
 import oze from "./fixtures/oze-sentence-alignment.json";
+import jailbound from "./fixtures/jailbound-sentence-alignment.json";
 vi.mock("pdfjs-dist", () => ({
   Util: { transform: (_a: number[], b: number[]) => b },
 }));
@@ -123,6 +124,73 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
   delete (Range.prototype as Partial<Range>).getClientRects;
   vi.unstubAllGlobals();
+});
+
+it("maps JailBound's three sentences despite its ASCII subscript moving into the next sentence", async () => {
+  currentBlock = jailbound.block;
+  const layer = page.querySelector(".textLayer")!;
+  const divs = jailbound.runs.map(({ text, bounds: b }) => {
+    const span = document.createElement("span");
+    span.textContent = text;
+    span.getBoundingClientRect = () =>
+      new DOMRect(b.x * 1000, b.y * 1000, b.width * 1000, b.height * 1000);
+    return span;
+  });
+  layer.replaceChildren(...divs);
+  nav.destroy();
+  const pdfPage = {
+    getTextContent: async () => ({
+      items: jailbound.runs.map((r) => ({
+        str: r.text,
+        fontName: r.math ? "math" : "body",
+      })),
+    }),
+    getOperatorList: async () => {},
+    commonObjs: {
+      has: () => true,
+      get: (name: string) => ({
+        name: name === "math" ? "CMMI10" : "NimbusRoman",
+      }),
+    },
+  };
+  nav = new PDFReadingNavigation(
+    host,
+    {
+      getPageView: () => ({
+        div: page,
+        pdfPage,
+        textLayer: { div: layer },
+        _textHighlighter: { textDivs: divs },
+      }),
+    } as unknown as PDFViewer,
+    async () => pdfPage as unknown as PDFPageProxy,
+    () => [currentBlock],
+    { location: vi.fn(), selection: vi.fn() },
+  );
+  await nav.markSentenceMath(6);
+  expect(divs.filter((d) => d.hasAttribute("data-neoread-math"))).toHaveLength(
+    jailbound.runs.filter((r) => r.math).length,
+  );
+  const normalize = (s: string) => s.replace(/\s/g, "");
+  const expected = [
+    "where x (j) t is the j-th token in the suffix.",
+    "This alternating optimization scheme enables coordinated perturbations across modalities while respecting the continuous nature of image perturbations and the discrete nature of text tokens.",
+    "The complete procedure is detailed in Algorithm 2.",
+  ];
+  let sourceOffset = 0;
+  for (let i = 0; i < 3; i++) {
+    const ranges = nav.sentenceRanges([
+      {
+        blockId: currentBlock.id,
+        sources: [jailbound.sentences[i].source],
+        sourceOffset,
+      },
+    ]);
+    expect(normalize(ranges.map((r) => r.toString()).join(""))).toBe(
+      normalize(expected[i]),
+    );
+    sourceOffset += normalize(jailbound.sentences[i].source).length;
+  }
 });
 
 it("highlights whole source sentences for a partial translation selection using text ranges, preserving the native selection", async () => {

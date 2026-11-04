@@ -1,4 +1,5 @@
 import type { Annotation, TranslationBlock } from "@neoread/core";
+import { sentenceIndexesForMark } from "./sentence-links";
 
 export function textRange(
   root: HTMLElement,
@@ -35,15 +36,13 @@ export function translatedAnnotationRanges(
     const mark = annotation.location.translation;
     if (!mark) continue;
     for (const part of mark.ranges ?? [{ ...mark, quote: annotation.quote }]) {
-      if (
-        !translations.some(
-          (t) =>
-            t.blockId === part.blockId &&
-            t.sourceHash === part.sourceHash &&
-            t.status === "complete",
-        )
-      )
-        continue;
+      const translation = translations.find(
+        (t) =>
+          t.blockId === part.blockId &&
+          t.sourceHash === part.sourceHash &&
+          t.status === "complete",
+      );
+      if (!translation) continue;
       const node = Array.from(
         host.querySelectorAll<HTMLElement>("[data-translation-block]"),
       ).find((n) => n.dataset.translationBlock === part.blockId);
@@ -51,7 +50,7 @@ export function translatedAnnotationRanges(
       if (part.recovered) {
         const range = recoveredAnnotationRange(
           node,
-          part.sentenceIndexes,
+          sentenceIndexesForMark(part, translation),
           part.wholeSentence ? "" : part.matchedQuote || "",
         );
         if (range) result.push({ annotation, range });

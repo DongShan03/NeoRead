@@ -24,7 +24,11 @@ func configureTranslationTest(t *testing.T, s *Server, url string) {
 	}
 }
 func translationParagraphLine(p translationParagraph) string {
-	data, _ := json.Marshal(map[string]any{"blockId": p.BlockID, "sourceHash": p.SourceHash, "sentences": []TranslationSentence{{Source: p.Source, Target: "译文。"}}})
+	pairs := []TranslationSentence{}
+	for _, source := range translationSentenceParts(p.Source) {
+		pairs = append(pairs, TranslationSentence{Source: strings.TrimSpace(source), Target: "译文。"})
+	}
+	data, _ := json.Marshal(map[string]any{"blockId": p.BlockID, "sourceHash": p.SourceHash, "sentences": pairs})
 	return string(data) + "\n"
 }
 func translationLine(b PDFBlock) string {

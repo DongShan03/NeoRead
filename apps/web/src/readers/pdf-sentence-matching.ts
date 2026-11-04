@@ -3,13 +3,31 @@
 // complete prose in that case, retaining the original PDF offsets for painting.
 const mathLetter = /[\u{1d400}-\u{1d7cb}]/u;
 
-function prose(text: string) {
+export function sentenceMathOffsets(text: string, glyphs: Set<string>) {
+  const offsets = new Set<number>();
+  for (const match of text.matchAll(
+    /(?<![\p{L}\p{N}])[\p{L}\p{N}](?![\p{L}\p{N}])/gu,
+  )) {
+    if (!glyphs.has(match[0].normalize("NFKD").toLowerCase())) continue;
+    const start = text.slice(0, match.index).replace(/[\s\u00ad]/g, "").length;
+    for (let i = 0; i < match[0].length; i++) offsets.add(start + i);
+  }
+  return offsets;
+}
+
+type SentenceMath = {
+  text: Set<number>;
+  block: Set<number>;
+  sources: Set<number>[];
+};
+
+function prose(text: string, math?: Set<number>) {
   let value = "",
     offset = 0;
   const starts: number[] = [],
     ends: number[] = [];
   for (const char of text) {
-    if (!mathLetter.test(char)) {
+    if (!mathLetter.test(char) && !math?.has(offset)) {
       value += char;
       for (let i = 0; i < char.length; i++) {
         starts.push(offset);
@@ -25,9 +43,15 @@ function uniqueIndex(text: string, needle: string) {
   const start = text.indexOf(needle);
   return start >= 0 && text.indexOf(needle, start + 1) < 0 ? start : -1;
 }
-function symbols(text: string) {
+function symbols(text: string, math?: Set<number>, base = 0) {
+  let offset = base;
   return Array.from(text)
-    .filter((c) => mathLetter.test(c))
+    .filter((c) => {
+      const include = mathLetter.test(c) || !!math?.has(offset);
+      offset += c.length;
+      return include;
+    })
+    .map((c) => c.normalize("NFKD").toLowerCase())
     .sort()
     .join("");
 }
@@ -104,26 +128,29 @@ export function sentenceTextRanges(
   block: string,
   sources: string[],
   sourceOffset = 0,
+  math?: SentenceMath,
 ): Array<{ start: number; end: number }> {
   const inline = inlineMathProjection(text, block);
   const paragraphStart = uniqueIndex(text, block);
-  const pdfProse = prose(text),
-    blockProse = prose(block);
+  const pdfProse = prose(text, math?.text),
+    blockProse = prose(block, math?.block);
   const proseStart = uniqueIndex(pdfProse.value, blockProse.value);
   const wholeParagraph =
     proseStart >= 0 &&
-    symbols(block) ===
+    symbols(block, math?.block) ===
       symbols(
         text.slice(
           pdfProse.starts[proseStart],
           pdfProse.ends[proseStart + blockProse.value.length - 1],
         ),
+        math?.text,
+        pdfProse.starts[proseStart],
       );
   const matches: Array<{ start: number; end: number }> = [];
   let cursor =
     paragraphStart >= 0 ? paragraphStart + sourceOffset : sourceOffset;
   let sourceCursor = sourceOffset;
-  for (const source of sources) {
+  for (const [index, source] of sources.entries()) {
     if (!source) continue;
     const sourceStart = block.indexOf(source, sourceCursor);
     if (sourceStart >= 0) sourceCursor = sourceStart + source.length;
@@ -136,7 +163,8 @@ export function sentenceTextRanges(
     }
     const contextual =
       wholeParagraph && sourceStart >= 0
-        ? proseStart + prose(block.slice(0, sourceStart)).value.length
+        ? proseStart +
+          prose(block.slice(0, sourceStart), math?.block).value.length
         : -1;
     let start =
       paragraphStart >= 0 && sourceStart >= 0
@@ -149,7 +177,7 @@ export function sentenceTextRanges(
       matches.push({ start, end: cursor });
       continue;
     }
-    const needle = prose(source).value;
+    const needle = prose(source, math?.sources[index]).value;
     // Without a complete paragraph match, require a unique substantial prose
     // sentence with the same variables. Paragraph context can also account for
     // subscripts that OCR has moved across sentence boundaries.
@@ -168,7 +196,11 @@ export function sentenceTextRanges(
       continue;
     start = pdfProse.starts[projected];
     const end = pdfProse.ends[projected + needle.length - 1];
-    if (!wholeParagraph && symbols(source) !== symbols(text.slice(start, end)))
+    if (
+      !wholeParagraph &&
+      symbols(source, math?.sources[index]) !==
+        symbols(text.slice(start, end), math?.text, start)
+    )
       continue;
     // Paragraph context resolves repeated sentences; otherwise require a
     // unique full-prose match. This never expands an unmatched sentence.

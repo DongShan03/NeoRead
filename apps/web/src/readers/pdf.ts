@@ -200,6 +200,10 @@ export class PDFReaderAdapter implements ReaderAdapter {
     this.bus.on(
       "textlayerrendered",
       ({ pageNumber }: { pageNumber: number }) => {
+        void this.navigation
+          .markSentenceMath(pageNumber)
+          .then(() => this.navigation.repaint())
+          .catch(() => {});
         this.navigation.repaint();
         this.figureLinks.repaint(pageNumber);
         this.locationHighlight.paint();

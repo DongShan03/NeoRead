@@ -1,0 +1,152 @@
+{
+  "block": {
+    "label": "text",
+    "confidence": 0.9196425676345825,
+    "order": 292,
+    "bounds": {
+      "x": 0.169677734375,
+      "y": 0.8690338134765625,
+      "width": 0.65625,
+      "height": 0.045135498046875
+    },
+    "text": "where x ( j ) is the j -th token in the suffix. This alternating optimization scheme enables coordinated t perturbations across modalities while respecting the continuous nature of image perturbations and the discrete nature of text tokens. The complete procedure is detailed in Algorithm 2.",
+    "id": "p6-b12",
+    "page": 6
+  },
+  "sentences": [
+    {
+      "source": "where x ( j ) is the j -th token in the suffix.",
+      "target": "其中，$x_t^{(j)}$ 是后缀中的第 $j$ 个词元。"
+    },
+    {
+      "source": "This alternating optimization scheme enables coordinated t perturbations across modalities while respecting the continuous nature of image perturbations and the discrete nature of text tokens.",
+      "target": "该交替优化方案既遵循图像扰动的连续性质和文本词元的离散性质，又实现了跨模态扰动的协调。"
+    },
+    {
+      "source": "The complete procedure is detailed in Algorithm 2.",
+      "target": "完整过程详见算法 2。"
+    }
+  ],
+  "runs": [
+    {
+      "text": "where",
+      "math": false,
+      "bounds": {
+        "x": 0.17588398692810459,
+        "y": 0.8730143398989898,
+        "width": 0.03992808223398693,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "x",
+      "math": true,
+      "bounds": {
+        "x": 0.21989705882352942,
+        "y": 0.8728130752525253,
+        "width": 0.009303310294117647,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "(",
+      "math": false,
+      "bounds": {
+        "x": 0.22920098039215683,
+        "y": 0.8688979580808082,
+        "width": 0.005086771764705882,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "j",
+      "math": true,
+      "bounds": {
+        "x": 0.2342877521568627,
+        "y": 0.8688979580808082,
+        "width": 0.005386462843137254,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": ")",
+      "math": false,
+      "bounds": {
+        "x": 0.2403351306862745,
+        "y": 0.8688979580808082,
+        "width": 0.005086771764705882,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "t",
+      "math": true,
+      "bounds": {
+        "x": 0.22920098039215683,
+        "y": 0.8785280085858587,
+        "width": 0.00491812431372549,
+        "height": 0.00880530303030303
+      }
+    },
+    {
+      "text": "is the",
+      "math": false,
+      "bounds": {
+        "x": 0.2503169934640523,
+        "y": 0.8730143398989898,
+        "width": 0.03495954478039218,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "j",
+      "math": true,
+      "bounds": {
+        "x": 0.2893578431372549,
+        "y": 0.8728130752525253,
+        "width": 0.0067035926143790845,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "-th token in the suffix. This alternating optimization scheme enables coordinated",
+      "math": false,
+      "bounds": {
+        "x": 0.29699346405228755,
+        "y": 0.8730143398989898,
+        "width": 0.5265342190954249,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "perturbations across modalities while respecting the continuous nature of image perturbations and the",
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529413,
+        "y": 0.8867883297979797,
+        "width": 0.6470611027450979,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "discrete nature of text tokens. The complete procedure is detailed in Algorithm 2.",
+      "math": false,
+      "bounds": {
+        "x": 0.17647058823529413,
+        "y": 0.9005623196969696,
+        "width": 0.5304433349673202,
+        "height": 0.012579040404040405
+      }
+    },
+    {
+      "text": "6",
+      "math": false,
+      "bounds": {
+        "x": 0.49592973856209155,
+        "y": 0.9382996934343434,
+        "width": 0.00813937908496732,
+        "height": 0.012579040404040405
+      }
+    }
+  ]
+}

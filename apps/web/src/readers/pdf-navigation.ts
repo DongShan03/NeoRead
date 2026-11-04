@@ -4,7 +4,10 @@ import {
   pdfFocusMotion,
   pdfFocusProgress,
 } from "./pdf-scroll";
-import { sentenceTextRanges } from "./pdf-sentence-matching";
+import {
+  sentenceTextRanges,
+  sentenceMathOffsets,
+} from "./pdf-sentence-matching";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFViewer } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { isPDFPageDecoration, sentenceAnchor } from "@neoread/core";
@@ -30,6 +33,7 @@ export class PDFReadingNavigation {
   private readable: PDFBlock[] = [];
   private blocksByPage = new Map<number, PDFBlock[]>();
   private blocksById = new Map<string, PDFBlock>();
+  private mathLayers = new WeakSet<HTMLElement>();
   private focusAnimation?: {
     animation: Animation;
     node: HTMLElement;
@@ -454,6 +458,42 @@ export class PDFReadingNavigation {
     );
     if (!this.disposed && this.focus === passages) this.paintFocus();
   }
+  async markSentenceMath(pageNumber: number) {
+    const view = this.viewer.getPageView(pageNumber - 1);
+    const page: pdfjs.PDFPageProxy | undefined = view?.pdfPage;
+    const layer = view?.textLayer?.div;
+    if (!page || !layer || this.disposed || this.mathLayers.has(layer)) return;
+    const content = await page.getTextContent({
+      includeMarkedContent: true,
+      disableNormalization: true,
+    });
+    await page.getOperatorList();
+    if (this.disposed || layer !== view.textLayer?.div) return;
+    const divs = (
+      view as unknown as { _textHighlighter?: { textDivs?: HTMLElement[] } }
+    )._textHighlighter?.textDivs;
+    const items = content.items.filter(
+      (item): item is import("pdfjs-dist/types/src/display/api").TextItem =>
+        "str" in item,
+    );
+    if (!divs || items.length !== divs.length) return;
+    items.forEach((item, index) => {
+      if (
+        divs[index].textContent !== item.str ||
+        !page.commonObjs.has(item.fontName)
+      )
+        return;
+      const name = String(
+        page.commonObjs.get(item.fontName).name ?? "",
+      ).replace(/^[A-Z]{6}\+/, "");
+      if (
+        /^(?:CMMI|CMSY|MSBM|CMEX)\d+$/i.test(name) ||
+        (/^CMBX\d+$/i.test(name) && Array.from(item.str).length === 1)
+      )
+        divs[index].setAttribute("data-neoread-math", "");
+    });
+    this.mathLayers.add(layer);
+  }
   sentenceRanges(passages: PDFPassage[]): Range[] {
     if (this.disposed) return [];
     return passages.flatMap((passage) => {
@@ -621,6 +661,8 @@ export class PDFReadingNavigation {
     if (!page.width) return [];
     const nodes: Array<{ node: Text; offset: number; group: number }> = [],
       chars: string[] = [];
+    const math = new Set<number>(),
+      glyphs = new Set<string>();
     const walker = document.createTreeWalker(
       node.querySelector(".textLayer") ?? document.createElement("div"),
       NodeFilter.SHOW_TEXT,
@@ -654,6 +696,10 @@ export class PDFReadingNavigation {
       for (let i = 0; i < (text.textContent?.length ?? 0); i++) {
         const c = text.textContent![i];
         if (/[\s\u00ad]/.test(c)) continue;
+        if (parent?.closest("[data-neoread-math]") && /[\p{L}\p{N}]/u.test(c)) {
+          math.add(chars.length);
+          glyphs.add(c.normalize("NFKD").toLowerCase());
+        }
         chars.push(c.toLowerCase());
         nodes.push({ node: text as Text, offset: i, group });
       }
@@ -667,6 +713,11 @@ export class PDFReadingNavigation {
       normalize(block.text),
       sources.map(normalize),
       startOffset,
+      {
+        text: math,
+        block: sentenceMathOffsets(block.text, glyphs),
+        sources: sources.map((source) => sentenceMathOffsets(source, glyphs)),
+      },
     )) {
       // PDF DOM order can interleave columns. Never let a Range bridge text
       // nodes that were excluded from this paragraph during matching.
