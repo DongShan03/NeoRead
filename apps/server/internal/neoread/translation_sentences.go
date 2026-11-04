@@ -8,7 +8,7 @@ import (
 	"github.com/clipperhouse/uax29/v2/sentences"
 )
 
-var sentenceAbbreviation = regexp.MustCompile(`(?i)(?:\bet al\.|\be\.g\.|\bi\.e\.|\b(?:fig|eq|sec|vol|no)\.)$`)
+var sentenceAbbreviation = regexp.MustCompile(`(?i)(?:\bet al\.|\be\.g\.|\bi\.e\.|\b(?:fig|eq|sec|vol|no|vs|app)\.)$`)
 var mathDecoration = regexp.MustCompile(`\\(bar|overline|hat|widehat|tilde|widetilde|dot|ddot|mathcal|mathbb|mathbf)\b`)
 
 func matchingMathDecorations(source, target string) bool {

@@ -20,6 +20,24 @@ func sentencesJSON(sources ...string) string {
 
 func compact(s string) string { return strings.Join(strings.Fields(s), "") }
 
+func TestScientificAbbreviationsDoNotRejectAlreadySentenceWiseTranslations(t *testing.T) {
+	for _, source := range []string{
+		"This formulation achieves 94.4% success on Qwen-VL (vs. 68.8% baseline) with fewer iterations.",
+		"(C) This induces safety blindness, achieving 95.5% ASR vs. 70.0% baseline.",
+		"Prompts used for multimodal evidence generation are listed in App. A.",
+	} {
+		raw := jsonText(map[string]any{"sentences": []TranslationSentence{{Source: source, Target: "这是对应的一个中文句子。"}}})
+		pairs, err := parseTranslationSource(raw, source, true)
+		if err != nil || len(pairs) != 1 {
+			t.Fatalf("abbreviation split a source sentence: %q: %v", source, err)
+		}
+		cached := repairCachedTranslationAnchors(TranslationBlock{Status: "complete", Sentences: []TranslationSentence{{Source: source, Target: "这是对应的一个中文句子。"}}}, source)
+		if cached.Error != "" {
+			t.Fatal("valid cached sentence acquired a legacy warning", cached.Error)
+		}
+	}
+}
+
 func TestJailBoundLegacyParagraphRestoresSentencePairs(t *testing.T) {
 	body, err := os.ReadFile("../../../web/src/readers/fixtures/jailbound-sentence-alignment.json")
 	if err != nil {
