@@ -165,16 +165,23 @@ export function installWebDAVSync() {
       setWebDAVStatus(status);
       if (status.phase === "ready" && status.applyToken && !applying) {
         applying = status.applyToken;
+        let acknowledged = false;
         try {
           await flushProgress();
           // Hold the note editors only during the local commit. Network
           // downloads/uploads happen outside this save boundary.
           const result = await importWithPaperNotes(async () => {
+            acknowledged = true;
             const committed = await api.applyWebdav(applying);
             await refreshViews(committed);
             return committed;
           }, true);
           if (active) setWebDAVStatus(result);
+        } catch (error) {
+          // A failed local save must terminate the run without applying remote
+          // content; persist its failure so polling can notify and offer retry.
+          if (!acknowledged) await api.applyWebdav(applying, false);
+          throw error;
         } finally {
           applying = "";
         }

@@ -280,7 +280,16 @@
                           "schema":
                             {
                               "type": "object",
-                              "properties": { "token": { "type": "string" } },
+                              "properties":
+                                {
+                                  "token": { "type": "string" },
+                                  "saved":
+                                    {
+                                      "type": "boolean",
+                                      "default": true,
+                                      "description": "False aborts the run when renderer drafts could not be saved",
+                                    },
+                                },
                               "required": ["token"],
                             },
                         },

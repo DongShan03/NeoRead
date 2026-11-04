@@ -317,10 +317,10 @@ export const api = {
     request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/cancel", {
       method: "POST",
     }),
-  applyWebdav: (token: string) =>
+  applyWebdav: (token: string, saved = true) =>
     request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/apply", {
       method: "POST",
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ token, saved }),
     }),
   resolveWebdav: (key: string, conflict: string, version: string) =>
     request<import("@neoread/core").WebDAVStatus>("/api/sync/webdav/resolve", {
