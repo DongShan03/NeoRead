@@ -75,7 +75,7 @@ func generateFormula(ctx context.Context, service *GenerationService, input AIIn
 
 // One bounded image worker runs independently of text batches. Only complete
 // provider responses are saved; each save publishes through the translation SSE.
-func (s *Server) convertFormulas(ctx context.Context, documentID string, m layoutManifest) error {
+func (s *Server) convertFormulas(ctx context.Context, documentID string, m layoutManifest, options *translationRunOptions) error {
 	items, err := s.translations(documentID, m)
 	if err != nil {
 		return err
@@ -111,7 +111,7 @@ func (s *Server) convertFormulas(ctx context.Context, documentID string, m layou
 		}
 		image, callErr := os.ReadFile(filepath.Join(s.analysisDir(documentID), b.Image))
 		if callErr == nil {
-			service := s.generationService(s.aiConfig())
+			service := s.generationService(options.apply(s.aiConfig()))
 			service.usageSink = s.processingUsageSink(documentID, "translating", b.ID)
 			service.timeout = formulaTimeout
 			t.FormulaMarkdown, callErr = generateFormula(ctx, service, AIInput{Prompt: formulaPrompt + b.Text, Image: image})
@@ -182,7 +182,7 @@ func (s *Server) translateContent(ctx context.Context, p *Processing, input tran
 		return err
 	}
 	result := make(chan error, 1)
-	go func() { result <- s.convertFormulas(ctx, p.DocumentID, m) }()
+	go func() { result <- s.convertFormulas(ctx, p.DocumentID, m, options) }()
 	textErr := s.settleTranslations(ctx, p, m)
 	if textErr == nil && p.Status != "waiting" {
 		p.Detail = "正文翻译已完成，正在完成公式转换"
@@ -196,10 +196,10 @@ func (s *Server) translateContent(ctx context.Context, p *Processing, input tran
 	retried := false
 	for textErr == nil && formulaErr != nil && errorKind(formulaErr) == ErrorCapability {
 		s.configMu.Lock()
-		if !retried && s.generationService(s.readAIConfig()).ValidateInput(AIInput{Image: []byte{1}}, false) == nil {
+		if !retried && s.generationService(options.apply(s.readAIConfig())).ValidateInput(AIInput{Image: []byte{1}}, false) == nil {
 			s.configMu.Unlock()
 			retried = true
-			formulaErr = s.convertFormulas(ctx, p.DocumentID, m)
+			formulaErr = s.convertFormulas(ctx, p.DocumentID, m, options)
 			continue
 		}
 		s.processingMu.Lock()

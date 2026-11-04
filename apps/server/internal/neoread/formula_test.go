@@ -252,7 +252,7 @@ func TestFormulaCancellationResumesWithoutSavingPartialResult(t *testing.T) {
 	configureFormulaTest(t, s, images.URL, images.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- s.convertFormulas(ctx, "doc", m) }()
+	go func() { done <- s.convertFormulas(ctx, "doc", m, nil) }()
 	waitFormulaSignal(t, started)
 	cancel()
 	if err := <-done; err == nil {
@@ -261,5 +261,46 @@ func TestFormulaCancellationResumesWithoutSavingPartialResult(t *testing.T) {
 	items, _ := s.translations("doc", m)
 	if items[0].Status != "pending" || items[0].FormulaMarkdown != "" {
 		t.Fatalf("partial formula saved: %+v", items[0])
+	}
+}
+
+func TestFormulaRetranslationRetainsSavedAgentAfterCurrentSelectionIsCleared(t *testing.T) {
+	s, p, m := formulaFixture(t)
+	completedFormulaCaption(t, s, m)
+	var calls atomic.Int32
+	images := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		sendTranslationDelta(w, "$$x=1$$")
+		finishTranslationStream(w)
+	}))
+	defer images.Close()
+	config := AIConfig{ImageAPI: APIConnection{URL: images.URL, Model: "test"}, Capabilities: map[string]Capability{}}
+	config.Capabilities["image-api"] = Capability{Text: true, Vision: true, Fingerprint: configPrint(config, "image-api")}
+	if err := s.writeAIConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	options := translationRunOptions{Provider: "codex", Model: "saved-translation-model", Effort: "high"}
+	if _, err := s.Store.DB.Exec("INSERT INTO translation_restarts(document_id,options) VALUES(?,?)", "doc", jsonText(options)); err != nil {
+		t.Fatal(err)
+	}
+	p.Enabled, p.Retranslating = true, true
+	p.lane = "translating"
+	p.Translating = &ProcessingStage{Status: "queued"}
+	if err := s.Store.saveProcessing(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.translateContent(t.Context(), &p, m); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.translations("doc", m)
+	if err != nil || items[0].Status != "complete" || items[0].FormulaMarkdown != "$$x=1$$\n" || items[1].Sentences[0].Target != "已保存图注" {
+		t.Fatal("saved formula/prose missing", items, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("formula conversion repeated", calls.Load())
+	}
+	if current := s.aiConfig(); current.Primary != "" {
+		t.Fatal("task changed global Agent selection")
 	}
 }
