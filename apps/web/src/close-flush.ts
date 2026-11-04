@@ -5,7 +5,7 @@ import {
   hasPendingPaperNotes,
   takePaperNoteSaveWarning,
 } from "./paper-note-state";
-import { useReaderStore } from "./store";
+import { flushLibraryPreferences, useReaderStore } from "./store";
 
 /** Save reading state when the window closes. Installed outside React so a crashed UI still answers the desktop close request. */
 export function installCloseFlush() {
@@ -31,15 +31,17 @@ export function installCloseFlush() {
       flushProgress(),
       flushPaperNotes(),
       saveReaderSettings(useReaderStore.getState().theme),
+      flushLibraryPreferences(),
     ]);
     // Note write failures are already reported and discarded. Other reading
     // state failures retain the existing close protection.
-    const failed = [results[0], results[2]].find(
+    const failed = [results[0], results[2], results[3]].find(
       (result) => result.status === "rejected",
     );
     if (failed?.status === "rejected") throw failed.reason;
     // Editing can continue while progress/settings requests are in flight.
     await flushPaperNotes().catch(() => {});
+    await flushLibraryPreferences();
     if (takePaperNoteSaveWarning()) return { noteSaveDiscarded: true };
   });
   return () => {

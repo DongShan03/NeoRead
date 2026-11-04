@@ -6,6 +6,7 @@ import { api } from "@neoread/api";
 import { toast } from "sonner";
 import { flushProgress } from "./progress";
 import { flushPaperNotes } from "./paper-note-state";
+import { flushLibraryPreferences } from "./store";
 import { WebDAVSyncButton } from "./WebDAVSyncButton";
 import {
   emptyWebDAVStatus,
@@ -21,6 +22,9 @@ vi.mock("./progress", () => ({
 vi.mock("./paper-note-state", () => ({
   flushPaperNotes: vi.fn(async () => {}),
   hasPendingPaperNotes: () => false,
+}));
+vi.mock("./store", () => ({
+  flushLibraryPreferences: vi.fn(async () => {}),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 const config = {
@@ -116,6 +120,7 @@ it("flushes drafts before manual sync and shows a green success notification", a
   vi.mocked(api.runWebdav).mockImplementation(async () => {
     expect(flushProgress).toHaveBeenCalledTimes(1);
     expect(flushPaperNotes).toHaveBeenCalledTimes(1);
+    expect(flushLibraryPreferences).toHaveBeenCalledTimes(1);
     return {
       ...clean,
       manual: true,

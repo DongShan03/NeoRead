@@ -107,3 +107,65 @@ func TestAnnotationRevisionDoesNotAdvanceAfterRolledBackRecovery(t *testing.T) {
 		t.Fatal("published an uncommitted revision")
 	}
 }
+
+func TestAnnotationMutationsPublishOnlyCommittedChanges(t *testing.T) {
+	for _, session := range []string{"", "reader-window"} {
+		t.Run("session="+session, func(t *testing.T) {
+			s, _ := processingFixture(t)
+			changes := make(chan struct{}, 1)
+			s.annotationSubscribers = map[string]map[chan struct{}]struct{}{"doc": {changes: {}}}
+			revision := s.annotationRevision("doc")
+			changed := func() {
+				t.Helper()
+				if next := s.annotationRevision("doc"); next == revision {
+					t.Fatal("committed mutation did not advance the revision")
+				} else {
+					revision = next
+				}
+				select {
+				case <-changes:
+				default:
+					t.Fatal("subscriber did not receive the committed change")
+				}
+			}
+			unchanged := func() {
+				t.Helper()
+				if s.annotationRevision("doc") != revision || len(changes) != 0 {
+					t.Fatal("published a failed or unchanged mutation")
+				}
+			}
+			a := pdfUnderline("", []annotationRect{{.1, .2, .3, .02}}, "source")
+			saved := undoMark(t, s, session, a)
+			changed()
+			path := "/api/documents/doc/annotations/" + saved.ID
+			edit := map[string]any{"note": "saved note"}
+			if w := undoRequest(t, s, session, "PATCH", path, edit); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			changed()
+			if w := undoRequest(t, s, session, "PATCH", path, edit); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			unchanged()
+			if w := undoRequest(t, s, session, "PATCH", path, map[string]any{"color": "invalid"}); w.Code != 400 {
+				t.Fatal(w.Body.String())
+			}
+			unchanged()
+			if w := undoRequest(t, s, session, "DELETE", path, nil); w.Code != 204 {
+				t.Fatal(w.Body.String())
+			}
+			changed()
+			if session == "" {
+				if len(s.annotationHistory) != 0 {
+					t.Fatal("client without an undo session gained history")
+				}
+				return
+			}
+			undoLast(t, s, session)
+			changed()
+			if body := storedAnnotationBody(t, s, saved.ID); !strings.Contains(body, "saved note") {
+				t.Fatal("undo notification preceded restored persistence")
+			}
+		})
+	}
+}

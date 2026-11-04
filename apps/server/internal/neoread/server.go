@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -503,6 +504,9 @@ func (s *Server) importFileToCategory(ctx context.Context, temp, filename, libra
 			return failure(500, "无法创建解析任务")
 		}
 		return d, 200, nil
+	} else if !errors.Is(e, sql.ErrNoRows) {
+		s.diagnosticEvent(slog.LevelError, "document.import_rejected", "documentId", docID, "reasonCode", "existing_record_unreadable")
+		return failure(500, "无法读取已有文档，原文件已保留，请先检查书库")
 	}
 	if kind == "pdf" {
 		f, e := os.Open(temp)
@@ -649,11 +653,6 @@ func validLocation(data json.RawMessage, kind string) bool {
 	return l.Href != "" && err == nil && l.Progression >= 0 && l.Progression <= 1 && validEPUBLocator(l.Locator, l.Href) && validEPUBTranslationLocations(data) && validEPUBBlockLocation(data)
 }
 func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
-	d, err := s.Store.Document(r.PathValue("id"))
-	if err != nil {
-		fail(w, 404, "文档不存在")
-		return
-	}
 	var v struct {
 		Title            json.RawMessage            `json:"title"`
 		Author           json.RawMessage            `json:"author"`
@@ -669,6 +668,23 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 		Status           *string                    `json:"readingStatus"`
 	}
 	if !decode(w, r, &v) {
+		return
+	}
+	// Read and patch the same committed snapshot. Separate field edits and
+	// background metadata lookups must not replace each other's saved values.
+	tx, err := s.Store.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, 500, "无法保存文档")
+		return
+	}
+	defer tx.Rollback()
+	d, err := scanDocument(tx.QueryRowContext(r.Context(), "SELECT "+documentColumns+" FROM documents WHERE id=?", r.PathValue("id")))
+	if errors.Is(err, sql.ErrNoRows) {
+		fail(w, 404, "文档不存在")
+		return
+	}
+	if err != nil {
+		fail(w, 500, "无法读取文档")
 		return
 	}
 	var title, author, category, tags, folders, library, metadata, status, bodyEnd any
@@ -806,7 +822,10 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 		progress = string(v.Progress)
 		bodyReadPosition = max(bodyReadPosition, pdfReadPosition(v.Progress))
 	}
-	_, err = s.Store.DB.Exec("UPDATE documents SET title=COALESCE(?,title),author=COALESCE(?,author),favorite=COALESCE(?,favorite),progress=COALESCE(?,progress),percentage=COALESCE(?,percentage),body_read_position=MAX(body_read_position,?),body_end=COALESCE(?,body_end),last_opened_at=COALESCE(?,last_opened_at),category=COALESCE(?,category),tags=COALESCE(?,tags),folders=COALESCE(?,folders),library=COALESCE(?,library),metadata=COALESCE(?,metadata),reading_status=COALESCE(?,reading_status),category_source=CASE WHEN ? IS NOT NULL THEN 'manual' ELSE category_source END,classification_status=CASE WHEN ? IS NOT NULL THEN 'done' ELSE classification_status END,classification_error=CASE WHEN ? IS NOT NULL THEN '' ELSE classification_error END WHERE id=?", title, author, v.Favorite, progress, v.Percentage, bodyReadPosition, bodyEnd, openedAt, category, tags, folders, library, metadata, status, category, category, category, d.ID)
+	_, err = tx.ExecContext(r.Context(), "UPDATE documents SET title=COALESCE(?,title),author=COALESCE(?,author),favorite=COALESCE(?,favorite),progress=COALESCE(?,progress),percentage=COALESCE(?,percentage),body_read_position=MAX(body_read_position,?),body_end=COALESCE(?,body_end),last_opened_at=COALESCE(?,last_opened_at),category=COALESCE(?,category),tags=COALESCE(?,tags),folders=COALESCE(?,folders),library=COALESCE(?,library),metadata=COALESCE(?,metadata),reading_status=COALESCE(?,reading_status),category_source=CASE WHEN ? IS NOT NULL THEN 'manual' ELSE category_source END,classification_status=CASE WHEN ? IS NOT NULL THEN 'done' ELSE classification_status END,classification_error=CASE WHEN ? IS NOT NULL THEN '' ELSE classification_error END WHERE id=?", title, author, v.Favorite, progress, v.Percentage, bodyReadPosition, bodyEnd, openedAt, category, tags, folders, library, metadata, status, category, category, category, d.ID)
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err != nil {
 		fail(w, 500, "保存失败")
 		return

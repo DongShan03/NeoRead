@@ -71,10 +71,10 @@ export function getChatSession(
   sessions.set(key, session);
   if (sessions.size > 24) {
     for (const [oldKey, old] of sessions) {
-      if (oldKey !== key && !old.getSnapshot().busy) {
+      if (oldKey !== key && old.canEvict()) {
         old.dispose();
         sessions.delete(oldKey);
-        break;
+        if (sessions.size <= 24) break;
       }
     }
   }

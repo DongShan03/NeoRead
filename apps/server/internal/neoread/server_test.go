@@ -106,6 +106,40 @@ func TestImportPaperIntoFolderKeepsExistingAssignment(t *testing.T) {
 	}
 }
 
+func TestReimportKeepsExistingFilesWhenDocumentCannotBeRead(t *testing.T) {
+	s := testServer(t)
+	data := testPDF(2)
+	first := uploadToFolder(t, s, "paper.pdf", data, "papers", "")
+	if first.Code != 201 {
+		t.Fatalf("import: %d %s", first.Code, first.Body.String())
+	}
+	var doc Document
+	if err := json.Unmarshal(first.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(s.Store.Root, "cache", doc.ID)
+	if err := os.MkdirAll(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(cache, "preserved.txt")
+	if err := os.WriteFile(marker, []byte("saved cache"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec("UPDATE documents SET metadata='invalid-json' WHERE id=?", doc.ID); err != nil {
+		t.Fatal(err)
+	}
+	again := uploadToFolder(t, s, "paper.pdf", data, "papers", "")
+	if again.Code != 500 {
+		t.Fatalf("unreadable existing record: %d %s", again.Code, again.Body.String())
+	}
+	if saved, err := os.ReadFile(s.Store.File(doc)); err != nil || !bytes.Equal(saved, data) {
+		t.Fatalf("failed reimport changed the original PDF: %v", err)
+	}
+	if saved, err := os.ReadFile(marker); err != nil || string(saved) != "saved cache" {
+		t.Fatalf("failed reimport changed the existing cache: %v", err)
+	}
+}
+
 func TestImportSmartCategoryTags(t *testing.T) {
 	for _, source := range []string{"file", "reference"} {
 		t.Run(source, func(t *testing.T) {

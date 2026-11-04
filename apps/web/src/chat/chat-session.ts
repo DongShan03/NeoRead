@@ -158,6 +158,9 @@ export class ChatSession {
       this.listeners.delete(listener);
     };
   };
+  canEvict() {
+    return !this.state.busy && this.listeners.size === 0;
+  }
   private publish(patch: Partial<ChatSnapshot> = {}) {
     this.state = {
       ...this.state,
@@ -188,6 +191,10 @@ export class ChatSession {
         this.io.latestRun?.(),
       ]);
       if (this.alive && serial === this.serial) {
+        // A managed run can finish after its stream disconnects. Reuse the
+        // fetched history to replace its partial output with the saved answer.
+        if (this.active) await this.reconcile(serial, this.active, messages);
+        if (!this.current(serial)) return;
         const last = messages.at(-1);
         const messageKeys = { ...this.state.messageKeys };
         if (!this.active && last?.role === "user") {
@@ -220,7 +227,9 @@ export class ChatSession {
                 readingLocation: question.readingLocation,
                 webSearch: question.webSearch ?? false,
               },
-              this.active,
+              this.active?.input.userMessageId === question.id
+                ? this.active
+                : undefined,
               run,
             );
         }
@@ -551,12 +560,13 @@ export class ChatSession {
       throw error;
     }
   };
-  private async reconcile(serial: number, pending: PendingAnswer) {
+  private async reconcile(
+    serial: number,
+    pending: PendingAnswer,
+    messages?: Message[],
+  ) {
     try {
-      const messages = await this.io.messages(
-        this.documentId,
-        this.querySignal(),
-      );
+      messages ??= await this.io.messages(this.documentId, this.querySignal());
       if (!this.current(serial) || this.active !== pending) return false;
       const userIndex = messages.findIndex(
         (message) =>

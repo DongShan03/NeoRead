@@ -17,6 +17,7 @@ vi.mock("@neoread/api", () => ({
   },
 }));
 vi.mock("./store", () => ({
+  flushLibraryPreferences: vi.fn(async () => {}),
   useReaderStore: { getState: () => ({ theme: { mode: "light" } }) },
 }));
 import { installCloseFlush } from "./close-flush";

@@ -56,12 +56,16 @@ vi.mock("@neoread/api", () => ({
     messages: vi.fn(async () => []),
     chatSessions: vi.fn(async () => []),
     sessionMessages: vi.fn(async () => []),
+    startChatRun: vi.fn(async () => ({ id: "run", status: "running" })),
     blocks: vi.fn(async () => []),
     documentNote: vi.fn(async () => ({ body: "note", updatedAt: "" })),
     translations: vi.fn(async () => []),
   },
   setDiagnosticReporter: vi.fn(),
   reportDiagnostic: vi.fn(),
+  watchChatRun: vi.fn(async (_doc, _session, _run, _signal, emit) => {
+    emit({ event: "done", data: { ok: true } });
+  }),
   blockImageURL: vi.fn(),
   publicationURL: vi.fn(),
 }));
@@ -164,6 +168,35 @@ const button = (text: string) =>
   [...document.querySelectorAll("button")].find(
     (el) => el.textContent?.trim() === text,
   )!;
+
+it("keeps newer model settings when the initial config response arrives late", async () => {
+  let finish!: (config: Awaited<ReturnType<typeof api.aiConfig>>) => void;
+  vi.mocked(api.aiConfig).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => render(0));
+  const newer: Awaited<ReturnType<typeof api.aiConfig>> = {
+    primary: "claude",
+    models: { claude: "new-model" },
+    capabilities: {},
+    api: { url: "", model: "", hasKey: false },
+    textAPI: { url: "", model: "", hasKey: false },
+    imageAPI: { url: "", model: "", hasKey: false },
+  };
+  await act(async () => useReaderStore.getState().setAIConfig(newer));
+  await act(async () =>
+    finish({
+      ...newer,
+      primary: "codex",
+      models: { codex: "old-model" },
+    }),
+  );
+  expect(useReaderStore.getState().aiConfig).toBe(newer);
+});
+
 beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
@@ -190,6 +223,7 @@ beforeEach(() => {
 });
 
 it("updates the active outline heading when reading moves within one PDF page", async () => {
+  vi.useFakeTimers();
   vi.mocked(api.blocks).mockResolvedValueOnce(
     [0.1, 0.7].map((y, i) => ({
       id: `heading-${i}`,
@@ -200,6 +234,8 @@ it("updates the active outline heading when reading moves within one PDF page", 
     })),
   );
   await act(async () => render(0));
+  // Settle the initial annotation snapshot before measuring scroll renders.
+  await act(async () => vi.advanceTimersByTimeAsync(100));
   const heading = (name: string) =>
     host.querySelector<HTMLElement>(`[aria-label="目录：${name}"]`)!;
   await act(async () =>
@@ -538,7 +574,7 @@ it("keeps typing local and preserves the latest text across workspace updates", 
   expect(tabCloseWarning(doc.id)).toBeNull();
 });
 
-it("restores the latest session draft and text when the composer remounts", async () => {
+it("preserves session drafts through remounts and checks every draft before closing", async () => {
   vi.mocked(api.chatSessions).mockResolvedValue(
     ["draft-a", "draft-b"].map((id) => ({
       id,
@@ -556,6 +592,7 @@ it("restores the latest session draft and text when the composer remounts", asyn
   await act(async () => panels.sessions!.onChange("draft-b"));
   expect(composer().value).toBe("");
   expect(host.querySelector(".quote-chips")).toBeNull();
+  expect(tabCloseWarning(doc.id)?.message).toContain("未发送");
   await enterPrompt("second draft");
   await act(async () => panels.sessions!.onChange("draft-a"));
   expect(composer().value).toBe("first draft with latest typing");
@@ -576,7 +613,49 @@ it("restores the latest session draft and text when the composer remounts", asyn
     host.querySelector<HTMLButtonElement>('[aria-label="移除引用"]')!.click(),
   );
   await enterPrompt("   ");
+  expect(tabCloseWarning(doc.id)?.message).toContain("未发送");
+  await act(async () => panels.sessions!.onChange("draft-b"));
+  await enterPrompt("");
   expect(tabCloseWarning(doc.id)).toBeNull();
+});
+
+it("sends from a mounted reader after other chat sessions fill the cache", async () => {
+  vi.useFakeTimers();
+  vi.mocked(api.aiConfig).mockResolvedValue({
+    primary: "api",
+    models: {},
+    capabilities: {},
+  } as Awaited<ReturnType<typeof api.aiConfig>>);
+  vi.mocked(api.chatSessions).mockResolvedValue([
+    {
+      id: "cache-current",
+      documentId: doc.id,
+      title: "current",
+      provider: "api",
+      createdAt: "now",
+      updatedAt: "now",
+    },
+  ]);
+  await act(async () => render(0));
+  await act(async () =>
+    panels.readerReady?.({
+      getLocation: () => undefined,
+    } as unknown as ReaderAdapter),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  for (let i = 0; i < 24; i++)
+    sessionRegistry.getChatSession(`cache-document-${i}`, `cache-session-${i}`);
+  await enterPrompt("send this draft");
+  const send = host.querySelector<HTMLButtonElement>(
+    '[aria-label="发送问题"]',
+  )!;
+  expect(send.disabled).toBe(false);
+  await act(async () => send.click());
+  expect(api.startChatRun).toHaveBeenCalledExactlyOnceWith(
+    doc.id,
+    "cache-current",
+    expect.objectContaining({ prompt: "send this draft" }),
+  );
 });
 
 it("keeps long Chinese composition and paste native across workspace updates", async () => {

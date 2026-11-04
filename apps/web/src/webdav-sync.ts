@@ -6,6 +6,7 @@ import {
   type WebDAVStatus,
 } from "@neoread/core";
 import {
+  flushLibraryPreferences,
   loadLibraryPreferences,
   refreshLibrary,
   refreshTrash,
@@ -96,6 +97,7 @@ export async function startWebDAVSync() {
   if (current.starting || webdavBusy(current.status.phase)) return;
   useWebDAVSync.setState({ starting: true });
   try {
+    await flushLibraryPreferences();
     await flushProgress();
     await flushPaperNotes();
     setWebDAVStatus(await api.runWebdav());
@@ -167,6 +169,7 @@ export function installWebDAVSync() {
         applying = status.applyToken;
         let acknowledged = false;
         try {
+          await flushLibraryPreferences();
           await flushProgress();
           // Hold the note editors only during the local commit. Network
           // downloads/uploads happen outside this save boundary.

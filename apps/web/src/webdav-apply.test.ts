@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "@neoread/api";
 import { flushProgress } from "./progress";
 import { importWithPaperNotes } from "./paper-note-state";
+import { flushLibraryPreferences } from "./store";
 import { emptyWebDAVStatus, installWebDAVSync } from "./webdav-sync";
 
 vi.mock("@neoread/api", () => ({
@@ -18,6 +19,7 @@ vi.mock("./paper-note-state", () => ({
   importWithPaperNotes: vi.fn(async (run: () => Promise<unknown>) => run()),
 }));
 vi.mock("./store", () => ({
+  flushLibraryPreferences: vi.fn(async () => {}),
   loadLibraryPreferences: vi.fn(),
   refreshLibrary: vi.fn(),
   refreshTrash: vi.fn(),
@@ -50,10 +52,14 @@ afterEach(() => {
   stop = undefined;
 });
 
-it.each(["progress", "notes"])(
+it.each(["preferences", "progress", "notes"])(
   "reports a failed %s save without acknowledging remote application",
   async (kind) => {
-    if (kind === "progress")
+    if (kind === "preferences")
+      vi.mocked(flushLibraryPreferences).mockRejectedValueOnce(
+        new Error("save failed"),
+      );
+    else if (kind === "progress")
       vi.mocked(flushProgress).mockRejectedValueOnce(new Error("save failed"));
     else
       vi.mocked(importWithPaperNotes).mockRejectedValueOnce(

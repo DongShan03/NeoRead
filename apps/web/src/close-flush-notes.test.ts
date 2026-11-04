@@ -16,6 +16,7 @@ vi.mock("@neoread/api", () => ({
 }));
 vi.mock("./progress", () => ({ flushProgress: vi.fn(async () => {}) }));
 vi.mock("./store", () => ({
+  flushLibraryPreferences: vi.fn(async () => {}),
   useReaderStore: { getState: () => ({ theme: { mode: "light" } }) },
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
