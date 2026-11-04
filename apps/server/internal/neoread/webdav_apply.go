@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -498,10 +499,11 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 	// Attachment blobs are shared by content hash. Resolve their references
 	// against the accepted updates before deleting any physical file.
 	shared := map[string]bool{}
-	for key, document := range current {
-		if accepted[key] {
-			document = updates[key]
-		}
+	surviving := maps.Clone(current)
+	for key := range accepted {
+		surviving[key] = updates[key]
+	}
+	for _, document := range surviving {
 		if document == nil {
 			continue
 		}
