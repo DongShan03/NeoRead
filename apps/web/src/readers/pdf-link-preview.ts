@@ -57,7 +57,7 @@ export class PDFLinkPreview {
   private timer?: ReturnType<typeof setTimeout>;
   private hovered?: HTMLAnchorElement;
   private request = 0;
-  private pages = new Map<string, Promise<HTMLCanvasElement>>();
+  private previewAbort?: AbortController;
   private renders = new Set<() => void>();
   private disposed = false;
   constructor(
@@ -102,6 +102,7 @@ export class PDFLinkPreview {
   hide = () => {
     clearTimeout(this.timer);
     this.request++;
+    this.previewAbort?.abort();
     this.hovered = undefined;
     this.show(null);
   };
@@ -122,48 +123,15 @@ export class PDFLinkPreview {
         : await pdf.getPageIndex(ref as { num: number; gen: number });
     return { pageIndex, ...destinationPoint(explicit) };
   }
-  private render(pageIndex: number, pageWidth: number) {
-    const key = `${pageIndex}:${pageWidth}:${window.devicePixelRatio || 1}`;
-    let page = this.pages.get(key);
-    if (!page) {
-      page = (async () => {
-        const proxy = await this.pdf()!.getPage(pageIndex + 1);
-        const base = proxy.getViewport({ scale: 1 });
-        const scale =
-          (pageWidth / base.width) * Math.min(2, window.devicePixelRatio || 1);
-        const viewport = proxy.getViewport({ scale });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
-        await proxy.render({
-          canvas,
-          canvasContext: canvas.getContext("2d")!,
-          viewport,
-          pageColors: pdfObjectColors(this.theme()) ?? undefined,
-        }).promise;
-        return canvas;
-      })();
-      this.pages.set(key, page);
-      // Keep a few recently previewed pages.
-      if (this.pages.size > 4)
-        this.pages.delete(this.pages.keys().next().value!);
-      page.catch(() => {
-        if (this.pages.get(key) === page) this.pages.delete(key);
-      });
-    }
-    return page;
+  private beginPreview() {
+    this.previewAbort?.abort();
+    this.previewAbort = new AbortController();
+    return { request: ++this.request, signal: this.previewAbort.signal };
   }
   invalidate() {
     this.request++;
+    this.previewAbort?.abort();
     for (const cancel of this.renders) cancel();
-    for (const page of this.pages.values())
-      void page
-        .then((canvas) => {
-          canvas.width = 0;
-          canvas.height = 0;
-        })
-        .catch(() => {});
-    this.pages.clear();
   }
   private async renderCrop(
     pdf: pdfjs.PDFDocumentProxy,
@@ -224,17 +192,17 @@ export class PDFLinkPreview {
     }
   }
   private async preview(link: HTMLAnchorElement) {
-    const request = ++this.request;
+    const { request, signal } = this.beginPreview();
     try {
       const target = await this.target(link);
       if (!target || request !== this.request) return;
-      await this.showTarget(target, link, request);
+      await this.showTarget(target, link, request, signal);
     } catch {
       /* a broken destination simply has no preview */
     }
   }
   async previewLocation(location: PDFLocation, link: HTMLAnchorElement) {
-    const request = ++this.request;
+    const { request, signal } = this.beginPreview();
     try {
       const page = await this.pdf()?.getPage(location.page);
       if (!page || request !== this.request) return;
@@ -247,6 +215,7 @@ export class PDFLinkPreview {
         { pageIndex: location.page - 1, left, top },
         link,
         request,
+        signal,
       );
     } catch {
       /* a broken destination simply has no preview */
@@ -256,9 +225,11 @@ export class PDFLinkPreview {
     target: { pageIndex: number; left: number | null; top: number | null },
     link: HTMLAnchorElement,
     request: number,
+    signal: AbortSignal,
   ) {
     const pdf = this.pdf()!;
     const proxy = await pdf.getPage(target.pageIndex + 1);
+    if (request !== this.request || !link.isConnected) return;
     const base = proxy.getViewport({ scale: 1 });
     const top =
       target.top === null
@@ -272,29 +243,22 @@ export class PDFLinkPreview {
     const left = right ? base.width / 2 : 0;
     const width = right ? base.width / 2 : base.width;
     const height = Math.min(base.height - top, base.height * 0.3);
-    // The crop fills the preview even when it contains only half a page.
-    const canvas = await this.render(
-      target.pageIndex,
-      PREVIEW_WIDTH * (base.width / width),
+    const bounds = {
+      x: left / base.width,
+      y: top / base.height,
+      width: width / base.width,
+      height: height / base.height,
+    };
+    // Render only the shown region, using the same pixel/dimension limits as
+    // enlarged previews. No full-page canvas survives in hidden reader tabs.
+    const image = await this.renderCrop(
+      pdf,
+      target.pageIndex + 1,
+      bounds,
+      PREVIEW_WIDTH * Math.min(2, window.devicePixelRatio || 1),
+      signal,
     );
     if (request !== this.request || !link.isConnected) return;
-    const ratio = canvas.width / base.width;
-    const crop = document.createElement("canvas");
-    crop.width = Math.round(width * ratio);
-    crop.height = Math.round(height * ratio);
-    crop
-      .getContext("2d")!
-      .drawImage(
-        canvas,
-        left * ratio,
-        top * ratio,
-        crop.width,
-        crop.height,
-        0,
-        0,
-        crop.width,
-        crop.height,
-      );
     const rect = link.getBoundingClientRect();
     const destination = base.convertToViewportPoint(
       target.left ?? 0,
@@ -308,8 +272,8 @@ export class PDFLinkPreview {
         height: rect.height,
       },
       page: target.pageIndex + 1,
-      image: crop.toDataURL("image/png"),
-      ratio: crop.width / crop.height,
+      image,
+      ratio: width / height,
       location: {
         type: "pdf",
         page: target.pageIndex + 1,
@@ -323,18 +287,7 @@ export class PDFLinkPreview {
             : Math.max(0, Math.min(1, destination[1] / base.height)),
       },
       renderImage: (pixels, signal) =>
-        this.renderCrop(
-          pdf,
-          target.pageIndex + 1,
-          {
-            x: left / base.width,
-            y: top / base.height,
-            width: width / base.width,
-            height: height / base.height,
-          },
-          pixels,
-          signal,
-        ),
+        this.renderCrop(pdf, target.pageIndex + 1, bounds, pixels, signal),
     });
   }
   destroy() {
@@ -347,6 +300,5 @@ export class PDFLinkPreview {
     this.container.removeEventListener("pointerout", this.out);
     this.container.removeEventListener("click", this.click, true);
     this.container.removeEventListener("scroll", this.hide);
-    this.pages.clear();
   }
 }
