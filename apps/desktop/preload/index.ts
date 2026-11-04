@@ -3,6 +3,25 @@ import { startupAppearanceFromArguments } from "../startup-appearance";
 import type { CiteEvent } from "../../../packages/api-client/src/cite-events";
 import type { ProxySettings } from "../../../packages/neoread-core/src/proxy-settings";
 import type { UpdateProgress } from "../../../packages/neoread-core/src/update-progress";
+
+// Menu accelerators live in the main process. Report focus, never input text,
+// so editable fields keep Chromium's native undo/redo history.
+window.addEventListener("DOMContentLoaded", () => {
+  let last: boolean | undefined;
+  const update = () => {
+    const element = document.activeElement;
+    const editing =
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement ||
+      (element instanceof HTMLElement && element.isContentEditable);
+    if (editing === last) return;
+    last = editing;
+    ipcRenderer.send("neoread:editing-text", editing);
+  };
+  document.addEventListener("focusin", update, true);
+  document.addEventListener("focusout", () => queueMicrotask(update), true);
+  update();
+});
 async function proxyRequest(channel: string, ...args: unknown[]) {
   try {
     return await ipcRenderer.invoke(channel, ...args);

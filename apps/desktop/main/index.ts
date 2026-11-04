@@ -116,6 +116,7 @@ function startupStage(event: string, started = startupStarted) {
   });
 }
 let documentTabActive = false;
+let editingTextActive = false;
 let citationService: ReturnType<typeof startCitationService> | undefined;
 let reopenMainWindow: (() => Promise<void>) | undefined;
 let mainWindowOpening: Promise<void> | undefined;
@@ -716,6 +717,7 @@ app
       flushed = false;
       closing = false;
       documentTabActive = false;
+      editingTextActive = false;
       const preferences: unknown = recoveryServer
         ? {}
         : await fetch(
@@ -956,14 +958,15 @@ app
           input.type === "keyDown" &&
             ((tabCommand !== null &&
               (documentTabActive || tabCommand.type === "reopen")) ||
-              annotationUndoShortcut({
-                key: input.key,
-                metaKey: input.meta,
-                ctrlKey: input.control,
-                shiftKey: input.shift,
-                altKey: input.alt,
-                isComposing: input.isComposing,
-              }) ||
+              (!editingTextActive &&
+                annotationUndoShortcut({
+                  key: input.key,
+                  metaKey: input.meta,
+                  ctrlKey: input.control,
+                  shiftKey: input.shift,
+                  altKey: input.alt,
+                  isComposing: input.isComposing,
+                })) ||
               ((input.meta || input.control) &&
                 !input.shift &&
                 !input.alt &&
@@ -1067,6 +1070,16 @@ app
       )
         throw new Error("Invalid sender");
     };
+    ipcMain.on("neoread:editing-text", (event, editing: unknown) => {
+      if (
+        event.sender !== window?.webContents ||
+        event.senderFrame !== window.webContents.mainFrame ||
+        typeof editing !== "boolean"
+      )
+        return;
+      editingTextActive = editing;
+      if (editing) window.webContents.setIgnoreMenuShortcuts(false);
+    });
     ipcMain.handle("neoread:library-location", (event) => {
       settingsSender(event);
       return activeLibrary || "";
@@ -1088,6 +1101,7 @@ app
       flushed = false;
       closing = false;
       documentTabActive = false;
+      editingTextActive = false;
       linksClaimed = false;
       openedClaimed = false;
       if (window && !window.isDestroyed())

@@ -16,6 +16,7 @@ let window: EventEmitter & {
   setEnabled: ReturnType<typeof vi.fn>;
   webContents: EventEmitter & {
     send: ReturnType<typeof vi.fn>;
+    setIgnoreMenuShortcuts: ReturnType<typeof vi.fn>;
     mainFrame: { url: string };
   };
 };
@@ -209,6 +210,7 @@ beforeEach(async ({ task }) => {
       webContents = Object.assign(new EventEmitter(), {
         mainFrame: { url: "http://127.0.0.1:1234/" },
         send: vi.fn(),
+        setIgnoreMenuShortcuts: vi.fn(),
         setWindowOpenHandler() {},
       });
       constructor(options: typeof windowOptions) {
@@ -630,6 +632,40 @@ const switchTo = async (id: string) => {
   ipc.emit("neoread:flushed", event(), null);
   return result;
 };
+it("leaves native undo and redo available while an editable field is focused", () => {
+  const key = (shift = false) =>
+    window.webContents.emit(
+      "before-input-event",
+      {},
+      {
+        type: "keyDown",
+        key: "z",
+        meta: true,
+        control: false,
+        shift,
+        alt: false,
+        isComposing: false,
+      },
+    );
+  key();
+  expect(window.webContents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(
+    true,
+  );
+  ipc.emit("neoread:editing-text", event(), true);
+  key();
+  expect(window.webContents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(
+    false,
+  );
+  key(true);
+  expect(window.webContents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(
+    false,
+  );
+  ipc.emit("neoread:editing-text", event(), false);
+  key();
+  expect(window.webContents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(
+    true,
+  );
+});
 it("restores editing without stopping the old library when the final switch flush fails", async () => {
   const original = window;
   original.webContents.send.mockClear();
