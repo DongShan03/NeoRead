@@ -96,6 +96,24 @@ it("repairs adjacent author superscripts and overescaped dagger commands without
   ).toEqual([String.raw`\begin{matrix}a&b\\c&d\end{matrix}`, "x^2"]);
 });
 
+it("repairs an extra JSON escape layer only in simple math, preserving code and matrix rows", async () => {
+  await render(
+    String.raw`严格预算 $\\varepsilon = 8/255$，集合 $\\{x_i\\}_{i=1}^{n}$。` +
+      "\n`\\\\varepsilon`\n" +
+      String.raw`$\begin{matrix}a&b\\c&d\end{matrix}$`,
+  );
+  expect(
+    [...host.querySelectorAll("[data-math]")].map((node) => node.textContent),
+  ).toEqual([
+    String.raw`\varepsilon = 8/255`,
+    String.raw`\{x_i\}_{i=1}^{n}`,
+    String.raw`\begin{matrix}a&b\\c&d\end{matrix}`,
+  ]);
+  expect(host.querySelector("code")?.textContent).toBe(
+    String.raw`\\varepsilon`,
+  );
+});
+
 it("renders completed delimiters after arbitrary streaming cuts, including long answers", async () => {
   const text = String.raw`公式 \[a_1 + \frac{b}{c}\] 和 \(x\)`;
   for (let i = 1; i <= text.length; i++) await render(text.slice(0, i), true);

@@ -156,11 +156,18 @@ export const remarkLatex: Plugin = function () {
       type: string;
       value?: string;
       children?: MathNode[];
-      data?: { hChildren?: { value?: string }[] };
+      data?: { hChildren?: MathNode[] };
     };
     const visit = (node: MathNode) => {
-      if (node.type === "inlineMath" && node.value) {
-        const value = node.value.replace(/\\\\(d(?:d)?agger)\b/g, "\\$1");
+      if ((node.type === "inlineMath" || node.type === "math") && node.value) {
+        const original = node.value;
+        const rows =
+          /\\(?:begin|matrix|pmatrix|bmatrix|smallmatrix|cases|aligned)\b/.test(
+            original,
+          );
+        let value = rows
+          ? original
+          : original.replace(/(?<!\\)\\\\(?=[A-Za-z]{2,}|[{}])/g, "\\");
         const chunks = value.split("$$");
         const markers: string[] = [];
         for (const chunk of chunks) {
@@ -168,13 +175,21 @@ export const remarkLatex: Plugin = function () {
             /^(?:\{\})?\^(?:\{((?:[\d*∗†‡, ]|\\(?:dagger|ddagger))+?)\}|([\d*∗†‡]|\\(?:dagger|ddagger)))$/.exec(
               chunk.trim(),
             );
-          if (!match) return node.children?.forEach(visit);
+          if (!match) {
+            markers.length = 0;
+            break;
+          }
           markers.push(match[1] ?? match[2]);
         }
-        if (chunks.length > 1 || value !== node.value) {
-          node.value = `^{${markers.join("")}}`;
-          for (const child of node.data?.hChildren ?? [])
-            if (child.value !== undefined) child.value = node.value;
+        if (markers.length && chunks.length > 1)
+          value = `^{${markers.join("")}}`;
+        if (value !== original) {
+          node.value = value;
+          const update = (child: MathNode) => {
+            if (child.value === original) child.value = value;
+            child.children?.forEach(update);
+          };
+          node.data?.hChildren?.forEach(update);
         }
       }
       node.children?.forEach(visit);
