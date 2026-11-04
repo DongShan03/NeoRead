@@ -118,9 +118,19 @@ ON previous.document_id=t.document_id AND previous.block_id=t.block_id AND previ
 		return nil, err
 	}
 	result := []TranslationBlock{}
+	var sources map[string]string
+	if d.Type == "pdf" {
+		sources = map[string]string{}
+		for _, p := range m.translationParagraphs() {
+			sources[p.BlockID] = p.Source
+		}
+	}
 	for _, t := range m.translationItems() {
 		if value, ok := saved[t.BlockID+":"+t.SourceHash]; ok {
 			t = value
+			if source := sources[t.BlockID]; source != "" {
+				t = repairCachedTranslationAnchors(t, source)
+			}
 		} else if d.Library == "books" || d.Type == "epub" {
 			t.Status = "idle"
 		}
@@ -328,6 +338,9 @@ func parseTranslationSource(raw, source string, repairPDF bool) ([]TranslationSe
 		return nil, errors.New("原文句子未完整对应，请重试此段")
 	}
 	for i, anchor := range alignAnchors(source, out.Sentences) {
+		if strings.TrimSpace(anchor) == "" {
+			return nil, errors.New("原文句子未完整对应，请重试此段")
+		}
 		out.Sentences[i].Anchor = anchor
 	}
 	return out.Sentences, nil

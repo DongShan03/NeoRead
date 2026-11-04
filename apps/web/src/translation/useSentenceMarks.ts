@@ -236,11 +236,16 @@ export function useSentenceMarks(
               !translation ||
               !part.sentenceIndexes.length ||
               part.sentenceIndexes.some((i) => !translation.sentences[i]) ||
-              normalize(
+              (normalize(
                 part.sentenceIndexes
                   .map((i) => sentenceAnchor(translation.sentences[i]))
                   .join(""),
-              ) !== normalize(part.sourceText)
+              ) !== normalize(part.sourceText) &&
+                normalize(
+                  part.sentenceIndexes
+                    .map((i) => translation.sentences[i].source)
+                    .join(""),
+                ) !== normalize(part.sourceText))
             ) {
               if (annotation.location.type === "pdf")
                 marks.push(

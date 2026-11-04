@@ -64,6 +64,43 @@ func TestExactTranslationNeedsNoAnchors(t *testing.T) {
 	}
 }
 
+func TestTranslationRejectsASentenceWithoutAnOriginalAnchor(t *testing.T) {
+	source := "The attention mechanism connects the positions in the network and reduces the number of sequential operations needed to process the input."
+	if _, err := parseTranslation(sentencesJSON(source, "XYZ XYZ XYZ."), source); err == nil {
+		t.Fatal("accepted a translated sentence with no original source span")
+	}
+}
+
+func TestCachedTranslationRepairsMissingAnchorsWithoutChangingSavedText(t *testing.T) {
+	source := "The A GENT reads the paper. It writes a sum- mary."
+	store := archiveFixture(t, t.TempDir())
+	archiveDocument(t, store, "paper", "分类")
+	s := NewServer(store, "test-token", "")
+	t.Cleanup(s.Close)
+	m := layoutManifest{Blocks: []PDFBlock{{ID: "p1-b1", Page: 1, Label: "text", Text: source}}}
+	block := TranslationBlock{BlockID: "p1-b1", SourceHash: translationHash(source), Status: "complete", Sentences: []TranslationSentence{{Source: "The AGENT reads the paper.", Target: "第一句。"}, {Source: "It writes a summary.", Target: "第二句。"}}}
+	if err := s.saveTranslation("paper", block); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.translations("paper", m)
+	if err != nil || len(got) != 1 {
+		t.Fatal(got, err)
+	}
+	if got[0].Sentences[0].Anchor != "The A GENT reads the paper." || got[0].Sentences[1].Anchor != "It writes a sum- mary." {
+		t.Fatal("legacy translation did not receive original sentence anchors", got)
+	}
+	if got[0].Sentences[0].Source != block.Sentences[0].Source || got[0].Sentences[1].Target != block.Sentences[1].Target {
+		t.Fatal("saved prose changed", got)
+	}
+	if indexes := recoverySentenceIndexes(got[0], block.Sentences[1].Source); len(indexes) != 1 || indexes[0] != 1 {
+		t.Fatal("existing annotations lost their sentence after restoring anchors", indexes)
+	}
+	var body string
+	if err := store.DB.QueryRow("SELECT body FROM translations WHERE document_id='paper' AND block_id=? AND source_hash=?", block.BlockID, block.SourceHash).Scan(&body); err != nil || body != jsonText(block) {
+		t.Fatal("reading rewrote the saved translation", body, err)
+	}
+}
+
 func TestTranslationRejectsDroppedHalf(t *testing.T) {
 	source := "Transactions commit in order. Readers never block writers in this design."
 	if _, err := parseTranslation(sentencesJSON("Transactions commit in order."), source); err == nil {

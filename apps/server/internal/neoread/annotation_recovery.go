@@ -315,25 +315,32 @@ func recoverySentenceIndexes(t TranslationBlock, source string) []int {
 	if source == "" {
 		return nil
 	}
-	full := ""
-	ends := []int{}
-	for _, sentence := range t.Sentences {
-		full += recoveryNormalize(recoverySentenceSource(sentence))
-		ends = append(ends, len(full))
-	}
-	start := strings.Index(full, source)
-	if start < 0 {
-		return nil
-	}
-	out := []int{}
-	previous := 0
-	for i, end := range ends {
-		if previous < start+len(source) && end > start {
-			out = append(out, i)
+	for _, useModel := range []bool{false, true} {
+		full := ""
+		ends := []int{}
+		for _, sentence := range t.Sentences {
+			text := recoverySentenceSource(sentence)
+			if useModel {
+				text = sentence.Source
+			}
+			full += recoveryNormalize(text)
+			ends = append(ends, len(full))
 		}
-		previous = end
+		start := strings.Index(full, source)
+		if start < 0 {
+			continue
+		}
+		out := []int{}
+		previous := 0
+		for i, end := range ends {
+			if previous < start+len(source) && end > start {
+				out = append(out, i)
+			}
+			previous = end
+		}
+		return out
 	}
-	return out
+	return nil
 }
 
 func recoveryBlock(part translationMarkRange, loc map[string]json.RawMessage, m translationInput) (translationParagraph, bool) {

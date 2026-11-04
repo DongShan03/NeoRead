@@ -13,6 +13,31 @@ const translationSimilarity = 0.5
 // Above this many cells, anchors are placed proportionally instead of by LCS.
 const alignmentCells = 4 << 20
 
+// Old caches may contain repaired model prose without the original source
+// spans. Restore those spans for readers, leaving persisted prose untouched.
+func repairCachedTranslationAnchors(block TranslationBlock, source string) TranslationBlock {
+	if block.Status != "complete" || len(block.Sentences) == 0 {
+		return block
+	}
+	var joined strings.Builder
+	for _, sentence := range block.Sentences {
+		if sentence.Anchor != "" {
+			joined.WriteString(sentence.Anchor)
+		} else {
+			joined.WriteString(sentence.Source)
+		}
+		joined.WriteByte(' ')
+	}
+	if string(compactRunes(joined.String())) == string(compactRunes(source)) {
+		return block
+	}
+	raw := jsonText(map[string]any{"sentences": block.Sentences})
+	if sentences, err := parseTranslationSource(raw, source, true); err == nil {
+		block.Sentences = sentences
+	}
+	return block
+}
+
 func comparableLetters(s string) []rune {
 	out := []rune{}
 	for _, r := range strings.ToLower(s) {

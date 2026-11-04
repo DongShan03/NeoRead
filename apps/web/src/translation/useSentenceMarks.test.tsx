@@ -654,6 +654,50 @@ it.each([
   },
 );
 
+it("uses restored original anchors for annotations saved from the model's sentence text", async () => {
+  const matching = vi.spyOn(engine, "sentenceRanges");
+  try {
+    await act(async () => root.render(<App />));
+    await pointer("[data-sentence]", "pointermove", 205);
+    const selected = events.sentenceHover.mock
+      .lastCall?.[0] as import("@neoread/core").ReaderSelection;
+    const annotation: Annotation = {
+      id: "legacy-anchor",
+      documentId: "doc",
+      kind: "highlight",
+      color: "#5b9fe8",
+      quote: selected.text,
+      note: "",
+      createdAt: "",
+      location: selected.location,
+    };
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    matching.mockClear();
+    const anchor = "Original sen- tence.";
+    await act(async () =>
+      root.render(
+        <App
+          annotations={[annotation]}
+          translations={[{ ...t, sentences: [{ ...t.sentences[0], anchor }] }]}
+        />,
+      ),
+    );
+    const marks = [...registry.entries()]
+      .filter(([name]) => name.includes("-highlight-5b9fe8"))
+      .flatMap(([, ranges]) => texts(ranges))
+      .sort();
+    expect(marks).toEqual(["Original sentence.", "翻译句子。"].sort());
+    expect(matching).toHaveBeenCalledWith([
+      expect.objectContaining({ sources: [anchor] }),
+    ]);
+    expect(annotation.location.translation?.sourceText).toBe(
+      "Original sentence.",
+    );
+  } finally {
+    matching.mockRestore();
+  }
+});
+
 it("retains the same bilingual annotation when re-parsing changes its source block ID", async () => {
   const moved = { ...blocks[0], id: "p1-b2" };
   const sourceBlocks = [
