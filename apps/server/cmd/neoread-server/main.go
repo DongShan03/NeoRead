@@ -32,6 +32,8 @@ func main() {
 	port := flag.String("port", "17840", "loopback port, 0 for automatic")
 	web := flag.String("web", "", "built web directory")
 	webdavAccount := flag.String("webdav-account", "", "machine-local shared WebDAV connection file")
+	aiConfig := flag.String("ai-config", "", "machine-local shared Agent connection settings")
+	aiConfigFallback := flag.String("ai-config-fallback", "", "existing default library Agent settings for first-time migration")
 	connector := flag.Bool("connector", true, "enable NeoRead Connector listener")
 	citeCredential := flag.String("cite-credential", "", "credential file for the Word and WPS plugins")
 	citePlugins := flag.String("cite-plugins", "", "directory with the Word and WPS add-in files")
@@ -183,6 +185,11 @@ func main() {
 	if *webdavAccount != "" {
 		if err := server.SetWebDAVAccountPath(*webdavAccount); err != nil {
 			log.Fatal("无法准备 WebDAV 连接设置")
+		}
+	}
+	if *aiConfig != "" {
+		if err := server.SetAIConfigPath(*aiConfig, *aiConfigFallback); err != nil {
+			log.Fatal("无法初始化共享 Agent 设置")
 		}
 	}
 	defer server.Close()

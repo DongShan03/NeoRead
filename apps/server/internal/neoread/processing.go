@@ -421,6 +421,10 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 			_ = s.Store.saveProcessing(p)
 		}
 	}
+	if s.aiConfigPath != "" && validAgent(s.aiConfig().Primary) {
+		s.recoverAgentConfigurationFailures()
+		s.wakeProcessing()
+	}
 	for _, phase := range []string{"learning", "translating"} {
 		workers.Add(1)
 		go func(phase string) {
@@ -567,6 +571,58 @@ func (s *Server) wakeProcessing() {
 		p.Detail = "等待继续处理"
 		p.wakeStages = true
 		_ = s.Store.saveProcessing(p)
+	}
+}
+
+func (s *Server) recoverAgentConfigurationFailures() {
+	const missing = "请在设置中指定主 Agent 并测试"
+	rows, err := s.Store.DB.Query("SELECT body FROM document_processing WHERE phase='translating' AND status='failed'")
+	if err != nil {
+		return
+	}
+	var recoverable []Processing
+	for rows.Next() {
+		var body string
+		var p Processing
+		if rows.Scan(&body) != nil || json.Unmarshal([]byte(body), &p) != nil || !p.Enabled {
+			continue
+		}
+		lines := strings.Split(strings.TrimSpace(p.Detail), "\n")
+		valid := len(lines) > 0
+		for _, line := range lines {
+			if strings.TrimSpace(line) != missing {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			recoverable = append(recoverable, p)
+		}
+	}
+	rows.Close()
+	for _, p := range recoverable {
+		tx, err := s.Store.DB.Begin()
+		if err != nil {
+			continue
+		}
+		_, err = tx.Exec("UPDATE translations SET status='pending',body=json_set(body,'$.status','pending','$.error','') WHERE document_id=? AND status='failed' AND json_extract(body,'$.error')=?", p.DocumentID, missing)
+		if err == nil {
+			p.Translating = &ProcessingStage{Status: "queued", Detail: "已恢复共享 Agent 配置，等待继续翻译"}
+			aggregateProcessing(&p)
+			body, _ := json.Marshal(p)
+			_, err = tx.Exec("UPDATE document_processing SET status=?,body=? WHERE document_id=?", p.Status, string(body), p.DocumentID)
+		}
+		if err == nil {
+			err = tx.Commit()
+		} else {
+			_ = tx.Rollback()
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			s.diagnosticEvent(slog.LevelError, "translation.config_recovery_failed", "documentId", p.DocumentID, "errorCode", "save")
+		} else {
+			s.diagnosticEvent(slog.LevelInfo, "translation.config_recovered", "documentId", p.DocumentID)
+		}
 	}
 }
 func (s *Server) learnPDF(ctx context.Context, p *Processing) error {

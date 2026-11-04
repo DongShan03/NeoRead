@@ -45,6 +45,58 @@ func TestConnectionSecretsAndFingerprint(t *testing.T) {
 	}
 }
 
+func TestAgentSettingsAreSharedAcrossLibrariesWithoutRemovingOriginalConfig(t *testing.T) {
+	a, _ := processingFixture(t)
+	b, _ := processingFixture(t)
+	config := AIConfig{Primary: "codex", Models: map[string]string{"codex": "model-a"}, Capabilities: map[string]Capability{}}
+	config.Capabilities["codex"] = Capability{Text: true, Fingerprint: configPrint(config, "codex")}
+	if err := a.writeAIConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(a.Store.Root, "ai-connections.json")
+	shared := filepath.Join(t.TempDir(), "ai-connections.json")
+	// Launching first in an unconfigured library migrates the default's settings.
+	if err := b.SetAIConfigPath(shared, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetAIConfigPath(shared, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.aiConfig(); got.Primary != "codex" || !capable(got, "codex", false) {
+		t.Fatal("model or verified capability was not shared")
+	}
+	config.Primary = "kimi"
+	if err := b.writeAIConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	if a.aiConfig().Primary != "kimi" {
+		t.Fatal("settings edited in another library did not propagate")
+	}
+	if a.readAIConfigFile(original).Primary != "codex" {
+		t.Fatal("migration overwrote the original library settings")
+	}
+}
+
+func TestSharedAgentConfigurationRecoversOnlyMissingAgentFailures(t *testing.T) {
+	for _, detail := range []string{"请在设置中指定主 Agent 并测试\n请在设置中指定主 Agent 并测试", "上游服务返回错误"} {
+		s, p := processingFixture(t)
+		p.Enabled, p.Phase, p.Status, p.Detail = true, "translating", "failed", detail
+		p.Translating = &ProcessingStage{Status: "failed", Detail: detail}
+		if err := s.Store.saveProcessing(p); err != nil {
+			t.Fatal(err)
+		}
+		s.recoverAgentConfigurationFailures()
+		stored, err := s.Store.processing(p.DocumentID)
+		want := "failed"
+		if strings.Contains(detail, "指定主 Agent") {
+			want = "queued"
+		}
+		if err != nil || stored.Status != want {
+			t.Fatal(stored, err)
+		}
+	}
+}
+
 func TestVisionProbe(t *testing.T) {
 	b, expected, e := visionProbe()
 	if e != nil {

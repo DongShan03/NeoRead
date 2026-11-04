@@ -144,6 +144,22 @@ func (s *Server) convertFormulas(ctx context.Context, documentID string, m layou
 }
 
 func (s *Server) translateContent(ctx context.Context, p *Processing, input translationInput) error {
+	options, err := s.retranslationOptions(p)
+	if err != nil {
+		return err
+	}
+	s.configMu.Lock()
+	config := options.apply(s.readAIConfig())
+	if !validAgent(config.Primary) {
+		s.processingMu.Lock()
+		p.Status, p.Detail = "waiting", "请选择主 Agent 并完成文字能力测试，随后继续翻译"
+		err := s.Store.saveProcessing(*p)
+		s.processingMu.Unlock()
+		s.configMu.Unlock()
+		s.diagnosticEvent(slog.LevelInfo, "translation.waiting", "documentId", p.DocumentID, "errorCode", "configuration")
+		return err
+	}
+	s.configMu.Unlock()
 	finish, err := s.startUsageStage(p.DocumentID, "translating")
 	if err != nil {
 		return err

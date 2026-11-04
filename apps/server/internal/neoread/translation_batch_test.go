@@ -109,6 +109,18 @@ func TestTranslationProgressUsesCurrentSourceStatusWithoutDecodingCachedProse(t 
 		t.Fatal("reading no longer validates saved translation bodies")
 	}
 }
+
+func TestTranslationWithoutPrimaryWaitsBeforeStartingFormulaConversion(t *testing.T) {
+	s, p, m := translationFixture(t)
+	p.lane = "translating"
+	if err := s.translateContent(t.Context(), &p, m); err != nil || p.Status != "waiting" {
+		t.Fatal("missing library configuration failed the translation", p, err)
+	}
+	stored, err := s.Store.processing(p.DocumentID)
+	if err != nil || stored.Translating == nil || stored.Translating.Status != "waiting" {
+		t.Fatal("waiting state was not persisted", stored, err)
+	}
+}
 func TestTranslationJSONLPublishesOnlyCompleteValidatedLines(t *testing.T) {
 	p := translationParagraph{"p1-b1", "version", "Sentence."}
 	var saved []TranslationBlock

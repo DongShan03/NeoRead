@@ -108,8 +108,15 @@ func (s *Server) aiConfig() AIConfig {
 	return s.readAIConfig()
 }
 func (s *Server) readAIConfig() AIConfig {
+	name := s.aiConfigPath
+	if name == "" {
+		name = filepath.Join(s.Store.Root, "ai-connections.json")
+	}
+	return s.readAIConfigFile(name)
+}
+func (s *Server) readAIConfigFile(name string) AIConfig {
 	c := AIConfig{Models: map[string]string{}, Capabilities: map[string]Capability{}}
-	b, err := os.ReadFile(filepath.Join(s.Store.Root, "ai-connections.json"))
+	b, err := os.ReadFile(name)
 	if err != nil {
 		return c
 	}
@@ -147,7 +154,39 @@ func (s *Server) writeAIConfig(c AIConfig) error {
 	if e != nil {
 		return e
 	}
-	return atomicFile(filepath.Join(s.Store.Root, "ai-connections.json"), b)
+	name := s.aiConfigPath
+	if name == "" {
+		name = filepath.Join(s.Store.Root, "ai-connections.json")
+	}
+	return atomicFile(name, b)
+}
+
+// Desktop libraries share machine-local connections and tested model choices.
+// Keep original library config files; they remain available to standalone CLI use.
+func (s *Server) SetAIConfigPath(name, fallback string) error {
+	phase := "existing"
+	_, err := os.Stat(name)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if os.IsNotExist(err) {
+		phase = "unconfigured"
+		config := s.readAIConfig()
+		if !validAgent(config.Primary) && fallback != "" {
+			config = s.readAIConfigFile(fallback)
+		}
+		s.aiConfigPath = name
+		if validAgent(config.Primary) {
+			if err := s.writeAIConfig(config); err != nil {
+				return err
+			}
+			phase = "migrated"
+		}
+	} else {
+		s.aiConfigPath = name
+	}
+	s.diagnosticEvent(slog.LevelInfo, "ai.config_shared", "phase", phase)
+	return nil
 }
 func atomicFile(path string, b []byte) error {
 	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {

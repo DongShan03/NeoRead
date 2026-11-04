@@ -69,6 +69,7 @@ type Server struct {
 	reparsingDocuments     map[string]bool
 	importMu               sync.Mutex
 	configMu               sync.Mutex
+	aiConfigPath           string
 	translationMu          sync.Mutex
 	translationSubscribers map[string]map[chan TranslationBlock]struct{}
 	processingMu           sync.Mutex
