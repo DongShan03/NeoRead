@@ -307,6 +307,11 @@ export interface paths {
                 content: {
                     "application/json": {
                         token: string;
+                        /**
+                         * @description False aborts the run when renderer drafts could not be saved
+                         * @default true
+                         */
+                        saved?: boolean;
                     };
                 };
             };

@@ -213,6 +213,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sync/webdav/apply", func(w http.ResponseWriter, r *http.Request) {
 		var value struct {
 			Token string `json:"token"`
+			Saved *bool  `json:"saved,omitempty"`
 		}
 		if !decode(w, r, &value) {
 			return
@@ -224,6 +225,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			return
 		}
 		ready, done := s.webdav.applyReady, s.webdav.applyDone
+		s.webdav.applyFailed = value.Saved != nil && !*value.Saved
 		s.webdav.applyReady = nil
 		close(ready)
 		s.webdav.mu.Unlock()

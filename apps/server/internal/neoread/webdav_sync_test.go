@@ -181,6 +181,42 @@ func TestWebDAVWaitsForRendererSaveBeforeApplyingIncomingContent(t *testing.T) {
 	b.webdav.mu.Unlock()
 	<-done
 }
+func TestWebDAVFailedRendererSaveDoesNotApplyAndCanRetry(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	b.webdav.beforeApply = nil
+	if err := b.beginWebDAVSync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := waitSyncPhase(t, b, "ready")
+	body, _ := json.Marshal(map[string]any{"token": status.ApplyToken, "saved": false})
+	req := httptest.NewRequest("POST", "http://127.0.0.1/api/sync/webdav/apply", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token)
+	out := httptest.NewRecorder()
+	b.Handler().ServeHTTP(out, req)
+	if out.Code != 200 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	b.webdav.mu.Lock()
+	done := b.webdav.done
+	b.webdav.mu.Unlock()
+	<-done
+	status = b.syncStatus()
+	if status.Phase != "failed" || !status.Failed || status.ApplyToken != "" {
+		t.Fatal("save failure left the run stuck or unreported", status)
+	}
+	if _, err := b.Store.Document("paper"); err == nil {
+		t.Fatal("incoming content was applied after a failed local save")
+	}
+	b.webdav.beforeApply = func(context.Context) error { return nil }
+	runSync(t, b)
+	if _, err := b.Store.Document("paper"); err != nil || b.syncStatus().Failed {
+		t.Fatal("save failure could not recover", err, b.syncStatus())
+	}
+}
+
 func TestWebDAVRecoversFileInstallationOnEitherSideOfCommit(t *testing.T) {
 	for _, committed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "rollback", true: "commit"}[committed], func(t *testing.T) {

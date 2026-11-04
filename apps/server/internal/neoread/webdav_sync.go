@@ -58,6 +58,7 @@ type webdavState struct {
 	beforeApply func(context.Context) error
 	applyReady  chan struct{}
 	applyDone   chan struct{}
+	applyFailed bool
 	taskID      string
 }
 
@@ -499,6 +500,7 @@ func (s *Server) waitSyncApply(ctx context.Context, token string, needed bool) (
 	s.webdav.mu.Lock()
 	s.webdav.applyReady = make(chan struct{})
 	s.webdav.applyDone = make(chan struct{})
+	s.webdav.applyFailed = false
 	ready, done := s.webdav.applyReady, s.webdav.applyDone
 	s.webdav.status.Phase = "ready"
 	s.webdav.status.ApplyToken = token
@@ -520,6 +522,13 @@ func (s *Server) waitSyncApply(ctx context.Context, token string, needed bool) (
 		finish()
 		return func() {}, ctx.Err()
 	case <-ready:
+		s.webdav.mu.Lock()
+		failed := s.webdav.applyFailed
+		s.webdav.mu.Unlock()
+		if failed {
+			finish()
+			return func() {}, errors.New("阅读状态保存失败，未应用云端内容，请重试同步")
+		}
 		s.setSyncPhase("applying")
 		return finish, nil
 	}
