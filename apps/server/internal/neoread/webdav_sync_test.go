@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"golang.org/x/net/webdav"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1395,5 +1399,259 @@ func TestWebDAVDeletionFileRecoveryMatchesTheDatabaseCommit(t *testing.T) {
 				t.Fatal("deletion recovery lost or revived the original", string(restored), err)
 			}
 		})
+	}
+}
+
+func testDAV(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	directory := t.TempDir()
+	handler := &webdav.Handler{Prefix: "/dav", FileSystem: webdav.Dir(directory), LockSystem: webdav.NewMemLS()}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		if !ok || user != "reader@example.com" || password != "application-password" {
+			w.WriteHeader(401)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	return server, directory
+}
+func testDAVClient(config webdavConfig, server *httptest.Server) *davClient {
+	d := newDAVClient(config)
+	d.base, _ = url.Parse(server.URL + "/dav/NeoRead/" + config.Folder + "/")
+	d.interval = 0
+	return d
+}
+func TestDAVCreatesApplicationAndLibraryFolders(t *testing.T) {
+	server, directory := testDAV(t)
+	config := webdavConfig{Account: "reader@example.com", Password: "application-password", Folder: "论文库"}
+	d := testDAVClient(config, server)
+	if err := d.prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, folder := range []string{"NeoRead/论文库/devices", "NeoRead/论文库/objects"} {
+		if info, err := os.Stat(filepath.Join(directory, folder)); err != nil || !info.IsDir() {
+			t.Fatalf("missing %s: %v", folder, err)
+		}
+	}
+	device := strings.Repeat("a", 32) + ".json"
+	if err := d.put(context.Background(), "devices/"+device, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	list, err := d.devices(context.Background())
+	if err != nil || len(list) != 1 || list[0].Name != device || list[0].ETag == "" {
+		t.Fatalf("listing: %+v %v", list, err)
+	}
+	if err = d.prepare(context.Background()); err != nil {
+		t.Fatalf("repeat folder creation: %v", err)
+	}
+}
+func TestDAVDoesNotForwardApplicationPasswordToRedirect(t *testing.T) {
+	var forwarded atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { forwarded.Add(1) }))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
+	defer redirect.Close()
+	d := newDAVClient(webdavConfig{Account: "reader@example.com", Password: "application-password", Folder: "论文库"})
+	d.base, _ = url.Parse(redirect.URL + "/dav/NeoRead/论文库/")
+	d.interval = 0
+	_, err := d.get(context.Background(), "devices/a.json", 100)
+	var remote *davError
+	if !errors.As(err, &remote) || remote.Status != 307 || forwarded.Load() != 0 {
+		t.Fatalf("redirect: %v, forwarded %d", err, forwarded.Load())
+	}
+}
+func TestDAVPreservesRateLimitDelayAndHidesServerBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "37")
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte("server-private-response application-password"))
+	}))
+	defer server.Close()
+	d := testDAVClient(webdavConfig{Folder: "论文库"}, server)
+	_, err := d.get(context.Background(), "devices/a.json", 100)
+	var remote *davError
+	if !errors.As(err, &remote) || remote.Retry != 37*time.Second || strings.Contains(err.Error(), "private") {
+		t.Fatalf("rate limit: %v", err)
+	}
+}
+func TestDAVCancellationStopsPacing(t *testing.T) {
+	d := newDAVClient(webdavConfig{Folder: "论文库"})
+	*d.last = time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := d.request(ctx, "GET", "devices/a.json", nil); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestDAVLibraryAndCatalogRequestsShareRateLimitPacing(t *testing.T) {
+	server, _ := testDAV(t)
+	d := testDAVClient(webdavConfig{Account: "reader@example.com", Password: "application-password", Folder: "论文库"}, server)
+	if err := d.prepare(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	d.interval = time.Second
+	*d.last = time.Time{}
+	root := d.rootClient()
+	if err := root.put(t.Context(), "pacing-test", []byte("test")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := d.get(ctx, "library.json", 100); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("library request did not wait after catalog request", err)
+	}
+}
+
+func cachedSyncChunk(t *testing.T, s *Server, text string) (string, *syncDocument) {
+	t.Helper()
+	hash := syncBytesHash([]byte(text))
+	if err := atomicFile(s.syncBlob(hash), []byte(text)); err != nil {
+		t.Fatal(err)
+	}
+	doc := emptySyncDocument()
+	doc.Files["cache/paper/"+text] = syncFile{Size: int64(len(text)), Chunks: []syncChunk{{Hash: hash, Size: len(text)}}}
+	return hash, doc
+}
+
+func TestWebDAVCacheReclaimsOldVersionsAfterSuccessfulSync(t *testing.T) {
+	remote, _ := testDAV(t)
+	s := syncFixture(t, remote, "Mac")
+	syncDocumentFixture(t, s.Store, "paper", "研究")
+	runSync(t, s)
+	config, _ := s.readSyncConfig()
+	state, err := s.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "cache/paper/analysis/manifest.json"
+	oldHash := state.Files[name].File.Chunks[0].Hash
+	if err := os.WriteFile(filepath.Join(s.Store.Root, filepath.FromSlash(name)), []byte(`{"pages":1,"blocks":[],"revision":2}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, s)
+	// The next snapshot refreshes the cached own-device manifest too.
+	runSync(t, s)
+	if _, err := os.Stat(s.syncBlob(oldHash)); !os.IsNotExist(err) {
+		t.Fatal("unreferenced old chunk retained", err)
+	}
+	state, err = s.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := state.Files[name].File.Chunks[0].Hash
+	if _, err := os.Stat(s.syncBlob(current)); err != nil {
+		t.Fatal("current chunk removed", err)
+	}
+	if _, err := os.Stat(s.Store.File(Document{ID: "paper", Type: "pdf"})); err != nil {
+		t.Fatal("original removed", err)
+	}
+}
+
+func TestWebDAVCacheKeepsOtherIdentitiesAndConflictingRemoteVersions(t *testing.T) {
+	s := testServer(t)
+	config := webdavConfig{Account: "reader@example.com", RemoteID: strings.Repeat("a", 32)}
+	state := newSyncState()
+	ownHash, own := cachedSyncChunk(t, s, "own")
+	state.Own["document/paper"] = newSyncVersion(state, own, nil, "Mac")
+	baseHash, base := cachedSyncChunk(t, s, "base")
+	state.Base["document/paper"] = base
+	fingerprintHash, fingerprint := cachedSyncChunk(t, s, "fingerprint")
+	state.Files["cache/paper/fingerprint"] = syncFingerprint{File: fingerprint.Files["cache/paper/fingerprint"]}
+	if err := s.saveSyncState(config, state); err != nil {
+		t.Fatal(err)
+	}
+	pausedHash, paused := cachedSyncChunk(t, s, "paused")
+	otherConfig := webdavConfig{Account: "other@example.com", RemoteID: strings.Repeat("b", 32)}
+	other := newSyncState()
+	other.Own["document/paper"] = newSyncVersion(other, paused, nil, "Paused")
+	if err := s.saveSyncState(otherConfig, other); err != nil {
+		t.Fatal(err)
+	}
+	remoteHash, remote := cachedSyncChunk(t, s, "conflict")
+	peer := newSyncState()
+	manifest := syncManifest{Format: "neoread-webdav", Version: 1, Device: peer.Device, Entries: map[string]*syncVersion{"document/paper": newSyncVersion(peer, remote, nil, "Peer")}}
+	path := filepath.Join(filepath.Dir(s.syncStatePath(config)), "remotes", peer.Device+".json")
+	if err := atomicFile(path, []byte(jsonText(manifest))); err != nil {
+		t.Fatal(err)
+	}
+	orphanHash, _ := cachedSyncChunk(t, s, "orphan")
+	count, _, err := s.pruneSyncCache(t.Context(), config, state)
+	if err != nil || count != 1 {
+		t.Fatal("cache pruning failed", count, err)
+	}
+	for _, hash := range []string{ownHash, baseHash, fingerprintHash, pausedHash, remoteHash} {
+		if _, err := os.Stat(s.syncBlob(hash)); err != nil {
+			t.Fatal("needed chunk removed", hash, err)
+		}
+	}
+	if _, err := os.Stat(s.syncBlob(orphanHash)); !os.IsNotExist(err) {
+		t.Fatal("orphan retained", err)
+	}
+}
+
+func TestWebDAVCacheSkipsCollectionWhenReferencesCannotBeEstablished(t *testing.T) {
+	for _, mode := range []string{"corrupt-state", "recovery", "cancelled", "outside-symlink"} {
+		t.Run(mode, func(t *testing.T) {
+			s := testServer(t)
+			config := webdavConfig{Account: "reader@example.com", RemoteID: strings.Repeat("a", 32)}
+			state := newSyncState()
+			if err := s.saveSyncState(config, state); err != nil {
+				t.Fatal(err)
+			}
+			orphanHash, _ := cachedSyncChunk(t, s, "orphan")
+			ctx := t.Context()
+			wantError := mode != "recovery"
+			switch mode {
+			case "corrupt-state":
+				path := filepath.Join(s.syncDirectory(), strings.Repeat("b", 64), "state.json")
+				if err := atomicFile(path, []byte("invalid")); err != nil {
+					t.Fatal(err)
+				}
+			case "recovery":
+				if err := atomicFile(filepath.Join(s.syncDirectory(), "apply.json"), []byte("pending")); err != nil {
+					t.Fatal(err)
+				}
+			case "cancelled":
+				child, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = child
+			case "outside-symlink":
+				outside := t.TempDir()
+				if err := os.WriteFile(filepath.Join(outside, orphanHash), []byte("keep"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				objects := filepath.Join(s.syncDirectory(), "objects")
+				if err := os.Rename(objects, objects+"-saved"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, objects); err != nil {
+					t.Skip("symlinks unavailable", err)
+				}
+			}
+			count, _, err := s.pruneSyncCache(ctx, config, state)
+			if count != 0 || (err != nil) != wantError {
+				t.Fatal("unsafe pruning result", count, err)
+			}
+			if _, err := os.Stat(s.syncBlob(orphanHash)); err != nil {
+				t.Fatal("cache removed", err)
+			}
+		})
+	}
+}
+
+func TestWebDAVCacheFailureDoesNotFailCompletedSync(t *testing.T) {
+	remote, _ := testDAV(t)
+	s := syncFixture(t, remote, "Mac")
+	syncDocumentFixture(t, s.Store, "paper", "研究")
+	path := filepath.Join(s.syncDirectory(), strings.Repeat("c", 64), "state.json")
+	if err := atomicFile(path, []byte("invalid")); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, s)
+	if _, err := s.Store.Document("paper"); err != nil {
+		t.Fatal(err)
 	}
 }
