@@ -330,6 +330,20 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 				for _, version := range versions {
 					if !choice.KeepBoth && syncHash(version) == choice.Version {
 						selected = version
+						// Resolve just the note when all other records can merge;
+						// choosing its text must not discard independent annotations.
+						if body, ok := keepSyncNotes(state.Base[key], versions); ok {
+							for recordKey, record := range body.Records {
+								if len(record["document_notes"]) == 1 {
+									if note, exists := version.Body.Records[recordKey]; exists {
+										body.Records[recordKey] = note
+									} else {
+										delete(body.Records, recordKey)
+									}
+								}
+							}
+							selected = &syncVersion{Body: body}
+						}
 						merged = true
 						break
 					}
