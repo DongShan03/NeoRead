@@ -137,6 +137,20 @@
 .translation-sentence::after {
   content: " ";
 }
+/* A sentence containing one numbered item stays in the paragraph flow. */
+.translation-sentence > .message-markdown > ol:has(> li:only-child) {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  list-style-position: inside;
+}
+.translation-sentence > .message-markdown > ol > li:only-child {
+  display: inline list-item;
+}
+.translation-sentence > .message-markdown > ol > li:only-child > p:first-child {
+  display: inline;
+  margin: 0;
+}
 .translation-sentence[data-linked] {
   background: color-mix(in srgb, var(--primary) 13%, transparent);
   border-radius: 3px;
