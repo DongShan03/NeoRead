@@ -417,12 +417,15 @@ function TranslationContent({
             </div>
           ))}
           {translation.error && (
-            <div className="translation-pending" role="status">
-              <span>{translation.error}</span>
-              <Button variant="ghost" size="sm" onClick={retry}>
-                重新翻译此段
-              </Button>
-            </div>
+            <Button
+              className="ml-1 text-muted-foreground"
+              variant="ghost"
+              size="xs"
+              title="旧缓存的句子对应暂不可用，重新翻译可恢复对应"
+              onClick={retry}
+            >
+              重新对应
+            </Button>
           )}
         </div>
       ) : (

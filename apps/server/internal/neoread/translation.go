@@ -307,7 +307,17 @@ func (s *Server) requestTranslation(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		found = true
-		if t.Status == "complete" || t.Status == "running" {
+		if t.Status == "running" {
+			continue
+		}
+		if t.Status == "complete" {
+			if req.BlockID == "" || t.Error == "" {
+				continue
+			}
+			if err = s.retryCachedTranslation(d.ID, t); err != nil {
+				fail(w, 500, "无法安排句子对应更新")
+				return
+			}
 			continue
 		}
 		t.Status = "pending"
@@ -349,25 +359,55 @@ func parseTranslationSource(raw, source string, repairPDF bool) ([]TranslationSe
 		}
 	}
 	var out struct {
-		Sentences []TranslationSentence `json:"sentences"`
+		Sentences []struct {
+			TranslationSentence
+			SourceIndex *int `json:"sourceIndex"`
+		} `json:"sentences"`
 	}
 	if json.Unmarshal([]byte(raw), &out) != nil || len(out.Sentences) == 0 {
 		return nil, errors.New("译文格式不完整，请重试此段")
 	}
+	indexed := false
+	for _, row := range out.Sentences {
+		indexed = indexed || row.SourceIndex != nil
+	}
+	input := make([]TranslationSentence, len(out.Sentences))
+	if indexed {
+		parts := translationSentenceParts(source)
+		if len(parts) != len(out.Sentences) {
+			return nil, errors.New("译文句子编号不完整，请重试此段")
+		}
+		seen := make([]bool, len(parts))
+		for _, row := range out.Sentences {
+			if row.SourceIndex == nil || *row.SourceIndex < 0 || *row.SourceIndex >= len(parts) || seen[*row.SourceIndex] {
+				return nil, errors.New("译文句子编号重复或无效，请重试此段")
+			}
+			index := *row.SourceIndex
+			seen[index] = true
+			original := strings.TrimSpace(parts[index])
+			if row.Source != "" && row.Source != original {
+				return nil, errors.New("译文原句与编号不匹配，请重试此段")
+			}
+			input[index] = TranslationSentence{Source: original, Target: row.Target}
+		}
+	} else {
+		for i, row := range out.Sentences {
+			input[i] = row.TranslationSentence
+		}
+	}
 	var joined strings.Builder
-	for i, sentence := range out.Sentences {
-		out.Sentences[i].Anchor = ""
+	for i, sentence := range input {
+		input[i].Anchor = ""
 		if strings.TrimSpace(sentence.Source) == "" || strings.TrimSpace(sentence.Target) == "" {
 			return nil, errors.New("译文存在空句，请重试此段")
 		}
 		joined.WriteString(sentence.Source)
 		joined.WriteByte(' ')
 	}
-	pairs, err := translationSentencePairs(out.Sentences)
+	pairs, err := translationSentencePairs(input)
 	if err != nil {
 		return nil, err
 	}
-	out.Sentences = pairs
 	for _, sentence := range pairs {
 		if !matchingMathDecorations(sentence.Source, sentence.Target) {
 			return nil, errors.New("译文改变了公式符号、重音、字体或上下标，请重试此段")
@@ -375,16 +415,16 @@ func parseTranslationSource(raw, source string, repairPDF bool) ([]TranslationSe
 	}
 	normalize := func(v string) string { return strings.Join(strings.Fields(v), "") }
 	if normalize(joined.String()) == normalize(source) {
-		return out.Sentences, nil
+		return pairs, nil
 	}
 	if !repairPDF || !similarText(joined.String(), source) {
 		return nil, errors.New("原文句子未完整对应，请重试此段")
 	}
-	for i, anchor := range alignAnchors(source, out.Sentences) {
+	for i, anchor := range alignAnchors(source, pairs) {
 		if strings.TrimSpace(anchor) == "" {
 			return nil, errors.New("原文句子未完整对应，请重试此段")
 		}
-		out.Sentences[i].Anchor = anchor
+		pairs[i].Anchor = anchor
 	}
-	return out.Sentences, nil
+	return pairs, nil
 }

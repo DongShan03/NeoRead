@@ -69,6 +69,22 @@ async function render(
     });
   }
 }
+
+it("keeps legacy translated prose readable without the old alignment error banner", async () => {
+  await render(
+    { ...base, label: "text", image: "", text: "First. Second." },
+    {
+      blockId: base.id,
+      sourceHash: "legacy",
+      status: "complete",
+      error: "旧译文未逐句对应，请重新翻译此段",
+      sentences: [{ source: "First. Second.", target: "已有译文仍保留。" }],
+    },
+  );
+  expect(host.textContent).toContain("已有译文仍保留");
+  expect(host.textContent).not.toContain("旧译文未逐句对应");
+  expect(host.textContent).toContain("重新对应");
+});
 it.each(["table", "chart", "image"])(
   "keeps %s body out of the translation view",
   async (label) => {

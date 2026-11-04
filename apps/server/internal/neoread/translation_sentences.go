@@ -3,7 +3,10 @@ package neoread
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/clipperhouse/uax29/v2/sentences"
 )
@@ -41,7 +44,134 @@ func matchingMathDecorations(source, target string) bool {
 			return false
 		}
 	}
-	return len(expected) == 0 || strings.Count(source, "^") == strings.Count(target, "^")
+	// PDF extraction can leave a centroid's layer label outside its math span.
+	// Check the superscripts of recognized decorated atoms, rather than the
+	// total number of carets in the sentence (which also counts repaired labels).
+	before, after := decoratedMathScripts(source), decoratedMathScripts(target)
+	for atom, scripts := range before {
+		slices.Sort(scripts)
+		slices.Sort(after[atom])
+		if !slices.Equal(scripts, after[atom]) {
+			return false
+		}
+	}
+	return true
+}
+
+func mathArgument(text string, at int) (string, int, bool) {
+	for at < len(text) && unicode.IsSpace(rune(text[at])) {
+		at++
+	}
+	if at >= len(text) {
+		return "", at, false
+	}
+	if text[at] != '{' {
+		start := at
+		if text[at] == '\\' {
+			at++
+			for at < len(text) && (text[at] >= 'a' && text[at] <= 'z' || text[at] >= 'A' && text[at] <= 'Z') {
+				at++
+			}
+			if at == start+1 && at < len(text) {
+				at++
+			}
+		} else {
+			_, size := utf8.DecodeRuneInString(text[at:])
+			at += size
+		}
+		return text[start:at], at, true
+	}
+	start, depth := at+1, 1
+	for i := start; i < len(text); i++ {
+		if text[i] == '\\' {
+			i++
+			continue
+		}
+		if text[i] == '{' {
+			depth++
+		}
+		if text[i] == '}' {
+			depth--
+			if depth == 0 {
+				return text[start:i], i + 1, true
+			}
+		}
+	}
+	return "", at, false
+}
+
+var mathControlWord = regexp.MustCompile(`\\[A-Za-z]+`)
+
+func decoratedMathScripts(text string) map[string][]int {
+	result := map[string][]int{}
+	for _, match := range mathDecoration.FindAllStringSubmatchIndex(text, -1) {
+		at := match[3]
+		if at < len(text) && (text[at] >= 'a' && text[at] <= 'z' || text[at] >= 'A' && text[at] <= 'Z') {
+			continue
+		}
+		name := text[match[2]:match[3]]
+		switch name {
+		case "overline":
+			name = "bar"
+		case "widehat":
+			name = "hat"
+		case "widetilde":
+			name = "tilde"
+		case "bigsqcup":
+			name = "sqcup"
+		}
+		base, count := "", 0
+		if name != "sum" && name != "sqcup" && name != "dagger" && name != "ddagger" {
+			argument, end, ok := mathArgument(text, at)
+			if !ok {
+				continue
+			}
+			at = end
+			count = strings.Count(argument, "^")
+			var stripped strings.Builder
+			for i := 0; i < len(argument); {
+				if argument[i] == '^' || argument[i] == '_' {
+					_, end, ok := mathArgument(argument, i+1)
+					if !ok {
+						break
+					}
+					i = end
+					continue
+				}
+				stripped.WriteByte(argument[i])
+				i++
+			}
+			for _, r := range mathControlWord.ReplaceAllString(stripped.String(), "") {
+				if unicode.IsLetter(r) || unicode.IsDigit(r) {
+					base += string(r)
+				}
+			}
+			// Compound expressions need richer structure than this atom check.
+			if utf8.RuneCountInString(base) != 1 {
+				continue
+			}
+		}
+		for at < len(text) && (text[at] == '}' || text[at] == ' ') {
+			at++
+		}
+		for at < len(text) && (text[at] == '^' || text[at] == '_') {
+			marker := text[at]
+			_, end, ok := mathArgument(text, at+1)
+			if !ok {
+				break
+			}
+			if marker == '^' {
+				count++
+			}
+			at = end
+			for at < len(text) && text[at] == ' ' {
+				at++
+			}
+		}
+		key := name + ":" + base
+		result[key] = append(result[key], count)
+	}
+	return result
 }
 
 // Keep math punctuation and scientific abbreviations inside their sentence.

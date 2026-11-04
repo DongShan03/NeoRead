@@ -225,3 +225,34 @@ ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET body=excluded.body`,
 	}
 	return tx.Commit()
 }
+
+func (s *Server) retryCachedTranslation(documentID string, previous TranslationBlock) error {
+	s.translationMu.Lock()
+	defer s.translationMu.Unlock()
+	tx, err := s.Store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = captureAnnotationAnchors(tx, documentID, []TranslationBlock{previous}); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`INSERT INTO translation_previous(document_id,block_id,source_hash,body)
+SELECT document_id,block_id,source_hash,body FROM translations WHERE document_id=? AND block_id=? AND source_hash=? AND status='complete'
+ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET body=excluded.body`, documentID, previous.BlockID, previous.SourceHash); err != nil {
+		return err
+	}
+	pending := TranslationBlock{BlockID: previous.BlockID, SourceHash: previous.SourceHash, Status: "pending", Sentences: []TranslationSentence{}}
+	body, err := json.Marshal(pending)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE translations SET status='pending',body=? WHERE document_id=? AND block_id=? AND source_hash=?", string(body), documentID, previous.BlockID, previous.SourceHash); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	s.publishTranslation(documentID, previous)
+	return nil
+}

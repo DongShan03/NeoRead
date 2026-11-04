@@ -92,6 +92,34 @@ func TestTranslationBatchBoundariesAndContext(t *testing.T) {
 	}
 }
 
+func TestRetryLegacySentenceMappingQueuesOnlyThisParagraphAndKeepsVisibleProse(t *testing.T) {
+	s, _, m := translationFixture(t)
+	old := newTranslation(m.Blocks[0])
+	old.Status = "complete"
+	old.Sentences = []TranslationSentence{{Source: m.Blocks[0].Text, Target: "旧的一段译文。"}}
+	if err := s.saveTranslation("doc", old); err != nil {
+		t.Fatal(err)
+	}
+	other := newTranslation(m.Blocks[1])
+	other.Status = "complete"
+	other.Sentences = []TranslationSentence{{Source: m.Blocks[1].Text, Target: "另一段保留。"}}
+	if err := s.saveTranslation("doc", other); err != nil {
+		t.Fatal(err)
+	}
+	response := request(t, s, "POST", "/api/documents/doc/translations", strings.NewReader(`{"blockId":"p1-b1"}`))
+	if response.Code != 202 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	states, err := s.translationStates("doc", m)
+	if err != nil || states[0].Status != "pending" || states[1].Status != "complete" {
+		t.Fatal(states, err)
+	}
+	visible, err := s.visibleTranslations("doc", m)
+	if err != nil || visible[0].Sentences[0].Target != "旧的一段译文。" {
+		t.Fatal("old prose was cleared before replacement", visible, err)
+	}
+}
+
 func TestTranslationProgressUsesCurrentSourceStatusWithoutDecodingCachedProse(t *testing.T) {
 	s, p, m := translationFixture(t)
 	block := newTranslation(m.Blocks[0])
