@@ -5,6 +5,7 @@ import type { RefObject } from "react";
 import type {
   Annotation,
   PDFBlock,
+  PDFPassage,
   EPUBReadingBlock,
   ReaderAdapter,
   ReaderEvents,
@@ -99,6 +100,37 @@ export function useSentenceMarks(
           y <= r.bottom,
       );
     };
+    const pdfSourceRanges = (passage: PDFPassage, pageHint?: number) => {
+      const ranges = engine.sentenceRanges?.([passage]) ?? [];
+      if (ranges.length) return ranges;
+      const preferred = latest.current.blocks.find(
+        (b) => b.id === passage.blockId,
+      );
+      const page =
+        pageHint ??
+        (preferred && "page" in preferred ? preferred.page : undefined);
+      if (!page) return [];
+      const normalize = (text: string) =>
+        text.replace(/[\s\u00ad]/g, "").toLowerCase();
+      const source = normalize(passage.sources.join(""));
+      if (!source) return [];
+      // Re-parsing can reuse a block ID for another paragraph. Relocate only
+      // an exact, unique source sentence on the saved PDF page.
+      const candidates = latest.current.blocks.filter(
+        (b): b is PDFBlock =>
+          "page" in b && b.page === page && normalize(b.text).includes(source),
+      );
+      if (candidates.length !== 1) return [];
+      const block = candidates[0];
+      const text = normalize(block.text);
+      const start = text.indexOf(source);
+      if (text.indexOf(source, start + 1) >= 0) return [];
+      return (
+        engine.sentenceRanges?.([
+          { ...passage, blockId: block.id, sourceOffset: start },
+        ]) ?? []
+      );
+    };
     const sourceRanges = (t: TranslationBlock, i: number) => {
       const key = `${t.blockId}:${i}`;
       if (!cache.has(key)) {
@@ -115,7 +147,7 @@ export function useSentenceMarks(
             : undefined;
           cache.set(key, range ? [range] : []);
         } else {
-          cache.set(key, engine.sentenceRanges?.([sourcePassage(t, i)]) ?? []);
+          cache.set(key, pdfSourceRanges(sourcePassage(t, i)));
         }
       }
       return cache.get(key)!;
@@ -209,8 +241,16 @@ export function useSentenceMarks(
                   .map((i) => sentenceAnchor(translation.sentences[i]))
                   .join(""),
               ) !== normalize(part.sourceText)
-            )
+            ) {
+              if (annotation.location.type === "pdf")
+                marks.push(
+                  ...pdfSourceRanges(
+                    { blockId: part.blockId, sources: [part.sourceText] },
+                    annotation.location.page,
+                  ).map((range) => ({ annotation, range })),
+                );
               continue;
+            }
             for (const index of part.sentenceIndexes)
               marks.push(
                 ...sourceRanges(translation, index).map((range) => ({

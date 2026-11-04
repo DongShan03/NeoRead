@@ -74,6 +74,7 @@ function App({
   translations = [t],
   searchQuery = "",
   searchResults,
+  sourceBlocks = blocks,
 }: {
   linked?: boolean;
   epub?: boolean;
@@ -81,12 +82,13 @@ function App({
   translations?: TranslationBlock[];
   searchQuery?: string;
   searchResults?: SearchResult[];
+  sourceBlocks?: PDFBlock[];
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useSentenceMarks(
     ref,
     engine,
-    epub ? epubBlocks : blocks,
+    epub ? epubBlocks : sourceBlocks,
     translations,
     annotations,
     linked,
@@ -651,6 +653,80 @@ it.each([
     }
   },
 );
+
+it("retains the same bilingual annotation when re-parsing changes its source block ID", async () => {
+  const moved = { ...blocks[0], id: "p1-b2" };
+  const sourceBlocks = [
+    { ...blocks[0], text: "An unrelated paragraph." },
+    moved,
+  ];
+  const match = vi
+    .spyOn(engine, "sentenceRanges")
+    .mockImplementation((passages) => {
+      if (passages[0]?.blockId !== moved.id) return [];
+      const range = document.createRange();
+      range.selectNodeContents(
+        host.querySelector("[data-source]")!.firstChild!,
+      );
+      return [range];
+    });
+  try {
+    await act(async () => root.render(<App sourceBlocks={sourceBlocks} />));
+    await pointer("[data-sentence]", "pointermove", 205);
+    const selected = events.sentenceHover.mock
+      .lastCall?.[0] as import("@neoread/core").ReaderSelection;
+    const annotation: Annotation = {
+      id: "relocated-note",
+      documentId: "doc",
+      kind: "highlight",
+      color: "#5b9fe8",
+      quote: selected.text,
+      note: "",
+      createdAt: "",
+      location: selected.location,
+    };
+    await act(async () =>
+      root.render(
+        <App sourceBlocks={sourceBlocks} annotations={[annotation]} />,
+      ),
+    );
+    const colored = () =>
+      [...registry.entries()]
+        .filter(([name]) => name.includes("-highlight-5b9fe8"))
+        .flatMap(([, ranges]) => texts(ranges))
+        .sort();
+    expect(colored()).toEqual(["Original sentence.", "翻译句子。"].sort());
+    expect(match).toHaveBeenCalledWith([
+      expect.objectContaining({ blockId: moved.id, sourceOffset: 0 }),
+    ]);
+    await act(async () =>
+      root.render(
+        <App
+          sourceBlocks={[...sourceBlocks, { ...moved, id: "p1-b3" }]}
+          annotations={[annotation]}
+        />,
+      ),
+    );
+    expect(colored()).toEqual(["翻译句子。"]);
+    await act(async () =>
+      root.render(
+        <App
+          sourceBlocks={sourceBlocks}
+          annotations={[annotation]}
+          translations={[]}
+        />,
+      ),
+    );
+    expect(colored()).toEqual(["Original sentence."]);
+    await pointer("[data-source]", "pointerdown", 5);
+    await pointer("[data-source]", "click", 5);
+    expect(events.annotation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ids: ["relocated-note"] }),
+    );
+  } finally {
+    match.mockRestore();
+  }
+});
 
 it("keeps the dwell toolbar alive while entering it and clears it on outside actions", async () => {
   await act(async () => root.render(<App />));
