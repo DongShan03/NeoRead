@@ -9,6 +9,7 @@ import { detectRegions } from "./detect";
 import {
   assignText,
   readingRegions,
+  readingTextSpans,
   isAsset,
   type Region,
 } from "./layout";
@@ -117,7 +118,10 @@ try {
     stage("page_inference", number);
     const regions = await detectRegions(session, canvas);
     stage("page_text", number);
-    const spans = await extractTextSpans(page, scale);
+    const spans = readingTextSpans(
+      regions,
+      await extractTextSpans(page, scale),
+    );
     const composed = readingRegions(
       regions,
       spans,

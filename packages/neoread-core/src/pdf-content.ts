@@ -10,9 +10,17 @@ export function isPDFPageDecoration(
     )
   )
     return true;
+  const b = block.bounds;
+  if (
+    (b.x < 0.09 || b.x > 0.9) &&
+    (b.width < 0.065 || b.height > 0.15) &&
+    /^arxiv\s*:\s*\d{4}\.\d+(?:v\d+)?(?:\s*\[[a-z.]+\])?(?:\s+\d{1,2}\s+[a-z]{3,9}\s+\d{4})?$/i.test(
+      block.text.trim(),
+    )
+  )
+    return true;
   // Explicit semantic labels take precedence over the pre-parsing fallback.
   if (!["", "text"].includes(block.label)) return false;
-  const b = block.bounds;
   return (
     (b.y < 0.1 || b.y + b.height > 0.9) &&
     b.width < 0.18 &&

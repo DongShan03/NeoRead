@@ -112,3 +112,35 @@ it("reads native filled panels with graphics transforms without treating white f
   expect(panels[1].x).toBeCloseTo(0.25);
   expect(panels[1].y).toBeCloseTo(0.3);
 });
+
+it("filters a rotated arXiv margin stamp without removing a normal body reference", async () => {
+  const page = {
+    getViewport: () => ({
+      width: 100,
+      height: 100,
+      transform: [1, 0, 0, 1, 0, 0],
+    }),
+    getTextContent: async () => ({
+      styles: { f1: { ascent: 0.8 } },
+      items: [
+        {
+          str: "arXiv:2605.18915v1 [cs.CR]",
+          fontName: "f1",
+          transform: [0, 10, -10, 0, 3, 30],
+          width: 50,
+        },
+        {
+          str: "See arXiv:2605.18915v1 [cs.CR].",
+          fontName: "f1",
+          transform: [10, 0, 0, 10, 20, 30],
+          width: 60,
+        },
+      ],
+    }),
+    getOperatorList: async () => ({ fnArray: [], argsArray: [] }),
+    commonObjs: { get: () => ({ name: "Times-Roman" }) },
+  } as unknown as PDFPageProxy;
+  expect((await extractTextSpans(page)).map((s) => s.text)).toEqual([
+    "See arXiv:2605.18915v1 [cs.CR].",
+  ]);
+});

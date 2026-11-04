@@ -216,6 +216,7 @@ export function readingRegions(
   spans: TextSpan[],
   panels: Box[] = [],
 ): ReadingRegion[] {
+  spans = readingTextSpans(raw, spans);
   const regions = raw.filter((r) => r.label !== "inline_formula");
   const assigned = assignText(regions, spans);
   const fitted = pdfAssetBounds(regions, spans);
@@ -389,4 +390,41 @@ export function readingRegions(
       ...merged,
     ].sort((a, b) => a.order - b.order),
   );
+}
+
+export function readingTextSpans(
+  regions: Region[],
+  spans: TextSpan[],
+): TextSpan[] {
+  const candidates = spans.filter(
+    (s) =>
+      /^\d{1,4}$/.test(s.text.trim()) &&
+      s.bounds.width < 0.035 &&
+      s.bounds.y > 0.06 &&
+      s.bounds.y + s.bounds.height < 0.95 &&
+      (s.bounds.x < 0.09 || s.bounds.x > 0.9) &&
+      !regions.some(
+        (r) =>
+          isAsset(r.label) &&
+          intersection(r.bounds, s.bounds) /
+            (s.bounds.width * s.bounds.height) >
+            0.5,
+      ),
+  );
+  const removed = new Set<TextSpan>();
+  for (const span of candidates) {
+    const column = candidates
+      .filter((s) => Math.abs(s.bounds.x - span.bounds.x) < 0.012)
+      .sort((a, b) => a.bounds.y - b.bounds.y);
+    if (column.length < 4) continue;
+    const step = Number(column[1].text) - Number(column[0].text);
+    const sequential =
+      [1, 5, 10].includes(step) &&
+      column.every(
+        (s, i) =>
+          i === 0 || Number(s.text) - Number(column[i - 1].text) === step,
+      );
+    if (sequential) column.forEach((s) => removed.add(s));
+  }
+  return spans.filter((s) => !removed.has(s));
 }

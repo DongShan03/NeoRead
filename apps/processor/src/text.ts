@@ -27,6 +27,13 @@ export async function extractTextSpans(
   return content.items.flatMap((item) => {
     if (!("str" in item) || !item.str.trim()) return [];
     const transform = Util.transform(viewport.transform, item.transform);
+    const vertical = Math.abs(transform[1]) > Math.abs(transform[0]) * 2;
+    if (
+      vertical &&
+      (transform[4] / width < 0.1 || transform[4] / width > 0.9) &&
+      /^arxiv\s*:\s*\d{4}\.\d+/i.test(item.str.trim())
+    )
+      return [];
     const h = Math.hypot(transform[2], transform[3]);
     const ascent = pdfFontAscent(content.styles[item.fontName]);
     const font = (fonts.get(item.fontName) ?? "").replace(/^[A-Z]{6}\+/, "");

@@ -4,6 +4,7 @@ import {
   decodeRegions,
   isAsset,
   readingRegions,
+  readingTextSpans,
 } from "./layout";
 import forceFigures from "./fixtures/force-figure-groups.json";
 describe("layout boundary", () => {
@@ -159,6 +160,39 @@ it("does not turn ordinary boxed prose into an image without a detected figure",
   expect(output.some((r) => r.text.includes("theorem"))).toBe(true);
 });
 
+it.each([1, 5, 10])(
+  "removes gutter line numbers with step %s while retaining table numbers",
+  (step) => {
+    const numbers = [1, 2, 3, 4].map((n) => ({
+      text: String(n * step),
+      bounds: { x: 0.045, y: 0.2 + n * 0.02, width: 0.015, height: 0.01 },
+    }));
+    const text = {
+      text: "Normal paragraph 32.",
+      bounds: { x: 0.12, y: 0.2, width: 0.5, height: 0.1 },
+    };
+    expect(readingTextSpans([], [...numbers, text])).toEqual([text]);
+    expect(
+      readingTextSpans(
+        [
+          {
+            label: "table",
+            order: 1,
+            confidence: 0.9,
+            bounds: { x: 0.03, y: 0.2, width: 0.7, height: 0.2 },
+          },
+        ],
+        numbers,
+      ),
+    ).toEqual(numbers);
+    expect(
+      readingTextSpans(
+        [],
+        numbers.map((s) => ({ ...s, bounds: { ...s.bounds, x: 0.2 } })),
+      ),
+    ).toHaveLength(4);
+  },
+);
 // Actual PP-DocLayoutV3 detections and PDF.js labels from FORCE figures 3 and 4.
 it.each(forceFigures)(
   "keeps the complete FORCE figure on page $page",
