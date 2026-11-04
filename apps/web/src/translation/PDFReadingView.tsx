@@ -128,6 +128,7 @@ export function PDFReadingView({
   };
   const previousMode = useRef<Mode>("source");
   const modeRestoring = useRef(false);
+  const modeFollow = useRef<PDFReadingAnchor | undefined>(undefined);
   const modeTarget = useRef<{
     anchor?: PDFReadingAnchor;
   }>(undefined);
@@ -286,7 +287,11 @@ export function PDFReadingView({
     const host = pane.current,
       body = content.current;
     if (!active || !host || !body) return;
-    const resize = new ResizeObserver(invalidateFollowGeometry);
+    const resize = new ResizeObserver(() => {
+      invalidateFollowGeometry();
+      if (modeFollow.current && !modeRestoring.current)
+        followTranslation(modeFollow.current);
+    });
     resize.observe(host);
     resize.observe(body);
     document.fonts?.addEventListener("loadingdone", invalidateFollowGeometry);
@@ -298,7 +303,7 @@ export function PDFReadingView({
       );
       invalidateFollowGeometry();
     };
-  }, [mode, doc.id, active]);
+  }, [mode, doc.id, active, blocks]);
   const sourceAnnotations = useMemo(
     () =>
       annotations.filter(
@@ -358,6 +363,27 @@ export function PDFReadingView({
     sentenceIndex?: number,
     options: { smooth?: boolean; center?: boolean } = {},
   ) => {
+    const formulaId = equationNumbers.byNumber.get(anchor.blockId);
+    if (formulaId) {
+      const number = blocksById.get(anchor.blockId),
+        formula = blocksById.get(formulaId);
+      anchor = {
+        blockId: formulaId,
+        fraction:
+          number && formula
+            ? Math.max(
+                0,
+                Math.min(
+                  1,
+                  (number.bounds.y +
+                    anchor.fraction * number.bounds.height -
+                    formula.bounds.y) /
+                    (formula.bounds.height || 1),
+                ),
+              )
+            : anchor.fraction,
+      };
+    }
     const host = pane.current;
     if (!host) return;
     control.current.following("translation");
@@ -782,6 +808,7 @@ export function PDFReadingView({
     };
   }, []);
   const input = (active: typeof side.current) => {
+    modeFollow.current = undefined;
     modeRestoring.current = false;
     cancelTranslationMotion();
     if (
@@ -881,11 +908,10 @@ export function PDFReadingView({
         ? ((pane.current &&
             translationReadingAnchor(pane.current, nodes.current)) ??
           reading.current)
-        : engine?.getReadingAnchor
-          ? engine.getReadingAnchor()
-          : reading.current;
+        : (engine?.getReadingAnchor?.() ?? reading.current);
     input(value === "translation" ? "translation" : "source");
     modeTarget.current = { anchor };
+    modeFollow.current = anchor;
     modeRestoring.current = true;
     setPopup(undefined);
     setMode(value);

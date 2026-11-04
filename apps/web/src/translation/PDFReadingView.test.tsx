@@ -1417,3 +1417,67 @@ it.each([
     }
   },
 );
+
+it("keeps the captured source anchor through delayed translation layout, then releases it on input", async () => {
+  adapter.getReadingAnchor = vi.fn(() => ({
+    blockId: "p1-b1",
+    fraction: 0.25,
+  }));
+  try {
+    await click("原文译文");
+    const { pane, block } = translationGeometry();
+    const callbacks = fixture.resizes.get(
+      host.querySelector(".translation-content")!,
+    )!;
+    await act(async () => callbacks.forEach((callback) => callback()));
+    expect(pane.scrollTop).toBe(350);
+    block.getBoundingClientRect = () =>
+      new DOMRect(40, 1000 - pane.scrollTop, 520, 200);
+    await act(async () => callbacks.forEach((callback) => callback()));
+    expect(pane.scrollTop).toBe(750);
+    await act(async () =>
+      pane.dispatchEvent(
+        new WheelEvent("wheel", { bubbles: true, deltaY: 20 }),
+      ),
+    );
+    pane.scrollTop = 900;
+    await act(async () => callbacks.forEach((callback) => callback()));
+    expect(pane.scrollTop).toBe(900);
+  } finally {
+    delete adapter.getReadingAnchor;
+  }
+});
+
+it("aligns a source equation-number anchor to the translated equation", async () => {
+  await renderView(defaultTheme, [
+    {
+      id: "formula",
+      page: 1,
+      label: "display_formula",
+      text: "x",
+      bounds: { x: 0.1, y: 0.58, width: 0.3, height: 0.1 },
+    },
+    {
+      id: "number",
+      page: 1,
+      label: "formula_number",
+      text: "(1)",
+      bounds: { x: 0.42, y: 0.6, width: 0.03, height: 0.04 },
+    },
+  ]);
+  adapter.getReadingAnchor = vi.fn(() => ({
+    blockId: "number",
+    fraction: 0.5,
+  }));
+  try {
+    await click("仅译文");
+    expect(
+      host
+        .querySelector("[data-translation-render-target]")
+        ?.getAttribute("data-translation-block"),
+    ).toBe("formula");
+    expect(host.querySelector('[data-translation-block="number"]')).toBeNull();
+  } finally {
+    delete adapter.getReadingAnchor;
+  }
+});

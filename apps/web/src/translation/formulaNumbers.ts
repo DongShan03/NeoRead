@@ -3,6 +3,7 @@ import type { PDFBlock } from "@neoread/core";
 /** Pair neighboring equation numbers without changing the extracted source blocks. */
 export function formulaNumbers(blocks: PDFBlock[]) {
   const byFormula = new Map<string, string>();
+  const byNumber = new Map<string, string>();
   const pairedIds = new Set<string>();
   const formulas = blocks.filter((b) => b.label === "display_formula");
   for (const number of blocks) {
@@ -39,7 +40,8 @@ export function formulaNumbers(blocks: PDFBlock[]) {
     )
       continue;
     byFormula.set(candidates[0].formula.id, number.text.trim());
+    byNumber.set(number.id, candidates[0].formula.id);
     pairedIds.add(number.id);
   }
-  return { byFormula, pairedIds };
+  return { byFormula, byNumber, pairedIds };
 }
