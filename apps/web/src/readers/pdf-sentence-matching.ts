@@ -40,12 +40,6 @@ function inlineMathProjection(text: string, block: string) {
   const parts: { text: string; math: boolean }[] = [];
   let offset = 0;
   for (const match of block.matchAll(/(?<!\\)\$(?:\\.|[^$])+\$/g)) {
-    if (
-      !/\\(?:mathcal|mathbb|mathbf|tilde|hat|bar|dot|ddot)\b|[_^]\{/.test(
-        match[0],
-      )
-    )
-      continue;
     parts.push(
       { text: block.slice(offset, match.index), math: false },
       { text: match[0], math: true },
@@ -83,7 +77,8 @@ function inlineMathProjection(text: string, block: string) {
       value
         .replace(/[˜ˆ¯˙¨]/g, "")
         .replace(/\\[a-z]+/gi, "")
-        .normalize("NFKD"),
+        .normalize("NFKD")
+        .toLowerCase(),
     )
       .filter((c) => /[\p{L}\p{N}]/u.test(c))
       .sort()

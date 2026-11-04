@@ -9,6 +9,26 @@ const pdf = normalized(
   "Each time 𝑡𝑖 merges a record-local graph, it checks all followers.",
 );
 
+it("maps ordinary inline formulas to PDF glyphs while keeping each variable", () => {
+  const source = normalized(
+    "The attention mechanism uses $d_k=64$ dimensions and reduces the cost for sequences of length $n$.",
+  );
+  const native = normalized(
+    "The attention mechanism uses dk=64 dimensions and reduces the cost for sequences of length n.",
+  );
+  expect(sentenceTextRanges(native, source, [source])).toEqual([
+    { start: 0, end: native.length },
+  ]);
+  const mathematical = native.replace("dk=64", "𝐷ₖ=64");
+  expect(sentenceTextRanges(mathematical, source, [source])).toEqual([
+    { start: 0, end: mathematical.length },
+  ]);
+  expect(
+    sentenceTextRanges(native.replace("dk=64", "dl=64"), source, [source]),
+  ).toEqual([]);
+  expect(sentenceTextRanges(native + native, source, [source])).toEqual([]);
+});
+
 it("maps structured inline scripts to native glyph order without accepting different variables", () => {
   const first = normalized("where CS denotes the cosine similarity.");
   const second = normalized(
