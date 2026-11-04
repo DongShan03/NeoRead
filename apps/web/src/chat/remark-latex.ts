@@ -149,4 +149,36 @@ export const remarkLatex: Plugin = function () {
   const data = this.data();
   (data.micromarkExtensions ??= []).push(syntax);
   (data.fromMarkdownExtensions ??= []).push(markdown);
+  // Adjacent footnote fragments such as $^1$$^*$ become one inlineMath token
+  // containing "^1$$^*". Repair only this numeric/symbol superscript grammar.
+  return (tree) => {
+    type MathNode = {
+      type: string;
+      value?: string;
+      children?: MathNode[];
+      data?: { hChildren?: { value?: string }[] };
+    };
+    const visit = (node: MathNode) => {
+      if (node.type === "inlineMath" && node.value) {
+        const value = node.value.replace(/\\\\(d(?:d)?agger)\b/g, "\\$1");
+        const chunks = value.split("$$");
+        const markers: string[] = [];
+        for (const chunk of chunks) {
+          const match =
+            /^(?:\{\})?\^(?:\{((?:[\d*∗†‡, ]|\\(?:dagger|ddagger))+?)\}|([\d*∗†‡]|\\(?:dagger|ddagger)))$/.exec(
+              chunk.trim(),
+            );
+          if (!match) return node.children?.forEach(visit);
+          markers.push(match[1] ?? match[2]);
+        }
+        if (chunks.length > 1 || value !== node.value) {
+          node.value = `^{${markers.join("")}}`;
+          for (const child of node.data?.hChildren ?? [])
+            if (child.value !== undefined) child.value = node.value;
+        }
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree as MathNode);
+  };
 };

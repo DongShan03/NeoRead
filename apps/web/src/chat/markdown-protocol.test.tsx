@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { ChatCitationNavigation } from "./citations";
+import katex from "katex";
 
 vi.mock("./MathFormula", () => ({
   default: ({ value, display }: { value: string; display: boolean }) => (
@@ -71,6 +72,28 @@ it("recognizes Codex math without interpreting code, literal brackets or escaped
   expect(host.querySelector("pre")?.textContent).toContain(
     String.raw`\[code\]`,
   );
+});
+
+it("repairs adjacent author superscripts and overescaped dagger commands without changing matrix rows", async () => {
+  await render(
+    String.raw`Yilian Liu$^1$$^*$，Guoshun Nan$^1$$^\\dagger$，Jiuyang Lyu$^1$$^{\\ddagger}$。`,
+  );
+  const values = [...host.querySelectorAll("[data-math]")].map(
+    (node) => node.textContent!,
+  );
+  expect(values).toEqual([
+    String.raw`^{1*}`,
+    String.raw`^{1\dagger}`,
+    String.raw`^{1\ddagger}`,
+  ]);
+  for (const value of values)
+    expect(() =>
+      katex.renderToString(value, { throwOnError: true, trust: false }),
+    ).not.toThrow();
+  await render(String.raw`$\begin{matrix}a&b\\c&d\end{matrix}$ 和 $x^2$`);
+  expect(
+    [...host.querySelectorAll("[data-math]")].map((node) => node.textContent),
+  ).toEqual([String.raw`\begin{matrix}a&b\\c&d\end{matrix}`, "x^2"]);
 });
 
 it("renders completed delimiters after arbitrary streaming cuts, including long answers", async () => {
