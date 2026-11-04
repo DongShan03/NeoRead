@@ -15,6 +15,7 @@ export function GuideHost({
   ready,
   version,
   hasDocuments,
+  afterLibrarySwitch = false,
   open,
   onOpenChange,
   onAction,
@@ -23,6 +24,7 @@ export function GuideHost({
   ready: boolean;
   version: string;
   hasDocuments: boolean;
+  afterLibrarySwitch?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAction: (action: GuideAction) => void;
@@ -45,7 +47,12 @@ export function GuideHost({
       .guidePreferences()
       .then((saved) => {
         preferences.current = saved;
-        const launch = guideLaunch(saved, version, hasDocuments);
+        const launch = guideLaunch(
+          saved,
+          version,
+          hasDocuments,
+          afterLibrarySwitch,
+        );
         if (launch.kind === "onboarding") setOnboarding(true);
         else if (launch.kind === "release") setRelease(launch.items);
         else if (launch.save) save(launch.save);

@@ -27,7 +27,16 @@ export function guideLaunch(
   preferences: GuidePreferences,
   version: string,
   hasDocuments: boolean,
+  afterLibrarySwitch = false,
 ): GuideLaunch {
+  if (
+    afterLibrarySwitch &&
+    (!preferences.onboarded || preferences.seenVersion !== version)
+  )
+    return {
+      kind: "none",
+      save: { ...preferences, onboarded: true, seenVersion: version },
+    };
   if (
     !preferences.onboarded &&
     (!hasDocuments || preferences.exampleDocumentId)

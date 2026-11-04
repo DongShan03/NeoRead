@@ -966,6 +966,10 @@ export function App() {
           ready={!loading && !error}
           version={version}
           hasDocuments={allDocuments.length > 0}
+          afterLibrarySwitch={
+            !!window.neoreadDesktop &&
+            new URLSearchParams(location.search).has("librarySession")
+          }
           open={guide}
           onOpenChange={setGuide}
           onAction={(action) => {

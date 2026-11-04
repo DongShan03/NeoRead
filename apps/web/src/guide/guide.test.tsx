@@ -143,13 +143,18 @@ describe("guide host", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
-  const render = async (hasDocuments: boolean, version = "9.9.9") => {
+  const render = async (
+    hasDocuments: boolean,
+    version = "9.9.9",
+    afterLibrarySwitch = false,
+  ) => {
     await act(async () =>
       root.render(
         <GuideHost
           ready
           version={version}
           hasDocuments={hasDocuments}
+          afterLibrarySwitch={afterLibrarySwitch}
           open={false}
           onOpenChange={() => {}}
           onAction={() => {}}
@@ -381,6 +386,22 @@ describe("guide host", () => {
     expect(api.saveGuidePreferences).toHaveBeenCalledWith({
       onboarded: true,
       seenVersion: "9.9.9",
+    });
+  });
+
+  it("switches to an existing library without replaying automatic update or onboarding dialogs", async () => {
+    vi.mocked(api.guidePreferences).mockResolvedValue({
+      onboarded: true,
+      seenVersion: "0.0.1",
+      exampleDocumentId: "existing-example",
+    });
+    await render(true, "9.9.9", true);
+    expect(document.body.textContent).not.toContain("更新内容");
+    expect(document.querySelector(".tour")).toBeNull();
+    expect(api.saveGuidePreferences).toHaveBeenCalledWith({
+      onboarded: true,
+      seenVersion: "9.9.9",
+      exampleDocumentId: "existing-example",
     });
   });
 
