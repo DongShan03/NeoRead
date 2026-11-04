@@ -119,7 +119,44 @@ it("rotates without a center signal during sync, including after a failure", asy
   expect(
     host.querySelector("svg")?.classList.contains("motion-reduce:animate-none"),
   ).toBe(true);
-  expect(host.querySelector("button")?.disabled).toBe(true);
+  expect(host.querySelector("button")?.getAttribute("aria-disabled")).toBe(
+    "true",
+  );
+  await click();
+  expect(api.runWebdav).not.toHaveBeenCalled();
+});
+it("keeps the disabled sync icon's tooltip accessible and updates this run's MB counts", async () => {
+  useWebDAVSync.setState({
+    status: {
+      ...clean,
+      phase: "downloading",
+      transferred: 4_200_000,
+      totalBytes: 25_000_000,
+    },
+  });
+  await render();
+  const trigger = host.querySelector<HTMLElement>(
+    '[data-slot="tooltip-trigger"]',
+  )!;
+  await act(async () => trigger.focus());
+  expect(
+    document.querySelector('[data-slot="tooltip-content"]')?.textContent,
+  ).toContain("已传输 4.2 MB / 共 25.0 MB");
+  await act(async () =>
+    setWebDAVStatus({
+      ...clean,
+      phase: "uploading",
+      transferred: 8_000_000,
+      totalBytes: 25_000_000,
+    }),
+  );
+  expect(
+    document.querySelector('[data-slot="tooltip-content"]')?.textContent,
+  ).toContain("已传输 8.0 MB / 共 25.0 MB");
+  await act(async () => useWebDAVSync.setState({ starting: true }));
+  expect(
+    document.querySelector('[data-slot="tooltip-content"]')?.textContent,
+  ).toContain("已传输 0.0 MB / 总量统计中");
 });
 it("changes the check to an exclamation after a library edit", async () => {
   await render();

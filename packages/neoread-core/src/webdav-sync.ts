@@ -44,6 +44,7 @@ export interface WebDAVStatus {
   conflicts: WebDAVConflict[];
   deferred: number;
   transferred: number;
+  totalBytes?: number;
   changed: string[];
   revision: number;
   applyToken?: string;

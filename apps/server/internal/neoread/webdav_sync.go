@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -40,6 +41,7 @@ type webdavStatus struct {
 	Conflicts   []webdavConflict `json:"conflicts"`
 	Deferred    int              `json:"deferred"`
 	Transferred int              `json:"transferred"`
+	TotalBytes  *int64           `json:"totalBytes,omitempty"`
 	Changed     []string         `json:"changed"`
 	Revision    uint64           `json:"revision"`
 	ApplyToken  string           `json:"applyToken,omitempty"`
@@ -405,6 +407,19 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 			continue
 		}
 		updates[key] = body
+	}
+	downloadBytes, err := s.syncDownloadBytes(ctx, snapshot.Documents, updates)
+	if err != nil {
+		return err
+	}
+	uploads := maps.Clone(state.Own)
+	for key, version := range resolutions {
+		if !snapshot.Busy[strings.TrimPrefix(key, "document/")] {
+			uploads[key] = version
+		}
+	}
+	s.setSyncTotal(downloadBytes + syncUploadBytes(uploads, state.Uploaded))
+	for key, body := range updates {
 		if body != nil {
 			if err = s.stageSyncDocument(ctx, dav, run, snapshot.Documents[key], body); err != nil {
 				return err
@@ -435,6 +450,12 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 	if err = s.saveSyncState(config, state); err != nil {
 		return err
 	}
+	// Edits made while downloading may prevent applying a resolution. Use
+	// only the versions actually accepted when counting remaining uploads.
+	s.webdav.mu.Lock()
+	transferred := s.webdav.status.Transferred
+	s.webdav.mu.Unlock()
+	s.setSyncTotal(int64(transferred) + syncUploadBytes(state.Own, state.Uploaded))
 	s.setSyncPhase("uploading")
 	for _, entry := range state.Own {
 		if entry.Deleted {
@@ -630,6 +651,60 @@ func syncConflict(key, identifier string, versions []*syncVersion) webdavConflic
 	return result
 }
 
+func (s *Server) setSyncTotal(total int64) {
+	s.webdav.mu.Lock()
+	s.webdav.status.TotalBytes = &total
+	s.webdav.mu.Unlock()
+}
+
+func syncUploadBytes(entries map[string]*syncVersion, uploaded map[string]bool) int64 {
+	var total int64
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		if entry.Deleted {
+			continue
+		}
+		for _, file := range entry.Body.Files {
+			for _, chunk := range file.Chunks {
+				if !uploaded[chunk.Hash] && !seen[chunk.Hash] {
+					total += int64(chunk.Size)
+					seen[chunk.Hash] = true
+				}
+			}
+		}
+	}
+	return total
+}
+
+func (s *Server) syncDownloadBytes(ctx context.Context, before, updates map[string]*syncDocument) (int64, error) {
+	var total int64
+	seen := map[string]bool{}
+	for key, doc := range updates {
+		if doc == nil {
+			continue
+		}
+		for name, file := range doc.Files {
+			if old := before[key]; old != nil && syncHash(old.Files[name]) == syncHash(file) {
+				continue
+			}
+			for _, chunk := range file.Chunks {
+				if err := ctx.Err(); err != nil {
+					return 0, err
+				}
+				if seen[chunk.Hash] {
+					continue
+				}
+				seen[chunk.Hash] = true
+				body, err := os.ReadFile(s.syncBlob(chunk.Hash))
+				if err != nil || len(body) != chunk.Size || syncBytesHash(body) != chunk.Hash {
+					total += int64(chunk.Size)
+				}
+			}
+		}
+	}
+	return total, nil
+}
+
 func (s *Server) beginWebDAVSync(ctx context.Context, manual ...bool) error {
 	if !s.webdav.operation.TryLock() {
 		return errors.New("同步正在进行")
@@ -661,6 +736,7 @@ func (s *Server) beginWebDAVSync(ctx context.Context, manual ...bool) error {
 	s.syncStatusLocked().Phase = "scanning"
 	s.syncStatusLocked().Error = ""
 	s.syncStatusLocked().Transferred = 0
+	s.syncStatusLocked().TotalBytes = nil
 	taskID := id()
 	s.webdav.taskID = taskID
 	s.webdav.status.RunID = taskID

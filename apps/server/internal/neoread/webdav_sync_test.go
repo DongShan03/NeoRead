@@ -304,6 +304,68 @@ func runSync(t *testing.T, s *Server) {
 		t.Fatal(err)
 	}
 }
+
+func TestWebDAVTransferTotalsCountBothDirectionsAndResetBeforeNextRun(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	syncDocumentFixture(t, b.Store, "other", "分类")
+	var uploaded, downloaded int64
+	var firstRequest, reset, missingTotal bool
+	b.webdav.factory = func(c webdavConfig) *davClient {
+		client := testDAVClient(c, remote)
+		client.http.Transport = davTestTransport(func(r *http.Request) (*http.Response, error) {
+			status := b.syncStatus()
+			if !firstRequest {
+				reset = status.Transferred == 0 && status.TotalBytes == nil
+				firstRequest = true
+			}
+			response, err := http.DefaultTransport.RoundTrip(r)
+			if err == nil && strings.Contains(r.URL.Path, "/objects/") {
+				if r.Method == "PUT" {
+					uploaded += r.ContentLength
+				} else if r.Method == "GET" {
+					downloaded += response.ContentLength
+				}
+				if (r.Method == "PUT" || r.Method == "GET") && status.TotalBytes == nil {
+					missingTotal = true
+				}
+			}
+			return response, err
+		})
+		return client
+	}
+	run := func() webdavStatus {
+		if err := b.beginWebDAVSync(t.Context(), true); err != nil {
+			t.Fatal(err)
+		}
+		b.webdav.mu.Lock()
+		done := b.webdav.done
+		b.webdav.mu.Unlock()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("sync did not finish")
+		}
+		b.webdav.operation.Lock()
+		b.webdav.operation.Unlock()
+		status := b.syncStatus()
+		if status.Phase != "complete" {
+			t.Fatal(status)
+		}
+		return status
+	}
+	status := run()
+	if !reset || missingTotal || uploaded <= 0 || downloaded <= 0 || int64(status.Transferred) != uploaded+downloaded || status.TotalBytes == nil || *status.TotalBytes != uploaded+downloaded {
+		t.Fatalf("progress = %+v; uploads %d downloads %d reset %v", status, uploaded, downloaded, reset)
+	}
+	uploaded, downloaded, firstRequest, reset = 0, 0, false, false
+	status = run()
+	if !reset || uploaded != 0 || downloaded != 0 || status.Transferred != 0 || status.TotalBytes == nil || *status.TotalBytes != 0 {
+		t.Fatal("reused chunks or previous run were counted", status, uploaded, downloaded, reset)
+	}
+}
 func TestWebDAVRoundTripKeepsOriginalNotesChatsAndOtherLibraryModes(t *testing.T) {
 	remote, _ := testDAV(t)
 	a := syncFixture(t, remote, "Mac")

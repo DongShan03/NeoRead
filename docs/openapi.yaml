@@ -6447,6 +6447,12 @@
                       "minimum": 0,
                       "description": "File bytes transferred over WebDAV during this run",
                     },
+                  "totalBytes":
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Planned upload and download file bytes in this run, excluding reused chunks and metadata; absent until scanning finishes",
+                    },
                   "changed": { "type": "array", "items": { "type": "string" } },
                   "revision": { "type": "integer", "minimum": 0 },
                   "applyToken": { "type": "string" },

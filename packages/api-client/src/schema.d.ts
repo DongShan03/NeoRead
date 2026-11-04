@@ -5600,6 +5600,8 @@ export interface components {
             deferred: number;
             /** @description File bytes transferred over WebDAV during this run */
             transferred: number;
+            /** @description Planned upload and download file bytes in this run, excluding reused chunks and metadata; absent until scanning finishes */
+            totalBytes?: number;
             changed: string[];
             revision: number;
             applyToken?: string;
