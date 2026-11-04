@@ -229,6 +229,20 @@ func execSyncRow(ctx context.Context, tx *sql.Tx, name string, schema syncTable,
 			merged[key] = value
 		}
 		body, _ := json.Marshal(merged)
+		shared, err := sharedPreferenceScope(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if shared {
+			var local, original map[string]any
+			if json.Unmarshal(body, &local) != nil {
+				return errors.New("同步书库设置无效")
+			}
+			if previous != "" && json.Unmarshal([]byte(previous), &original) != nil {
+				return errors.New("本地书库设置无效")
+			}
+			body, _ = json.Marshal(mergeApplicationPreference("preferences:library", local, globalPreference("preferences:library", original)))
+		}
 		copy := syncRow{}
 		for key, value := range row {
 			copy[key] = value

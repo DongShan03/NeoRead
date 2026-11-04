@@ -740,6 +740,43 @@ func TestWebDAVConfiguredConnectionIsAvailableButOffInOtherLibraries(t *testing.
 		t.Fatal("unconfigured library could sync the default folder")
 	}
 }
+
+func TestWebDAVLibraryOrganizationDoesNotOverrideApplicationDisplayPreferences(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	for _, server := range []*Server{a, b} {
+		if err := server.SetApplicationSettingsPath(filepath.Join(t.TempDir(), "application-settings.json"), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Establish a common baseline before editing app-wide display settings.
+	runSync(t, a)
+	runSync(t, b)
+	if err := a.saveApplicationPreference("preferences:library", map[string]any{"papers": map[string]any{"showAuthors": true, "categories": []any{"共享分类"}}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := b.readApplicationPreference("preferences:library")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := before["papers"].(map[string]any); !ok {
+		before["papers"] = map[string]any{}
+	}
+	before["papers"].(map[string]any)["showAuthors"] = false
+	if err := b.saveApplicationPreference("preferences:library", before); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	runSync(t, b)
+	prefs, err := readPreference(b.Store.DB, "preferences:library")
+	if err != nil {
+		t.Fatal(err)
+	}
+	papers := prefs["papers"].(map[string]any)
+	if papers["showAuthors"] != false || papers["categories"].([]any)[0] != "共享分类" {
+		t.Fatal("sync overwrote machine display settings or lost organization", papers)
+	}
+}
 func TestWebDAVRemoteFolderFollowsRenameAndOtherDevicesDiscoverIt(t *testing.T) {
 	remote, directory := testDAV(t)
 	a := syncFixture(t, remote, "Mac")

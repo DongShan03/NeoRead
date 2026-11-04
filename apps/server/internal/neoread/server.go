@@ -31,60 +31,62 @@ import (
 )
 
 type Server struct {
-	codexHistoryMu         sync.Mutex
-	webdav                 webdavState
-	libraryArchiveMu       sync.RWMutex
-	startupSettings        json.RawMessage
-	processingReady        <-chan struct{}
-	chatReservations       map[string]bool
-	chatMu                 sync.Mutex
-	chatRuns               map[string]*chatRun
-	Diagnostics            *diagnostics.Store
-	connectorMu            sync.Mutex
-	connectorAvailable     bool
-	connectorReason        string
-	connectorRevision      atomic.Int64
-	cite                   citeBroker
-	zoteroMu               sync.Mutex
-	zoteroScans            map[string]*zoteroScan
-	endnoteScans           map[string]*endnoteScan
-	annotationCheckLocks   sync.Map
-	annotationMu           sync.Mutex
-	annotationRevisions    map[string]string
-	annotationSubscribers  map[string]map[chan struct{}]struct{}
-	annotationHistory      []annotationChange
-	codexChat              codexChatCache
-	documentCodex          documentCodexCache
-	corpusMu               sync.Mutex
-	overviewMu             sync.Mutex
-	overviewActive         map[string]context.CancelFunc
-	Store                  *Store
-	Token                  string
-	Web                    string
-	aiMu                   sync.Mutex
-	documentMu             sync.Mutex
-	documentClosed         bool
-	documentTasks          map[string]map[*documentTask]struct{}
-	deletingDocuments      map[string]bool
-	reparsingDocuments     map[string]bool
-	importMu               sync.Mutex
-	configMu               sync.Mutex
-	aiConfigPath           string
-	translationMu          sync.Mutex
-	translationSubscribers map[string]map[chan TranslationBlock]struct{}
-	processingMu           sync.Mutex
-	bookLayout             bookLayoutState
-	processingControlMu    sync.Mutex
-	activeProcessing       map[string]*documentTask
-	blockedProcessing      map[string]bool
-	modelMu                sync.Mutex
-	modelCache             map[string]modelCatalogEntry
-	paperRefresh           paperRefreshState
-	scholarMu              sync.Mutex
-	scholar                *scholar.Client
-	journalRankMu          sync.Mutex
-	journalRankLast        time.Time
-	journalRankRequests    singleflight.Group
+	codexHistoryMu          sync.Mutex
+	webdav                  webdavState
+	libraryArchiveMu        sync.RWMutex
+	startupSettings         json.RawMessage
+	processingReady         <-chan struct{}
+	chatReservations        map[string]bool
+	chatMu                  sync.Mutex
+	chatRuns                map[string]*chatRun
+	Diagnostics             *diagnostics.Store
+	connectorMu             sync.Mutex
+	connectorAvailable      bool
+	connectorReason         string
+	connectorRevision       atomic.Int64
+	cite                    citeBroker
+	zoteroMu                sync.Mutex
+	zoteroScans             map[string]*zoteroScan
+	endnoteScans            map[string]*endnoteScan
+	annotationCheckLocks    sync.Map
+	annotationMu            sync.Mutex
+	annotationRevisions     map[string]string
+	annotationSubscribers   map[string]map[chan struct{}]struct{}
+	annotationHistory       []annotationChange
+	codexChat               codexChatCache
+	documentCodex           documentCodexCache
+	corpusMu                sync.Mutex
+	overviewMu              sync.Mutex
+	overviewActive          map[string]context.CancelFunc
+	Store                   *Store
+	Token                   string
+	Web                     string
+	aiMu                    sync.Mutex
+	documentMu              sync.Mutex
+	documentClosed          bool
+	documentTasks           map[string]map[*documentTask]struct{}
+	deletingDocuments       map[string]bool
+	reparsingDocuments      map[string]bool
+	importMu                sync.Mutex
+	configMu                sync.Mutex
+	aiConfigPath            string
+	applicationSettingsPath string
+	preferencesMu           sync.Mutex
+	translationMu           sync.Mutex
+	translationSubscribers  map[string]map[chan TranslationBlock]struct{}
+	processingMu            sync.Mutex
+	bookLayout              bookLayoutState
+	processingControlMu     sync.Mutex
+	activeProcessing        map[string]*documentTask
+	blockedProcessing       map[string]bool
+	modelMu                 sync.Mutex
+	modelCache              map[string]modelCatalogEntry
+	paperRefresh            paperRefreshState
+	scholarMu               sync.Mutex
+	scholar                 *scholar.Client
+	journalRankMu           sync.Mutex
+	journalRankLast         time.Time
+	journalRankRequests     singleflight.Group
 }
 
 func NewServer(s *Store, token, web string) *Server { return &Server{Store: s, Token: token, Web: web} }
@@ -254,13 +256,12 @@ func (s *Server) Handler() http.Handler {
 			respond(w, 200, s.startupSettings)
 			return
 		}
-		var value string
-		err := s.Store.DB.QueryRow("SELECT value FROM settings WHERE key='neoread'").Scan(&value)
+		value, err := s.readApplicationPreference("neoread")
 		if err != nil {
-			respond(w, 200, map[string]any{})
+			fail(w, 500, "无法读取应用设置")
 			return
 		}
-		respond(w, 200, json.RawMessage(value))
+		respond(w, 200, value)
 	})
 	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		var v map[string]any
@@ -300,8 +301,7 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
-		b, _ := json.Marshal(v)
-		_, err := s.Store.DB.Exec("INSERT INTO settings VALUES('neoread',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", string(b))
+		err := s.saveApplicationPreference("neoread", v)
 		if err != nil {
 			fail(w, 500, "设置保存失败")
 			return

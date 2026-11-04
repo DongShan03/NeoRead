@@ -120,6 +120,10 @@ func emptySyncDocument() *syncDocument {
 }
 
 func snapshotSyncRows(ctx context.Context, q syncQuery) (map[string]*syncDocument, error) {
+	shared, err := sharedPreferenceScope(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	schema, err := syncSchema(ctx, q)
 	if err != nil {
 		return nil, err
@@ -134,6 +138,15 @@ func snapshotSyncRows(ctx context.Context, q syncQuery) (map[string]*syncDocumen
 		}
 		for _, row := range rows {
 			if table == "settings" {
+				if shared {
+					var prefs map[string]any
+					if json.Unmarshal([]byte(fmtSyncString(row["value"])), &prefs) != nil {
+						return nil, errors.New("书库偏好格式无效")
+					}
+					local := mergeApplicationPreference("preferences:library", prefs, map[string]any{})
+					body, _ := json.Marshal(local)
+					row["value"] = string(body)
+				}
 				var preferences map[string]json.RawMessage
 				if json.Unmarshal([]byte(fmtSyncString(row["value"])), &preferences) != nil {
 					return nil, errors.New("书库偏好格式无效")
@@ -141,6 +154,12 @@ func snapshotSyncRows(ctx context.Context, q syncQuery) (map[string]*syncDocumen
 				sections := map[string]json.RawMessage{}
 				for _, name := range []string{"papers", "books"} {
 					if value, ok := preferences[name]; ok {
+						if shared {
+							var section map[string]any
+							if json.Unmarshal(value, &section) == nil && len(section) == 0 {
+								continue
+							}
+						}
 						sections[name] = value
 					}
 				}
@@ -198,6 +217,17 @@ func snapshotSyncRows(ctx context.Context, q syncQuery) (map[string]*syncDocumen
 		}
 	}
 	return result, nil
+}
+
+func sharedPreferenceScope(ctx context.Context, q syncQuery) (bool, error) {
+	rows, err := q.QueryContext(ctx, "SELECT key FROM settings WHERE key='application:preferences-scope'")
+	if err != nil {
+		return false, err
+	}
+	shared := rows.Next()
+	err = rows.Err()
+	rows.Close()
+	return shared, err
 }
 
 func (s *Server) syncBusy() map[string]bool {

@@ -34,6 +34,8 @@ func main() {
 	webdavAccount := flag.String("webdav-account", "", "machine-local shared WebDAV connection file")
 	aiConfig := flag.String("ai-config", "", "machine-local shared Agent connection settings")
 	aiConfigFallback := flag.String("ai-config-fallback", "", "existing default library Agent settings for first-time migration")
+	appSettings := flag.String("application-settings", "", "machine-local shared application preferences")
+	appSettingsFallback := flag.String("application-settings-fallback", "", "default library directory for preference migration")
 	connector := flag.Bool("connector", true, "enable NeoRead Connector listener")
 	citeCredential := flag.String("cite-credential", "", "credential file for the Word and WPS plugins")
 	citePlugins := flag.String("cite-plugins", "", "directory with the Word and WPS add-in files")
@@ -193,6 +195,11 @@ func main() {
 		}
 	}
 	defer server.Close()
+	if *appSettings != "" {
+		if err := server.SetApplicationSettingsPath(*appSettings, *appSettingsFallback); err != nil {
+			log.Fatal("无法初始化应用设置")
+		}
+	}
 	if err := server.PrepareStartupSettings(); err != nil {
 		log.Fatal(err)
 	}

@@ -132,8 +132,7 @@ func (s *Server) preferences(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "未知偏好")
 		return
 	}
-	var value string
-	err := s.Store.DB.QueryRow("SELECT value FROM settings WHERE key=?", "preferences:"+key).Scan(&value)
+	value, err := s.readApplicationPreference("preferences:" + key)
 	if errors.Is(err, sql.ErrNoRows) {
 		respond(w, 200, map[string]any{})
 		return
@@ -142,7 +141,7 @@ func (s *Server) preferences(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "无法读取偏好")
 		return
 	}
-	respond(w, 200, json.RawMessage(value))
+	respond(w, 200, value)
 }
 func (s *Server) savePreferences(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
@@ -177,7 +176,7 @@ func (s *Server) savePreferences(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "偏好内容过大")
 		return
 	}
-	if _, err := s.Store.DB.Exec("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "preferences:"+key, string(b)); err != nil {
+	if err := s.saveApplicationPreference("preferences:"+key, v); err != nil {
 		fail(w, 500, "偏好保存失败")
 		return
 	}
