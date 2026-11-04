@@ -137,6 +137,8 @@ Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history
 
 ## 坚果云同步
 
+`sync.cache_pruned` 汇总成功同步后回收的本地无引用分块数量和字节数；`sync.cache_prune_failed` 表示回收未完成，未能回收的缓存保留，不改变已成功同步的结果。事件不记录分块内容、路径或账号。
+
 `sync.started / stage / finished` 用 `taskId` 关联一轮同步，终态记录耗时并区分完成、待选择冲突、失败和取消。阶段包括扫描、下载、等待渲染端保存、应用和上传；限流终态使用 `errorCode=rate_limited`，后续遵守上游 `Retry-After`。
 
 `sync.config_saved / config_failed / connection_verified / connection_failed / disconnected` 记录连接操作结果；配置成功只记录是否自动同步和分钟间隔。`sync.index_failed` 记录接收内容后全文索引排队失败，带文档 ID 和固定错误类别。事件不记录坚果云账号、应用密码、文件夹名、完整 URL、上游响应正文、笔记或聊天内容。使用说明与人工检查见[坚果云同步](webdav-sync.md)。

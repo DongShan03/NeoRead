@@ -233,9 +233,9 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 		}
 		state.Own[key] = newSyncVersion(state, local, base, config.DeviceName, parents)
 	}
-	for name, fingerprint := range snapshot.Files {
-		state.Files[name] = fingerprint
-	}
+	// Fingerprints are a read cache, not deletion history. Keep only files in
+	// this snapshot; Own/Base still retain chunks needed by deferred work.
+	state.Files = snapshot.Files
 	// Persist unpublished local changes before any network access. A retry
 	// retains their original causal order instead of hiding an offline edit.
 	if err = s.saveSyncState(config, state); err != nil {
@@ -528,6 +528,13 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 	s.webdav.mu.Lock()
 	s.syncStatusLocked().LastSync = state.LastSync
 	s.webdav.mu.Unlock()
+	if count, bytes, err := s.pruneSyncCache(ctx, config, state); err != nil {
+		if ctx.Err() == nil {
+			s.diagnosticEvent(slog.LevelWarn, "sync.cache_prune_failed", "taskId", s.webdav.taskID, "errorCode", "cache")
+		}
+	} else if count > 0 {
+		s.diagnosticEvent(slog.LevelInfo, "sync.cache_pruned", "taskId", s.webdav.taskID, "count", count, "bytes", bytes)
+	}
 	return nil
 }
 
