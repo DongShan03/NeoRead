@@ -256,7 +256,8 @@ it("turns off configured sync immediately and hides its credentials without dele
       ...config,
       account: "reader@example.com",
       passwordSet: true,
-      libraryConfigured: false,
+      libraryConfigured: true,
+      remoteId: "connected-library",
     });
   });
   await render(true);
@@ -269,7 +270,11 @@ it("turns off configured sync immediately and hides its credentials without dele
   await toggle();
   expect(input("email").value).toBe("reader@example.com");
   expect(input("password").value).toBe("");
-  expect(api.saveWebdavConfig).not.toHaveBeenCalled();
+  await click("测试连接");
+  await click("保存");
+  expect(api.saveWebdavConfig).toHaveBeenCalledWith(
+    expect.objectContaining({ enabled: true, remoteId: "connected-library" }),
+  );
 });
 
 it("requires a successful connection test again after either credential changes", async () => {

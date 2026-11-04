@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/mail"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -134,17 +133,20 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			return
 		}
 		defer s.webdav.operation.Unlock()
-		config, _ := s.readSyncConfig()
-		if err := os.Remove(s.syncConfigPath()); err != nil && !os.IsNotExist(err) {
-			fail(w, 500, "无法移除同步设置")
+		config, err := s.readSyncConfig()
+		if err != nil {
+			fail(w, 500, err.Error())
 			return
 		}
-		if config.RemoteID != "" {
-			_ = os.RemoveAll(filepath.Dir(s.syncStatePath(config)))
+		// Disabling pauses replication. The baseline and device identity are
+		// needed to propagate edits and deletions made while sync is disabled.
+		config.Enabled = false
+		if config.LibraryConfigured {
+			if err = s.writeSyncConfig(config); err != nil {
+				fail(w, 500, "无法关闭此书库同步")
+				return
+			}
 		}
-		s.webdav.mu.Lock()
-		s.webdav.status = webdavStatus{Phase: "idle"}
-		s.webdav.mu.Unlock()
 		s.diagnosticEvent(slog.LevelInfo, "sync.disconnected")
 		w.WriteHeader(204)
 	})

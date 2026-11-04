@@ -750,6 +750,79 @@ func syncAPI(t *testing.T, s *Server, method, path string) {
 	}
 }
 
+func TestWebDAVDisablePreservesHistoryAndOfflineDeletion(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	runSync(t, b)
+	config, _ := a.readSyncConfig()
+	before, err := a.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAPI(t, a, "DELETE", "/api/sync/webdav/config")
+	disabled, err := a.readSyncConfig()
+	if err != nil || disabled.Enabled || disabled.RemoteID != config.RemoteID {
+		t.Fatal("disabling lost the connected library", publicSyncConfig(disabled), err)
+	}
+	if err := a.beginWebDAVSync(t.Context(), true); err == nil {
+		t.Fatal("disabled library started a sync")
+	}
+	syncAPI(t, a, "DELETE", "/api/documents/paper")
+	disabled.Enabled = true
+	body, _ := json.Marshal(disabled)
+	req := httptest.NewRequest("PUT", "http://127.0.0.1/api/sync/webdav/config", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+a.Token)
+	out := httptest.NewRecorder()
+	a.Handler().ServeHTTP(out, req)
+	if out.Code != 200 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	runSync(t, a)
+	runSync(t, b)
+	assertSyncDocumentDeleted(t, a, nil)
+	assertSyncDocumentDeleted(t, b, nil)
+	after, err := a.loadSyncState(config)
+	if err != nil || after.Device != before.Device || !after.Own["document/paper"].Deleted {
+		t.Fatal("reenabling forgot the original deletion history", err)
+	}
+}
+
+func TestWebDAVDeletionPreservesAttachmentsUsedByOtherDocuments(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	attachment := []byte("shared attachment")
+	hash := syncBytesHash(attachment)
+	for _, owner := range []string{"paper", "other"} {
+		syncDocumentFixture(t, a.Store, owner, "分类")
+		if _, err := a.Store.DB.Exec(`INSERT INTO paper_attachments(id,document_id,kind,title,sha256,created_at) VALUES(?,?,'file','shared',?,'now')`, owner, owner, hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(a.Store.Root, "attachments"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.Store.Root, "attachments", hash), attachment, 0600); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	runSync(t, b)
+	syncAPI(t, a, "DELETE", "/api/documents/paper")
+	runSync(t, a)
+	runSync(t, b)
+	body, err := os.ReadFile(filepath.Join(b.Store.Root, "attachments", hash))
+	if err != nil || !bytes.Equal(body, attachment) {
+		t.Fatal("deleting one document removed another document's attachment", err)
+	}
+	syncAPI(t, a, "DELETE", "/api/documents/other")
+	runSync(t, a)
+	runSync(t, b)
+	if _, err := os.Stat(filepath.Join(b.Store.Root, "attachments", hash)); !os.IsNotExist(err) {
+		t.Fatal("last attachment reference was not removed", err)
+	}
+}
+
 func assertSyncDocumentDeleted(t *testing.T, s *Server, names []string) {
 	t.Helper()
 	if _, err := s.Store.Document("paper"); err == nil {

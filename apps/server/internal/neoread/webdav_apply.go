@@ -483,6 +483,27 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 			journal.Files = append(journal.Files, syncInstallFile{Name: name, Existed: e == nil, Remove: remove})
 		}
 	}
+	// Attachment blobs are shared by content hash. Resolve their references
+	// against the accepted updates before deleting any physical file.
+	shared := map[string]bool{}
+	for key, document := range current {
+		if accepted[key] {
+			document = updates[key]
+		}
+		if document == nil {
+			continue
+		}
+		for _, record := range document.Records {
+			for _, row := range record["paper_attachments"] {
+				if row["kind"] == "file" {
+					shared["attachments/"+fmtSyncString(row["sha256"])] = true
+				}
+			}
+		}
+	}
+	journal.Files = slices.DeleteFunc(journal.Files, func(file syncInstallFile) bool {
+		return file.Remove && shared[file.Name]
+	})
 	// Do not modify files before a durable recovery plan exists.
 	body, _ := json.Marshal(journal)
 	if err = atomicFile(filepath.Join(s.syncDirectory(), "apply.json"), body); err != nil {
