@@ -9,6 +9,8 @@ const fixture = vi.hoisted(() => ({
   destroyed: [] as string[],
   visible: new Map<string, boolean>(),
   toc: new Map<string, Promise<[]>>(),
+  open: new Map<string, Promise<void>>(),
+  readTOC: vi.fn(),
 }));
 vi.mock("./readers/pdf", () => ({
   PDFReaderAdapter: class {
@@ -20,6 +22,7 @@ vi.mock("./readers/pdf", () => ({
     async open(doc: Document) {
       this.id = doc.id;
       fixture.events.set(doc.id, this.events);
+      await fixture.open.get(doc.id);
       this.events.location({ type: "pdf", page: 1 }, 0.1);
     }
     async setTheme() {}
@@ -28,6 +31,7 @@ vi.mock("./readers/pdf", () => ({
     }
     async highlight() {}
     async getTOC() {
+      fixture.readTOC(this.id);
       return fixture.toc.get(this.id) ?? [];
     }
     async destroy() {
@@ -71,6 +75,7 @@ afterEach(async () => {
   fixture.events.clear();
   fixture.visible.clear();
   fixture.toc.clear();
+  fixture.open.clear();
   fixture.destroyed.length = 0;
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -127,4 +132,28 @@ it("restores rendering when a hidden reader is activated while its TOC is loadin
   expect(host.textContent).not.toContain("正在排版");
   expect(fixture.visible.get("a")).toBe(true);
   expect(fixture.destroyed).toEqual([]);
+});
+
+it("destroys a closed tab before its pending open finishes and ignores late setup", async () => {
+  let finish!: () => void;
+  fixture.open.set("a", new Promise<void>((resolve) => (finish = resolve)));
+  await act(async () => root.render(readers("a", ["a"])));
+  await vi.waitFor(() => expect(fixture.events.has("a")).toBe(true));
+  await act(async () => root.render(null));
+  expect(fixture.destroyed).toEqual(["a"]);
+  await act(async () => finish());
+  expect(fixture.readTOC).not.toHaveBeenCalled();
+  expect(fixture.destroyed).toEqual(["a"]);
+});
+
+it("releases the engine when opening fails, without waiting for the error tab to close", async () => {
+  let reject!: (error: Error) => void;
+  fixture.open.set("a", new Promise<void>((_, no) => (reject = no)));
+  await act(async () => root.render(readers("a", ["a"])));
+  await vi.waitFor(() => expect(fixture.events.has("a")).toBe(true));
+  await act(async () => reject(new Error("open failed")));
+  expect(host.textContent).toContain("open failed");
+  expect(fixture.destroyed).toEqual(["a"]);
+  await act(async () => root.render(null));
+  expect(fixture.destroyed).toEqual(["a"]);
 });

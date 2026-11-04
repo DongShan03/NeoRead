@@ -10,6 +10,7 @@ import type {
 } from "@neoread/core";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { reportDiagnostic } from "./diagnostics";
 export function ReaderView({
   document: doc,
   active = true,
@@ -57,6 +58,22 @@ export function ReaderView({
     container.className = "neoread-engine";
     host.current!.append(container);
     let engine: ReaderAdapter | undefined;
+    const release = () => {
+      const current = engine;
+      engine = undefined;
+      if (current)
+        void current
+          .destroy()
+          .catch(() =>
+            reportDiagnostic({
+              level: "error",
+              event: "reader.destroy_failed",
+            }),
+          );
+      container.remove();
+    };
+    setLoading(true);
+    setError("");
     const setup = async () => {
       const { PDFReaderAdapter } =
         doc.type === "pdf"
@@ -143,9 +160,11 @@ export function ReaderView({
       await engine.open(doc);
       if (disposed) return;
       await engine.setTheme(latest.current.theme);
+      if (disposed) return;
       await engine.highlight(latest.current.annotations).catch((e) => {
         if (!disposed) toast.error(e.message);
       });
+      if (disposed) return;
       engine.setBlocks?.(latest.current.blocks);
       engine.setVisible?.(latest.current.visible);
       const toc = await engine.getTOC();
@@ -155,8 +174,9 @@ export function ReaderView({
       latest.current.onReady(engine, toc);
       setLoading(false);
     };
-    const pending = setup().catch((e) => {
+    void setup().catch((e) => {
       if (!disposed) {
+        release();
         setError(e.message);
         setLoading(false);
       }
@@ -164,12 +184,9 @@ export function ReaderView({
     return () => {
       disposed = true;
       adapter.current = null;
-      void pending
-        .finally(async () => {
-          await engine?.destroy();
-          container.remove();
-        })
-        .catch(() => {});
+      // Destroy owns cancellation of PDF loading and EPUB requests; waiting for
+      // setup first would leave a closed tab's pending I/O alive indefinitely.
+      release();
     };
   }, [doc.id]);
   useEffect(() => {
