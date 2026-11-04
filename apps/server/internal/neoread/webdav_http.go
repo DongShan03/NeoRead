@@ -95,17 +95,25 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			fail(w, 500, err.Error())
 			return
 		}
-		if config.RemoteID != "" && config.Folder != old.Folder {
+		verified := s.webdav.verified
+		if verified != nil && verified.Input.Account == config.Account && verified.Input.Password == config.Password && verified.Input.Folder == config.Folder {
+			config.RemoteID = verified.Location.RemoteID
+			config.Folder = verified.Location.Folder
+		} else if !old.LibraryConfigured || old.RemoteID == "" || old.Account != config.Account || old.Password != config.Password {
+			fail(w, 409, "请先测试当前账号和应用密码的连接")
+			return
+		}
+		if old.RemoteID != "" && old.RemoteID == config.RemoteID && old.Account == config.Account && config.Folder != old.Folder {
 			if err = atomicFile(s.syncNamePath(), []byte(config.Folder)); err != nil {
 				fail(w, 500, "无法保存书库名称")
 				return
 			}
 			config.Folder = old.Folder
 		}
-		config, _, err = s.prepareSyncLocation(r.Context(), config)
-		if err != nil {
-			s.diagnosticEvent(slog.LevelError, "sync.config_failed", "errorCode", "connection")
-			fail(w, 502, err.Error())
+		config.LibraryConfigured = true
+		if err = s.writeSyncConfig(config); err != nil {
+			s.diagnosticEvent(slog.LevelError, "sync.config_failed", "errorCode", "save")
+			fail(w, 500, "无法保存同步设置")
 			return
 		}
 		if old.Account != config.Account || old.RemoteID != config.RemoteID {
@@ -160,8 +168,11 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			return
 		}
 		defer s.webdav.operation.Unlock()
-		dav := s.dav(config)
-		err := dav.prepare(r.Context())
+		s.webdav.verified = nil
+		location, dav, err := s.resolveSyncLocation(r.Context(), config)
+		if err == nil {
+			err = dav.prepare(r.Context())
+		}
 		if err == nil {
 			name := ".connection-test-" + id()
 			err = dav.put(r.Context(), name, []byte("NeoRead"))
@@ -191,6 +202,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			fail(w, 502, err.Error())
 			return
 		}
+		s.webdav.verified = &webdavVerification{Input: config, Location: location}
 		s.diagnosticEvent(slog.LevelInfo, "sync.connection_verified")
 		respond(w, 200, map[string]bool{"ok": true})
 	})

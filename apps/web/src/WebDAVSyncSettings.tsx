@@ -188,7 +188,7 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
               NeoRead/{draft.folder}/
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              保存时创建，跟随本地书库重命名。
+              测试连接时创建，跟随本地书库重命名。
             </p>
           </div>
           <label className="grid gap-1.5 text-sm">

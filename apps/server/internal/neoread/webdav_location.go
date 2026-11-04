@@ -64,7 +64,7 @@ func davNotFound(err error) bool {
 
 // Stable IDs in the small app catalog let already-connected devices find a
 // renamed library without recreating its previous directory.
-func (s *Server) prepareSyncLocation(ctx context.Context, config webdavConfig) (webdavConfig, *davClient, error) {
+func (s *Server) resolveSyncLocation(ctx context.Context, config webdavConfig) (webdavConfig, *davClient, error) {
 	dav := s.dav(config)
 	root := dav.rootClient()
 	location := syncLocation{ID: config.RemoteID, Folder: config.Folder}
@@ -124,6 +124,18 @@ func (s *Server) prepareSyncLocation(ctx context.Context, config webdavConfig) (
 		location = registered
 	}
 	dav.setFolder(location.Folder)
+	config.RemoteID = location.ID
+	config.Folder = location.Folder
+	return config, dav, nil
+}
+
+func (s *Server) prepareSyncLocation(ctx context.Context, config webdavConfig) (webdavConfig, *davClient, error) {
+	config, dav, err := s.resolveSyncLocation(ctx, config)
+	if err != nil {
+		return config, nil, err
+	}
+	root := dav.rootClient()
+	location := syncLocation{ID: config.RemoteID, Folder: config.Folder}
 	name, err := os.ReadFile(s.syncNamePath())
 	if err != nil && !os.IsNotExist(err) {
 		return config, nil, err

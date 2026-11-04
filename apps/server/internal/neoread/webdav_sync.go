@@ -48,6 +48,7 @@ type webdavState struct {
 	accountPath string
 	mu          sync.Mutex
 	operation   sync.Mutex
+	verified    *webdavVerification // protected by operation, never persisted
 	status      webdavStatus
 	next        time.Time
 	cancel      context.CancelFunc
@@ -60,6 +61,11 @@ type webdavState struct {
 	applyDone   chan struct{}
 	applyFailed bool
 	taskID      string
+}
+
+type webdavVerification struct {
+	Input    webdavConfig
+	Location webdavConfig
 }
 
 func (s *Server) syncConfigPath() string { return filepath.Join(s.Store.Root, "webdav-sync.json") }

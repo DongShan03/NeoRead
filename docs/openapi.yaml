@@ -39,7 +39,7 @@
             },
           "put":
             {
-              "summary": "Create NeoRead/library folder and save library-local WebDAV configuration",
+              "summary": "Save verified library-local WebDAV configuration without network requests",
               "responses":
                 {
                   "200":
@@ -124,7 +124,7 @@
         {
           "post":
             {
-              "summary": "Test Nutstore read/write using an application password",
+              "summary": "Initialize the library folder and test Nutstore read/write without saving local settings",
               "responses":
                 {
                   "200":

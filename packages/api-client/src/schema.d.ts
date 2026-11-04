@@ -41,7 +41,7 @@ export interface paths {
                 };
             };
         };
-        /** Create NeoRead/library folder and save library-local WebDAV configuration */
+        /** Save verified library-local WebDAV configuration without network requests */
         put: {
             parameters: {
                 query?: never;
@@ -154,7 +154,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Test Nutstore read/write using an application password */
+        /** Initialize the library folder and test Nutstore read/write without saving local settings */
         post: {
             parameters: {
                 query?: never;

@@ -749,16 +749,40 @@ func TestWebDAVReusingARenamedLibraryNameCreatesAnIndependentLibrary(t *testing.
 func TestWebDAVConfigDefaultsIntervalsAndCredentialsStayLocal(t *testing.T) {
 	remote, directory := testDAV(t)
 	s := NewServer(archiveFixture(t, t.TempDir()), "test-token", "")
-	s.webdav.factory = func(c webdavConfig) *davClient { return testDAVClient(c, remote) }
+	t.Cleanup(s.Close)
+	connections := 0
+	s.webdav.factory = func(c webdavConfig) *davClient {
+		connections++
+		return testDAVClient(c, remote)
+	}
 	config, _ := s.readSyncConfig()
 	if config.Enabled || config.Folder != "论文库" || config.IntervalMinutes != 15 {
 		t.Fatalf("defaults: %+v", config)
 	}
 	body := []byte(`{"account":"reader@example.com","password":"application-password","folder":"论文库","deviceName":"Mac","enabled":true,"intervalMinutes":7}`)
-	request := httptest.NewRequest("PUT", "http://127.0.0.1/api/sync/webdav/config", bytes.NewReader(body))
-	request.Header.Set("Authorization", "Bearer test-token")
-	response := httptest.NewRecorder()
-	s.Handler().ServeHTTP(response, request)
+	call := func(method, path string, body []byte) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, "http://127.0.0.1/api/sync/webdav/"+path, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer test-token")
+		response := httptest.NewRecorder()
+		s.Handler().ServeHTTP(response, request)
+		return response
+	}
+	if response := call("PUT", "config", body); response.Code != 409 || connections != 0 {
+		t.Fatal("untested configuration was saved or contacted WebDAV", response.Code)
+	}
+	if response := call("POST", "test", body); response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	untouched, _ := s.readSyncConfig()
+	if untouched.LibraryConfigured || untouched.Enabled || untouched.Account != "" {
+		t.Fatal("testing changed persisted settings", publicSyncConfig(untouched))
+	}
+	if _, err := os.Stat(filepath.Join(directory, "NeoRead", "论文库", "library.json")); err != nil {
+		t.Fatal("test did not initialize the library", err)
+	}
+	before := connections
+	remote.Close()
+	response := call("PUT", "config", body)
 	if response.Code != 200 {
 		t.Fatal(response.Code, response.Body.String())
 	}
@@ -770,9 +794,13 @@ func TestWebDAVConfigDefaultsIntervalsAndCredentialsStayLocal(t *testing.T) {
 		t.Fatalf("public settings: %s", response.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(directory, "NeoRead", "论文库")); err != nil {
-		t.Fatal("save did not create folder", err)
+		t.Fatal("test did not create folder", err)
+	}
+	if connections != before {
+		t.Fatal("save contacted WebDAV again")
 	}
 	other := NewServer(archiveFixture(t, t.TempDir()), "other", "")
+	t.Cleanup(other.Close)
 	defaults, _ := other.readSyncConfig()
 	if defaults.Enabled || defaults.Account != "" {
 		t.Fatal("other library was enabled")
@@ -780,6 +808,17 @@ func TestWebDAVConfigDefaultsIntervalsAndCredentialsStayLocal(t *testing.T) {
 	private, _ := s.readSyncConfig()
 	if private.Password != "application-password" {
 		t.Fatal("application password not saved locally")
+	}
+	private.Password = ""
+	private.IntervalMinutes = 10
+	changed, _ := json.Marshal(private)
+	if response := call("PUT", "config", changed); response.Code != 200 || connections != before {
+		t.Fatal("changing the interval required a network connection", response.Code)
+	}
+	private.Password = "untested-password"
+	changed, _ = json.Marshal(private)
+	if response := call("PUT", "config", changed); response.Code != 409 || connections != before {
+		t.Fatal("untested password was saved", response.Code)
 	}
 }
 
