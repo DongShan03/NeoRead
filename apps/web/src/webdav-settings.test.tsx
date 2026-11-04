@@ -162,6 +162,38 @@ it("keeps an already stored application password out of the renderer input", asy
   );
 });
 
+it("lets a saved connection rename the device without testing it again", async () => {
+  vi.mocked(api.webdavConfig).mockResolvedValue({
+    ...config,
+    account: "reader@example.com",
+    passwordSet: true,
+    libraryConfigured: true,
+    enabled: true,
+  });
+  await render();
+  const name = [...host.querySelectorAll("label")]
+    .find((label) => label.textContent?.includes("设备名称"))!
+    .querySelector<HTMLInputElement>("input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(name, "研究用 Mac");
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const save = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent?.trim() === "保存",
+  )!;
+  expect(save.disabled).toBe(false);
+  await click("保存");
+  expect(api.testWebdav).not.toHaveBeenCalled();
+  expect(api.saveWebdavConfig).toHaveBeenCalledWith(
+    expect.objectContaining({ deviceName: "研究用 Mac", password: "" }),
+  );
+  await change("email", "different@example.com");
+  expect(save.disabled).toBe(true);
+});
+
 it("allows note conflicts to be deferred or kept together without forcing a dialog", async () => {
   const conflict = {
     key: "document/paper",

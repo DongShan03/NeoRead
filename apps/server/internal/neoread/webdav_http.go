@@ -129,6 +129,7 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			fail(w, 500, "无法保存同步设置")
 			return
 		}
+		deviceRenamed := old.DeviceName != config.DeviceName
 		if old.Account != config.Account || old.RemoteID != config.RemoteID {
 			if _, err = s.Store.DB.Exec("DELETE FROM settings WHERE key IN ('sync:synced-revision','sync:last-result')"); err != nil {
 				fail(w, 500, "无法更新同步状态")
@@ -137,6 +138,11 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 			s.webdav.mu.Lock()
 			s.webdav.status = webdavStatus{Phase: "idle"}
 			s.webdav.mu.Unlock()
+		} else if deviceRenamed {
+			if _, err = s.Store.DB.Exec("DELETE FROM settings WHERE key='sync:synced-revision'"); err != nil {
+				fail(w, 500, "无法更新设备名称同步状态")
+				return
+			}
 		}
 		if err = s.saveSyncConnection(config); err != nil {
 			fail(w, 500, "无法保存共享 WebDAV 连接")
@@ -144,6 +150,9 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 		}
 		s.webdav.mu.Lock()
 		s.webdav.next = time.Now().Add(time.Duration(config.IntervalMinutes) * time.Minute)
+		if deviceRenamed && config.Enabled {
+			s.webdav.next = time.Now()
+		}
 		s.webdav.mu.Unlock()
 		s.diagnosticEvent(slog.LevelInfo, "sync.config_saved", "enabled", config.Enabled, "intervalMinutes", config.IntervalMinutes)
 		respond(w, 200, publicSyncConfig(config))

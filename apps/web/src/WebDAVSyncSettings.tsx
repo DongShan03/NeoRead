@@ -84,6 +84,13 @@ export function WebDAVSyncSettings({ open }: { open: boolean }) {
               },
         );
         setPassword("");
+        if (
+          config.account &&
+          config.passwordSet &&
+          config.libraryConfigured !== false
+        ) {
+          setVerified({ account: config.account.trim(), password: "" });
+        }
         setError("");
       })
       .catch((failure) => {

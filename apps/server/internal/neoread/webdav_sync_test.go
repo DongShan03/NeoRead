@@ -39,6 +39,40 @@ func syncFixture(t *testing.T, remote *httptest.Server, name string) *Server {
 	return server
 }
 
+func TestWebDAVDeviceRenameSavesWithoutRetestingAndKeepsIdentity(t *testing.T) {
+	remote, _ := testDAV(t)
+	s := syncFixture(t, remote, "Mac")
+	s.Token = "test-secret"
+	runSync(t, s)
+	config, _ := s.readSyncConfig()
+	before, err := s.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Store.DB.Exec("INSERT INTO settings(key,value) VALUES('sync:last-result','failed') ON CONFLICT(key) DO UPDATE SET value=excluded.value"); err != nil {
+		t.Fatal(err)
+	}
+	connections := 0
+	s.webdav.factory = func(c webdavConfig) *davClient {
+		connections++
+		return testDAVClient(c, remote)
+	}
+	config.DeviceName = "研究用 Mac"
+	response := request(t, s, "PUT", "/api/sync/webdav/config", strings.NewReader(jsonText(config)))
+	if response.Code != 200 || connections != 0 {
+		t.Fatal("renaming retested the saved connection", response.Code, connections)
+	}
+	saved, _ := s.readSyncConfig()
+	after, err := s.loadSyncState(saved)
+	if err != nil || saved.DeviceName != config.DeviceName || after.Device != before.Device {
+		t.Fatal("device name or stable identity was lost", err)
+	}
+	status := s.syncStatus()
+	if !status.Dirty || !status.Failed || s.webdav.next.After(time.Now()) {
+		t.Fatal("renaming cleared a failure or did not schedule its metadata sync", status)
+	}
+}
+
 func TestWebDAVCloudLibraryDiscoveryIsReadOnlyAndKeepsRemoteIdentity(t *testing.T) {
 	remote, directory := testDAV(t)
 	s := syncFixture(t, remote, "Mac")
