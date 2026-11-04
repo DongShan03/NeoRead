@@ -18,6 +18,7 @@ import { sentenceAnchor } from "@neoread/core";
 import { hoveredSentenceSelection } from "./sentence-annotation";
 import { isSelectionToolbar } from "../readers/selection-anchor";
 import { translatedAnnotationRanges } from "./annotations";
+import { sentenceSegments } from "../readers/sentence-segmentation";
 import {
   sourcePassage,
   translatedSentenceRanges,
@@ -504,12 +505,10 @@ export function useSentenceMarks(
             blockId: block.id,
             sourceHash: "",
             status: "complete",
-            sentences: Array.from(
-              new Intl.Segmenter(undefined, {
-                granularity: "sentence",
-              }).segment(block.text),
-              (s) => ({ source: s.segment, target: "" }),
-            ),
+            sentences: Array.from(sentenceSegments(block.text), (s) => ({
+              source: s.segment,
+              target: "",
+            })),
           };
         }
         if (t)

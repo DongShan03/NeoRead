@@ -3,6 +3,8 @@
  * the whole sentence around it, using the platform's sentence segmentation.
  */
 
+import { sentenceSegments } from "./sentence-segmentation";
+
 interface Piece {
   node: Text;
   /** Offset of the node's first character in the joined text. */
@@ -60,8 +62,7 @@ function positionAt(pieces: Piece[], offset: number, end: boolean) {
 
 /** [start, end) of the sentence containing `offset`, without edge spaces. */
 export function sentenceBounds(text: string, offset: number) {
-  const segmenter = new Intl.Segmenter(undefined, { granularity: "sentence" });
-  for (const { segment, index } of segmenter.segment(text)) {
+  for (const { segment, index } of sentenceSegments(text)) {
     if (offset < index || offset >= index + segment.length) continue;
     const lead = segment.length - segment.trimStart().length;
     return {

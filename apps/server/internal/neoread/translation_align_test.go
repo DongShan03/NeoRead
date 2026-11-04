@@ -20,6 +20,61 @@ func sentencesJSON(sources ...string) string {
 
 func compact(s string) string { return strings.Join(strings.Fields(s), "") }
 
+func TestSentenceQuotesStayWithTheSentenceTheyClose(t *testing.T) {
+	for _, source := range []string{
+		`The query includes “ money laundering service. ” Using an LLM, we continue.`,
+		`The query includes "money laundering service. " Using an LLM, we continue.`,
+		"The query includes ‘money laundering service.\n’ Using an LLM, we continue.",
+		`The query includes “money laundering service. " Using an LLM, we continue.`,
+		`The query includes "money laundering service. ” Using an LLM, we continue.`,
+	} {
+		parts := translationSentenceParts(source)
+		if len(parts) != 2 || strings.Contains(strings.TrimSpace(parts[1]), "service") || !strings.HasPrefix(strings.TrimSpace(parts[1]), "Using") {
+			t.Fatalf("closing quote moved to the next sentence: %#v", parts)
+		}
+		if compact(strings.Join(parts, "")) != compact(source) {
+			t.Fatal("segmentation lost source text", parts)
+		}
+	}
+	parts := translationSentenceParts(`First sentence. "The next sentence starts a new quote."`)
+	if len(parts) != 2 || !strings.HasPrefix(strings.TrimSpace(parts[1]), `"The next`) {
+		t.Fatal("opening quote moved backwards", parts)
+	}
+}
+
+func TestCachedQuoteBoundariesRepairBothSidesWithoutRetranslating(t *testing.T) {
+	source := `The query includes “ money laundering service. ” Using an LLM, we continue.`
+	old := TranslationBlock{Status: "complete", SourceHash: translationHash(source), Sentences: []TranslationSentence{
+		{Source: `The query includes “ money laundering service.`, Target: `查询包括“洗钱服务。`},
+		{Source: `” Using an LLM, we continue.`, Target: `”我们使用大语言模型继续。`},
+	}}
+	current := repairCachedTranslationAnchors(old, source)
+	if current.Error != "" || len(current.Sentences) != 2 || !strings.HasSuffix(current.Sentences[0].Source, "”") || !strings.HasSuffix(current.Sentences[0].Target, "”") || strings.HasPrefix(current.Sentences[1].Target, "”") {
+		t.Fatal("cached closing quote not repaired", current)
+	}
+	if current.SourceHash != old.SourceHash || compact(current.Sentences[0].Target+current.Sentences[1].Target) != compact(old.Sentences[0].Target+old.Sentences[1].Target) {
+		t.Fatal("cached translation content changed", current)
+	}
+	if got := repairCachedTranslationAnchors(current, source); jsonText(got) != jsonText(current) {
+		t.Fatal("quote repair is not stable", got)
+	}
+}
+
+func TestSentenceQuoteOnlyTailAndNewOpeningQuoteStayDistinct(t *testing.T) {
+	ending := `A “quoted sentence. ”`
+	if parts := translationSentenceParts(ending); len(parts) != 1 || compact(parts[0]) != compact(ending) {
+		t.Fatal("closing quote became a standalone sentence", parts)
+	}
+	source := `Readers' examples end here. "Don't move this opening quote."`
+	if parts := translationSentenceParts(source); len(parts) != 2 || !strings.HasPrefix(strings.TrimSpace(parts[1]), `"Don't`) {
+		t.Fatal("opening quote or apostrophe moved", parts)
+	}
+	ordinary := []TranslationSentence{{Source: "  Plain sentence. ", Target: "普通译文。"}}
+	if got := reattachTranslationQuotes(ordinary); jsonText(got) != jsonText(ordinary) {
+		t.Fatal("quote repair changed ordinary prose", got)
+	}
+}
+
 func TestScientificAbbreviationsDoNotRejectAlreadySentenceWiseTranslations(t *testing.T) {
 	for _, source := range []string{
 		"This formulation achieves 94.4% success on Qwen-VL (vs. 68.8% baseline) with fewer iterations.",

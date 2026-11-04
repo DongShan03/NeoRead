@@ -1,4 +1,5 @@
 import type { Annotation } from "@neoread/core";
+import { sentenceSegments } from "../readers/sentence-segmentation";
 
 export type AnnotationRange = { annotation: Annotation; range: Range };
 const overlaps = (a: DOMRect, b: DOMRect) =>
@@ -84,9 +85,7 @@ export function sentenceRectsAtPoint(
     }
     return [nodes[nodes.length - 1], nodes[nodes.length - 1].length];
   };
-  for (const sentence of new Intl.Segmenter(undefined, {
-    granularity: "sentence",
-  }).segment(text)) {
+  for (const sentence of sentenceSegments(text)) {
     const range = document.createRange();
     range.setStart(...endpoint(sentence.index));
     range.setEnd(...endpoint(sentence.index + sentence.segment.length));
