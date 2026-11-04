@@ -88,7 +88,7 @@ it("hides the icon before any WebDAV connection is configured", async () => {
   await render();
   expect(host.querySelector("button")).toBeNull();
 });
-it("shows an empty ring for a disabled library and opens its sync settings", async () => {
+it("shows a slashed ring for a disabled library and opens its sync settings", async () => {
   useWebDAVSync.setState({
     config: { ...config, enabled: false },
     status: { ...clean, failed: true },

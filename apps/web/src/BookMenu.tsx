@@ -3,7 +3,7 @@ import {
   BookOpen,
   ChartColumn,
   FileDown,
-  RefreshCw,
+  FileScan,
   Trash2,
 } from "lucide-react";
 import type { Document, LibraryMode } from "@neoread/core";
@@ -52,7 +52,7 @@ export function BookMenuItems({
         用量统计
       </K.Item>
       <K.Item onClick={() => void reparseDocument(doc)}>
-        <RefreshCw />
+        <FileScan />
         重新解析翻译
       </K.Item>
       {doc.type === "pdf" && (

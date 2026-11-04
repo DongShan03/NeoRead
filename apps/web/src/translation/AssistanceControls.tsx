@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, FileSearch, Pause, RotateCcw, Languages } from "lucide-react";
+import {
+  Check,
+  FileScan,
+  FileSearch,
+  Pause,
+  RotateCcw,
+  Languages,
+} from "lucide-react";
 import type { EPUBLocation, LibraryMode, Processing } from "@neoread/core";
 import { api } from "@neoread/api";
 import { Button } from "@neoread/ui/components/button";
@@ -170,7 +177,7 @@ export function AssistanceControls({
               />
             }
           >
-            <RotateCcw />
+            <FileScan />
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>

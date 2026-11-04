@@ -9,7 +9,7 @@ import {
   Link2,
   Paperclip,
   Pin,
-  RefreshCw,
+  FileScan,
   Star,
   Tag,
   Trash2,
@@ -260,7 +260,7 @@ export function PaperMenuItems({
                 : void reparseDocument(one!)
             }
           >
-            <RefreshCw />
+            <FileScan />
             重新解析翻译
           </K.Item>
         )}

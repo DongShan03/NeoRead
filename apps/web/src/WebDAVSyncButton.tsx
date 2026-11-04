@@ -1,4 +1,4 @@
-import { Check, RefreshCw, X } from "lucide-react";
+import { Check, RefreshCw, RefreshCwOff, X } from "lucide-react";
 import { Button } from "@neoread/ui/components/button";
 import {
   Tooltip,
@@ -12,6 +12,7 @@ export function WebDAVSyncButton() {
   const { config, status, starting } = useWebDAVSync();
   if (!config?.account || !config.passwordSet) return null;
   const enabled = config.enabled;
+  const SyncIcon = enabled ? RefreshCw : RefreshCwOff;
   const busy = starting || webdavBusy(status.phase);
   const pending =
     status.dirty || status.conflicts.length > 0 || !status.lastSync;
@@ -60,7 +61,7 @@ export function WebDAVSyncButton() {
           className="relative block size-[1.2rem]"
           data-sync-state={busy ? "syncing" : !enabled ? "disabled" : marker}
         >
-          <RefreshCw
+          <SyncIcon
             aria-hidden="true"
             className={`absolute inset-0 !size-full ${enabled && status.conflicts.length ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"} ${busy ? "animate-spin motion-reduce:animate-none" : ""}`}
             style={{ animationDuration: "1.2s" }}
