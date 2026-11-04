@@ -284,6 +284,15 @@ func TestWebDAVReadingMergeUsesActualTimestampsAndKeepsPeakPosition(t *testing.T
 	}
 }
 
+func TestWebDAVReadingResetDoesNotRestoreAnOfflineDevicesOldPeak(t *testing.T) {
+	a := syncRow{"id": "a", "created_at": "2026-11-03T10:00:00Z", "last_opened_at": "2026-11-03T10:00:00Z", "progress": "", "percentage": 0.0, "body_read_position": 0.0, "reading_reset_at": "2026-11-04T10:00:00Z", "reading_status": "unread"}
+	b := syncRow{"id": "a", "created_at": "2026-11-03T10:00:00Z", "last_opened_at": "2026-11-04T11:00:00Z", "progress": "old location", "percentage": 0.8, "body_read_position": 9.0, "reading_reset_at": "", "reading_status": "reading"}
+	merged, ok := mergeSyncDocumentRow(nil, []syncRow{a}, []syncRow{b})
+	if !ok || merged["progress"] != "" || syncNumber(merged["body_read_position"]) != 0 || merged["reading_status"] != "unread" || merged["reading_reset_at"] != a["reading_reset_at"] {
+		t.Fatal("old progress overrode an explicit reset", merged, ok)
+	}
+}
+
 func TestWebDAVSameNoteTextWithDifferentSaveTimesDoesNotConflict(t *testing.T) {
 	a, b := emptySyncDocument(), emptySyncDocument()
 	key := `document_notes/["paper"]`

@@ -15,6 +15,22 @@ let saving: Promise<unknown> = Promise.resolve();
 let pendingWrites = 0;
 export const hasPendingProgress = () => latest.size > 0 || pendingWrites > 0;
 const errors = new Map<string, unknown>();
+const resetting = new Set<string>();
+export async function resetProgressWrites<T>(
+  ids: string[],
+  reset: () => Promise<T>,
+): Promise<T> {
+  ids.forEach((id) => resetting.add(id));
+  forgetProgress(ids);
+  try {
+    // Finish already issued writes before clearing persisted progress; discard
+    // queued positions and unmount-time events from the old reading session.
+    await saving.catch(() => {});
+    return await reset();
+  } finally {
+    ids.forEach((id) => resetting.delete(id));
+  }
+}
 /** Deleted or merged documents must not leave failed writes blocking other tabs. */
 export function forgetProgress(ids: string[]) {
   for (const id of ids) {
@@ -29,6 +45,7 @@ export function scheduleProgress(
   patch: Progress,
   onError: (error: Error) => void,
 ) {
+  if (resetting.has(id)) return;
   const version = (versions.get(id) || 0) + 1;
   versions.set(id, version);
   if (patch.progress.type === "pdf") {
@@ -61,6 +78,7 @@ export async function flushProgress() {
       .then(async () => {
         let failure: unknown;
         for (const update of updates) {
+          if (resetting.has(update.id)) continue;
           try {
             await api.update(update.id, update.patch);
             errors.delete(update.id);

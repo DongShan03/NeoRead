@@ -51,6 +51,7 @@ func (s *Store) migrateOrganization() error {
 		{"folders", "TEXT NOT NULL DEFAULT '[]'"},
 		{"body_end", "TEXT"},
 		{"body_read_position", "REAL NOT NULL DEFAULT 0"},
+		{"reading_reset_at", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if !columns[column.name] {
 			if _, err = tx.Exec("ALTER TABLE documents ADD COLUMN " + column.name + " " + column.definition); err != nil {

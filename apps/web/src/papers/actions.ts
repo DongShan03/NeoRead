@@ -23,6 +23,7 @@ import {
   type PaperView,
 } from "./model";
 import { usePaperUI } from "./state";
+import { resetProgressWrites } from "../progress";
 
 type Patch = Parameters<typeof api.update>[1];
 
@@ -124,15 +125,31 @@ export const toggleTagFor = (docs: Document[], name: string) =>
     ? removeTag(docs, name)
     : addTag(docs, name);
 
-export const setReadingStatus = (
+export const setReadingStatus = async (
   docs: Document[],
   readingStatus: ReadingStatus,
-) =>
-  patchPapers(
-    docs
-      .filter((doc) => doc.readingStatus !== readingStatus)
-      .map((doc) => [doc, { readingStatus }]),
-  );
+) => {
+  const changes: [Document, Patch][] = docs
+    .filter(
+      (doc) =>
+        readingStatus === "unread" || doc.readingStatus !== readingStatus,
+    )
+    .map((doc) => [doc, { readingStatus }]);
+  if (readingStatus !== "unread") return patchPapers(changes);
+  const ids = changes.map(([doc]) => doc.id);
+  return resetProgressWrites(ids, async () => {
+    const state = useReaderStore.getState();
+    state.closeTabs(ids);
+    state.setDocuments(
+      state.documents.map((doc) =>
+        ids.includes(doc.id)
+          ? { ...doc, progress: undefined, percentage: 0, bodyReadPosition: 0 }
+          : doc,
+      ),
+    );
+    return patchPapers(changes);
+  });
+};
 export const setStarred = (docs: Document[], favorite: boolean) =>
   patchPapers(
     docs

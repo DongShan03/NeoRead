@@ -42,6 +42,25 @@ func TestBodyReadPositionKeepsPeakAndCurrentLocationAfterReopening(t *testing.T)
 	}
 }
 
+func TestMarkingUnreadClearsPeakLocationAndPercentage(t *testing.T) {
+	s := testServer(t)
+	bodyProgressPaper(t, s.Store)
+	if response := request(t, s, "PATCH", "/api/documents/paper", strings.NewReader(`{"progress":{"type":"pdf","page":6,"y":0.4},"percentage":0.6}`)); response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
+	if response := request(t, s, "PATCH", "/api/documents/paper", strings.NewReader(`{"readingStatus":"unread"}`)); response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
+	doc, err := s.Store.Document("paper")
+	if err != nil || doc.ReadingStatus != "unread" || doc.Percentage != 0 || doc.BodyReadPosition != 0 || len(doc.Progress) != 0 {
+		t.Fatal(doc, err)
+	}
+	var reset string
+	if err := s.Store.DB.QueryRow("SELECT reading_reset_at FROM documents WHERE id='paper'").Scan(&reset); err != nil || reset == "" {
+		t.Fatal("reset identity was not saved", err)
+	}
+}
+
 func TestBodyReadPositionMigratesExistingReadingLocation(t *testing.T) {
 	root := t.TempDir()
 	store, err := OpenStore(root)

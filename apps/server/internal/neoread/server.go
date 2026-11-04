@@ -824,6 +824,9 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 		bodyReadPosition = max(bodyReadPosition, pdfReadPosition(v.Progress))
 	}
 	_, err = tx.ExecContext(r.Context(), "UPDATE documents SET title=COALESCE(?,title),author=COALESCE(?,author),favorite=COALESCE(?,favorite),progress=COALESCE(?,progress),percentage=COALESCE(?,percentage),body_read_position=MAX(body_read_position,?),body_end=COALESCE(?,body_end),last_opened_at=COALESCE(?,last_opened_at),category=COALESCE(?,category),tags=COALESCE(?,tags),folders=COALESCE(?,folders),library=COALESCE(?,library),metadata=COALESCE(?,metadata),reading_status=COALESCE(?,reading_status),category_source=CASE WHEN ? IS NOT NULL THEN 'manual' ELSE category_source END,classification_status=CASE WHEN ? IS NOT NULL THEN 'done' ELSE classification_status END,classification_error=CASE WHEN ? IS NOT NULL THEN '' ELSE classification_error END WHERE id=?", title, author, v.Favorite, progress, v.Percentage, bodyReadPosition, bodyEnd, openedAt, category, tags, folders, library, metadata, status, category, category, category, d.ID)
+	if err == nil && v.Status != nil && *v.Status == "unread" {
+		_, err = tx.ExecContext(r.Context(), "UPDATE documents SET progress=NULL,percentage=0,body_read_position=0,reading_reset_at=? WHERE id=?", now(), d.ID)
+	}
 	if err == nil {
 		err = tx.Commit()
 	}
@@ -833,6 +836,9 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	if bodyEnd != nil {
 		s.connectorRevision.Add(1)
+	}
+	if v.Status != nil && *v.Status == "unread" {
+		s.diagnosticEvent(slog.LevelInfo, "reading.progress_reset", "documentId", d.ID)
 	}
 	d, err = s.Store.Document(d.ID)
 	if err != nil {

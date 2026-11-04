@@ -295,8 +295,17 @@ func mergeSyncDocumentRow(base, local, remote []syncRow) (syncRow, bool) {
 	if syncTimeAfter(fmtSyncString(r["last_opened_at"]), fmtSyncString(l["last_opened_at"])) {
 		newest = r
 	}
-	reading := map[string]bool{"progress": true, "percentage": true, "last_opened_at": true, "body_read_position": true}
+	resetChanged := fmtSyncString(l["reading_reset_at"]) != fmtSyncString(r["reading_reset_at"])
+	reset := l
+	if syncTimeAfter(fmtSyncString(r["reading_reset_at"]), fmtSyncString(l["reading_reset_at"])) {
+		reset = r
+	}
+	reading := map[string]bool{"progress": true, "percentage": true, "last_opened_at": true, "body_read_position": true, "reading_reset_at": true}
 	for key, value := range l {
+		if key == "reading_reset_at" {
+			result[key] = fmtSyncString(reset[key])
+			continue
+		}
 		if key == "created_at" {
 			result[key] = value
 			if syncTimeAfter(fmtSyncString(value), fmtSyncString(r[key])) {
@@ -306,9 +315,15 @@ func mergeSyncDocumentRow(base, local, remote []syncRow) (syncRow, bool) {
 		}
 		if reading[key] {
 			result[key] = newest[key]
-			if key == "body_read_position" {
+			if resetChanged && key != "last_opened_at" {
+				result[key] = reset[key]
+			} else if key == "body_read_position" {
 				result[key] = max(syncNumber(l[key]), syncNumber(r[key]))
 			}
+			continue
+		}
+		if key == "reading_status" && resetChanged {
+			result[key] = reset[key]
 			continue
 		}
 		switch {

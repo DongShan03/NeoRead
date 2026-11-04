@@ -22,6 +22,44 @@ it("keeps the furthest PDF position even when the reader goes back before the de
     bodyReadPosition: 6.6,
   });
 });
+
+it("waits for an in-flight save and ignores old queued positions while marking unread", async () => {
+  const { scheduleProgress, flushProgress, resetProgressWrites } =
+    await import("./progress");
+  let complete!: () => void;
+  update.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        complete = resolve;
+      }),
+  );
+  scheduleProgress(
+    "pdf",
+    { progress: { type: "pdf", page: 8 }, percentage: 0.8 },
+    () => {},
+  );
+  const flush = flushProgress();
+  await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+  const reset = vi.fn(async () => {});
+  const marking = resetProgressWrites(["pdf"], reset);
+  scheduleProgress(
+    "pdf",
+    { progress: { type: "pdf", page: 9 }, percentage: 0.9 },
+    () => {},
+  );
+  expect(reset).not.toHaveBeenCalled();
+  complete();
+  await Promise.all([flush, marking]);
+  expect(reset).toHaveBeenCalledOnce();
+  update.mockResolvedValue({});
+  scheduleProgress(
+    "pdf",
+    { progress: { type: "pdf", page: 1 }, percentage: 0 },
+    () => {},
+  );
+  await flushProgress();
+  expect(update.mock.calls.at(-1)![1].bodyReadPosition).toBe(0);
+});
 afterEach(() => {
   vi.resetModules();
   update.mockReset();
