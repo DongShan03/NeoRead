@@ -245,10 +245,10 @@ export function LibraryModeSwitcher({
             />
           }
         >
-          <span className="min-w-0 truncate">{name}</span>
+          <span className="min-w-0 flex-1 truncate text-left">{name}</span>
           <ChevronDown className="size-4 text-muted-foreground" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60">
+        <DropdownMenuContent align="start">
           {catalog?.libraries.map((entry) => (
             <DropdownMenuItem
               key={entry.id}
