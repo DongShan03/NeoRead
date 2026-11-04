@@ -533,10 +533,11 @@ export const api = {
   setAssistance: (
     id: string,
     action: "start" | "pause" | "resume" | "retranslate",
+    options?: { restart?: boolean },
   ) =>
     request<Processing>(`/api/documents/${id}/assistance`, {
       method: "POST",
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...options }),
     }),
   overviewJobs: () => request<OverviewJob[]>("/api/overviews"),
   documentOverview: (id: string) =>

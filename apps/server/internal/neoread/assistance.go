@@ -23,13 +23,14 @@ func (s *Server) getAssistance(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) setAssistance(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Action string `json:"action"`
+		Action  string `json:"action"`
+		Restart bool   `json:"restart,omitempty"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
 	if req.Action == "retranslate" {
-		s.requestRetranslation(w, r)
+		s.requestRetranslation(w, r, req.Restart)
 		return
 	}
 	if req.Action != "start" && req.Action != "pause" && req.Action != "resume" {

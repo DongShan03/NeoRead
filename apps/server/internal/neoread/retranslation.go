@@ -84,7 +84,8 @@ func (s *Server) translationPrevious(documentID string) (map[string]bool, error)
 	return previous, rows.Err()
 }
 
-func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request) {
+func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, restart ...bool) {
+	fullRestart := len(restart) > 0 && restart[0]
 	lock := s.annotationRecoveryLock(r.PathValue("id"))
 	if !lock.TryLock() {
 		fail(w, 409, "正在检查批注，请稍后重新翻译")
@@ -114,7 +115,7 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request) {
 	}
 	s.processingMu.Lock()
 	p, err := s.Store.processing(d.ID)
-	if err != nil || p.Status != "complete" {
+	if err != nil || !fullRestart && p.Status != "complete" {
 		s.processingMu.Unlock()
 		fail(w, 409, "请等待当前翻译完成后再重新翻译")
 		return
@@ -137,7 +138,10 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request) {
 	// Joining prevents a previous worker's delayed results from replacing this run.
 	p, err = s.Store.processing(d.ID)
 	if err == nil {
-		err = s.queueRetranslation(p, m, snapshotTranslationOptions(config))
+		m, err = s.readTranslationSource(d.ID)
+	}
+	if err == nil {
+		err = s.queueRetranslation(p, m, snapshotTranslationOptions(config), fullRestart)
 	}
 	if err != nil {
 		fail(w, 409, "无法开始重新翻译："+err.Error())
@@ -151,7 +155,7 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, p)
 }
 
-func (s *Server) queueRetranslation(p Processing, m translationInput, options translationRunOptions) error {
+func (s *Server) queueRetranslation(p Processing, m translationInput, options translationRunOptions, allowEmpty ...bool) error {
 	options.LayoutRun, options.LayoutReady = id(), false
 	items, err := s.translations(p.DocumentID, m)
 	if err != nil {
@@ -171,7 +175,7 @@ func (s *Server) queueRetranslation(p Processing, m translationInput, options tr
 			count++
 		}
 	}
-	if count == 0 {
+	if count == 0 && !(len(allowEmpty) > 0 && allowEmpty[0]) {
 		return errors.New("没有已完成的正文译文")
 	}
 	s.translationMu.Lock()

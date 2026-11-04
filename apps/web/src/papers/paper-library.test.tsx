@@ -14,6 +14,7 @@ import * as attachments from "./attachments";
 import { paper } from "./fixtures";
 import { exportAnnotatedPDFWithToast } from "../annotated-pdf-export";
 import { LibrarySidebarResizer } from "../LibrarySidebarResizer";
+import { toast } from "sonner";
 vi.mock("../annotated-pdf-export", () => ({
   exportAnnotatedPDFWithToast: vi.fn(async () => 1),
 }));
@@ -214,6 +215,34 @@ const menuItem = (label: string) =>
   [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
     (item) => item.textContent === label,
   )!;
+
+it("queues full reparse and translation for every selected paper after confirmation", async () => {
+  await act(async () => usePaperUI.getState().startPicking(["a", "b"]));
+  await act(async () => button("重新翻译").click());
+  expect(api.setAssistance).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain("重新解析并翻译 2 篇论文");
+  vi.mocked(api.setAssistance).mockRejectedValueOnce(
+    new Error("paper is busy"),
+  );
+  const confirm = [
+    ...document.querySelectorAll<HTMLButtonElement>("button"),
+  ].find((b) => b.textContent?.trim() === "重新解析并翻译")!;
+  await act(async () => confirm.click());
+  expect(api.setAssistance).toHaveBeenCalledWith("a", "retranslate", {
+    restart: true,
+  });
+  expect(api.setAssistance).toHaveBeenCalledWith("b", "retranslate", {
+    restart: true,
+  });
+  expect(api.setAssistance).toHaveBeenCalledTimes(2);
+  expect(toast.success).toHaveBeenCalledWith(
+    "已将 1 篇论文加入重新解析与翻译队列",
+  );
+  expect(toast.error).toHaveBeenCalledWith(
+    "1 篇论文无法开始重新翻译",
+    expect.any(Object),
+  );
+});
 
 it("shows details on click and saves an edited field as manual metadata", async () => {
   await act(async () => row("Attention Is All You Need").click());

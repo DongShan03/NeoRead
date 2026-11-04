@@ -3194,6 +3194,11 @@ export interface paths {
                          * @enum {string}
                          */
                         action: "start" | "pause" | "resume" | "retranslate";
+                        /**
+                         * @description Explicit full reparse and translation restart, also for paused papers or papers without prior completed translations
+                         * @default false
+                         */
+                        restart?: boolean;
                     };
                 };
             };

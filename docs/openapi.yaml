@@ -3540,6 +3540,12 @@
                                         ],
                                       "description": "retranslate restarts completed paper text with saved current translation choices, retaining previous translations until replacement succeeds. Books keep chapter translation controls.",
                                     },
+                                  "restart":
+                                    {
+                                      "type": "boolean",
+                                      "default": false,
+                                      "description": "Explicit full reparse and translation restart, also for paused papers or papers without prior completed translations",
+                                    },
                                 },
                             },
                         },

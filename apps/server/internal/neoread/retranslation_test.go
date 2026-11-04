@@ -48,6 +48,28 @@ func assertVisibleOldTranslation(t *testing.T, s *Server) {
 	}
 }
 
+func TestFullRestartQueuesParsedPaperWithoutCompletedTranslations(t *testing.T) {
+	s, p, _ := completedTranslationFixture(t)
+	if _, err := s.Store.DB.Exec("DELETE FROM translations WHERE document_id='doc'"); err != nil {
+		t.Fatal(err)
+	}
+	p.Status, p.Enabled = "paused", false
+	if err := s.Store.saveProcessing(p); err != nil {
+		t.Fatal(err)
+	}
+	out := request(t, s, "POST", "/api/documents/doc/assistance", strings.NewReader(`{"action":"retranslate","restart":true}`))
+	if out.Code != 200 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	if err := json.Unmarshal(out.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	options, err := s.retranslationOptions(&p)
+	if err != nil || !p.Retranslating || p.Status != "queued" || options == nil || options.LayoutReady || !validLayoutRun(options.LayoutRun) {
+		t.Fatal("full parse and translation were not queued", p, options, err)
+	}
+}
+
 func TestRetranslationPreservesTextFormulasAndSnapshotAcrossRestart(t *testing.T) {
 	s, p, m := completedTranslationFixture(t)
 	formula := m.Blocks[0]

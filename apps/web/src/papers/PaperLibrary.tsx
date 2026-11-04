@@ -54,6 +54,14 @@ import type {
   Processing,
 } from "@neoread/core";
 import { Button } from "@neoread/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@neoread/ui/components/dialog";
 import { Checkbox } from "@neoread/ui/components/checkbox";
 import { Input } from "@neoread/ui/components/input";
 import { Progress } from "@neoread/ui/components/progress";
@@ -296,6 +304,37 @@ export function PaperLibrary({
     .map((id) => pickedById.get(id))
     .filter((doc): doc is Document => doc?.type === "pdf");
   const [exportingPDFs, setExportingPDFs] = useState(false);
+  const [retranslatingDocs, setRetranslatingDocs] = useState<Document[] | null>(
+    null,
+  );
+  const [queueingRetranslations, setQueueingRetranslations] = useState(false);
+  const retranslatePicked = async () => {
+    if (!retranslatingDocs?.length || queueingRetranslations) return;
+    setQueueingRetranslations(true);
+    try {
+      const results = await Promise.allSettled(
+        retranslatingDocs.map((doc) =>
+          api.setAssistance(doc.id, "retranslate", { restart: true }),
+        ),
+      );
+      const queued = results.filter((r) => r.status === "fulfilled").length;
+      if (queued) toast.success(`已将 ${queued} 篇论文加入重新解析与翻译队列`);
+      const failures = results.flatMap((r, i) =>
+        r.status === "rejected"
+          ? [
+              `${retranslatingDocs[i].title}：${r.reason instanceof Error ? r.reason.message : "无法开始"}`,
+            ]
+          : [],
+      );
+      if (failures.length)
+        toast.error(`${failures.length} 篇论文无法开始重新翻译`, {
+          description: failures.slice(0, 3).join("\n"),
+        });
+      setRetranslatingDocs(null);
+    } finally {
+      setQueueingRetranslations(false);
+    }
+  };
   const pdfExportRunning = useRef(false);
   const exportPickedPDFs = async () => {
     if (pdfExportRunning.current || !pickedPDFs.length) return;
@@ -947,6 +986,20 @@ export function PaperLibrary({
                     )}
                     {exportingPDFs ? "正在导出…" : "导出"}
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="重新解析并重新翻译选中的论文"
+                    disabled={!pickedPDFs.length || queueingRetranslations}
+                    onClick={() => setRetranslatingDocs([...pickedPDFs])}
+                  >
+                    {queueingRetranslations ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Languages />
+                    )}
+                    重新翻译
+                  </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
@@ -1271,6 +1324,38 @@ export function PaperLibrary({
           </DetailSheet>
         </div>
       )}
+      <Dialog
+        open={!!retranslatingDocs}
+        onOpenChange={(open) => {
+          if (!open && !queueingRetranslations) setRetranslatingDocs(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重新翻译选中的论文</DialogTitle>
+            <DialogDescription>
+              将使用当前翻译模型重新解析并翻译 {retranslatingDocs?.length ?? 0}{" "}
+              篇论文。新译文完成前保留旧译文，批注和笔记保留。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={queueingRetranslations}
+              onClick={() => setRetranslatingDocs(null)}
+            >
+              取消
+            </Button>
+            <Button
+              disabled={queueingRetranslations}
+              onClick={() => void retranslatePicked()}
+            >
+              {queueingRetranslations && <Loader2 className="animate-spin" />}
+              重新解析并翻译
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {exporting && (
         <CitationDialog
           docs={documents.filter((d) => exporting.ids.includes(d.id))}
