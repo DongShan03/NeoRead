@@ -290,7 +290,13 @@ func applySyncRecords(ctx context.Context, tx *sql.Tx, key string, before, after
 		// resume from its newly saved messages rather than replay an old thread.
 		session := strings.TrimPrefix(recordKey, "chat/")
 		prefix := "session:" + session + ":"
-		if _, err := tx.ExecContext(ctx, "DELETE FROM document_conversations WHERE document_id=? AND substr(provider,1,?)=?", strings.TrimPrefix(key, "document/"), len(prefix), prefix); err != nil {
+		query := "DELETE FROM document_conversations WHERE document_id=? AND substr(provider,1,?)=?"
+		args := []any{strings.TrimPrefix(key, "document/"), len(prefix), prefix}
+		if session == "" {
+			query = "DELETE FROM document_conversations WHERE document_id=? AND substr(provider,1,8)<>'session:'"
+			args = args[:1]
+		}
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 			return err
 		}
 	}
