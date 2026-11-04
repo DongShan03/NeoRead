@@ -59,6 +59,7 @@ let archiveDownload: ReturnType<typeof vi.fn>;
 let catalogRemember: ReturnType<typeof vi.fn>;
 let catalogAllocate: ReturnType<typeof vi.fn>;
 let catalogRemove: ReturnType<typeof vi.fn>;
+let cloudPrepare: ReturnType<typeof vi.fn>;
 let trashLibrary: ReturnType<typeof vi.fn>;
 const event = () => ({
   sender: window.webContents,
@@ -164,6 +165,8 @@ beforeEach(async ({ task }) => {
     downloadLibraryArchive: archiveDownload,
     prepareLibraryArchive: archivePrepare,
   }));
+  cloudPrepare = vi.fn().mockResolvedValue(undefined);
+  vi.doMock("./cloud-library", () => ({ prepareCloudLibrary: cloudPrepare }));
   catalogRemember = vi.fn(async () => {});
   trashLibrary = vi.fn(async () => {});
   catalogRemove = vi.fn(async (_active, id, trash) =>
@@ -1357,6 +1360,48 @@ it("acknowledges a discarded note warning and continues closing without a retry 
       buttons: ["知道了"],
     }),
   );
+});
+
+it("resolves the requested cloud identity before switching and preserves the current library when resolution fails", async () => {
+  const remoteId = "a".repeat(32);
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ error: "云端书库已删除" }, { status: 502 }),
+  );
+  await expect(
+    handlers.get("neoread:sync-remote-library")!(event(), remoteId),
+  ).rejects.toThrow("云端书库已删除");
+  expect(catalogAllocate).not.toHaveBeenCalled();
+  expect(stop).not.toHaveBeenCalled();
+  const config = {
+    account: "reader@example.com",
+    remoteId,
+    folder: "云端研究库",
+    enabled: true,
+    passwordSet: true,
+    deviceName: "Mac",
+    intervalMinutes: 15,
+  };
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json(config));
+  const importing = handlers.get("neoread:sync-remote-library")!(
+    event(),
+    remoteId,
+  );
+  await vi.waitFor(() =>
+    expect(window.webContents.send).toHaveBeenCalledWith("neoread:flush"),
+  );
+  expect(cloudPrepare).toHaveBeenCalledWith(
+    importedEntry.directory,
+    "/old/library",
+    config,
+  );
+  ipc.emit("neoread:flushed", event(), null);
+  expect(await importing).toBe(true);
+  expect(catalogRemember).toHaveBeenCalledWith(importedEntry);
+  expect(saveLocation).toHaveBeenCalledWith(
+    "/userdata",
+    importedEntry.directory,
+  );
+  expect(app.relaunch).not.toHaveBeenCalled();
 });
 
 it("creates an empty local library through the saved-state switch path without an archive or cloud connection", async () => {

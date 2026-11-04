@@ -4,6 +4,95 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/sync/webdav/libraries":
+        {
+          "get":
+            {
+              "summary": "List live cloud library identities without creating folders or downloading library contents",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "type": "object",
+                                      "properties":
+                                        {
+                                          "id": { "type": "string" },
+                                          "folder": { "type": "string" },
+                                        },
+                                      "required": ["id", "folder"],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Failed",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/sync/webdav/libraries/{id}":
+        {
+          "get":
+            {
+              "summary": "Resolve an existing cloud identity for a new local library, without exposing credentials or modifying the cloud",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/WebDAVConfig" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Failed",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/sync/webdav/library":
         {
           "delete":

@@ -3,6 +3,71 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LibraryCatalog } from "./library-catalog";
+import { prepareCloudLibrary } from "./cloud-library";
+import type { WebDAVConfig } from "../../../packages/neoread-core/src/webdav-sync";
+
+it("connects a cloud-only library with sync enabled without renaming or overwriting an existing local library", async () => {
+  const root = await mkdtemp(join(tmpdir(), "neoread-cloud-catalog-"));
+  try {
+    const active = join(root, "library");
+    await mkdir(active);
+    await writeFile(join(active, "neoread.sqlite"), "original");
+    await writeFile(
+      join(active, "webdav-sync.json"),
+      JSON.stringify({
+        account: "reader@example.com",
+        password: "private-password",
+        enabled: false,
+      }),
+    );
+    const catalog = new LibraryCatalog(root);
+    const entry = await catalog.allocate(active, "论文库");
+    const config = {
+      account: "reader@example.com",
+      remoteId: "a".repeat(32),
+      folder: "论文库",
+      deviceName: "Mac",
+      enabled: true,
+      passwordSet: true,
+      intervalMinutes: 15,
+    } satisfies WebDAVConfig;
+    await prepareCloudLibrary(entry.directory, active, config);
+    await writeFile(join(entry.directory, "neoread.sqlite"), "new");
+    await catalog.remember(entry);
+    const snapshot = await catalog.list(entry.directory, true);
+    expect(
+      snapshot.libraries.find((item) => item.id === entry.id),
+    ).toMatchObject({
+      name: "论文库(1)",
+      sync: {
+        enabled: true,
+        remoteId: config.remoteId,
+        account: config.account,
+      },
+    });
+    expect(
+      snapshot.libraries.find((item) => item.id !== entry.id)?.sync?.enabled,
+    ).toBe(false);
+    expect(JSON.stringify(snapshot)).not.toContain("private-password");
+    const saved = JSON.parse(
+      await readFile(join(entry.directory, "webdav-sync.json"), "utf8"),
+    );
+    expect(saved).toMatchObject({
+      enabled: true,
+      remoteId: config.remoteId,
+      folder: "论文库",
+      password: "private-password",
+    });
+    await expect(
+      prepareCloudLibrary(entry.directory, active, config),
+    ).rejects.toThrow();
+    expect(await readFile(join(active, "neoread.sqlite"), "utf8")).toBe(
+      "original",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 it("deletes a renamed default library only after switching, rolls back failed deletion, and keeps the last library", async () => {
   const root = await mkdtemp(join(tmpdir(), "neoread-delete-catalog-"));

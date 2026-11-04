@@ -956,6 +956,7 @@ export {
   webdavBusy,
   type WebDAVConfig,
   type WebDAVConfigInput,
+  type WebDAVLibrary,
   type WebDAVStatus,
   type WebDAVConflict,
   type WebDAVVariant,

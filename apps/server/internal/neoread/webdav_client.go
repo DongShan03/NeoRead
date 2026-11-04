@@ -150,7 +150,11 @@ type davDevice struct {
 }
 
 func (d *davClient) devices(ctx context.Context) ([]davDevice, error) {
-	res, err := d.request(ctx, "PROPFIND", "devices/", []byte(
+	return d.manifests(ctx, "devices/")
+}
+
+func (d *davClient) manifests(ctx context.Context, directory string) ([]davDevice, error) {
+	res, err := d.request(ctx, "PROPFIND", directory, []byte(
 		`<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>`))
 	if err != nil {
 		return nil, err
@@ -171,12 +175,12 @@ func (d *davClient) devices(ctx context.Context) ([]davDevice, error) {
 		} `xml:"response"`
 	}
 	if xml.NewDecoder(io.LimitReader(res.Body, 2<<20)).Decode(&listing) != nil {
-		return nil, errors.New("坚果云返回了无效的设备列表")
+		return nil, errors.New("坚果云返回了无效的同步目录列表")
 	}
 	// Only device manifests are listed, never the potentially large object folder.
 	// Refuse a provider-truncated listing rather than interpreting omissions as deletions.
 	if len(listing.Responses) >= 750 {
-		return nil, errors.New("同步目录中的设备列表过大，请为书库选择独立目录")
+		return nil, errors.New("坚果云同步目录列表过大，无法完整读取")
 	}
 	result := []davDevice{}
 	seen := map[string]bool{}
@@ -186,7 +190,7 @@ func (d *davClient) devices(ctx context.Context) ([]davDevice, error) {
 			return nil, errors.New("坚果云返回了无效的设备路径")
 		}
 		u = d.base.ResolveReference(u)
-		if u.Host != d.base.Host || path.Dir(u.Path)+"/" != d.base.Path+"devices/" {
+		if u.Host != d.base.Host || path.Dir(u.Path)+"/" != d.base.Path+directory {
 			continue
 		}
 		name := path.Base(u.Path)

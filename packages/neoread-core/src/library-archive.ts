@@ -10,6 +10,7 @@ export interface LibraryEntry {
   id: string;
   name: string;
   directory: string;
+  sync?: { enabled: boolean; remoteId?: string; account?: string };
 }
 export interface LibraryCatalogSnapshot {
   libraries: LibraryEntry[];

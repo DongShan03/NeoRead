@@ -9,6 +9,10 @@ export interface WebDAVConfig {
   passwordSet: boolean;
 }
 export type WebDAVConfigInput = WebDAVConfig & { password?: string };
+export interface WebDAVLibrary {
+  id: string;
+  folder: string;
+}
 export interface WebDAVVariant {
   id: string;
   device: string;

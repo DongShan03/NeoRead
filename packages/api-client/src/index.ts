@@ -295,6 +295,10 @@ export const api = {
     request<{ revision: number }>("/api/connector/revision"),
   webdavConfig: () =>
     request<import("@neoread/core").WebDAVConfig>("/api/sync/webdav/config"),
+  webdavLibraries: () =>
+    request<import("@neoread/core").WebDAVLibrary[]>(
+      "/api/sync/webdav/libraries",
+    ),
   saveWebdavConfig: (config: import("@neoread/core").WebDAVConfigInput) =>
     request<import("@neoread/core").WebDAVConfig>("/api/sync/webdav/config", {
       method: "PUT",

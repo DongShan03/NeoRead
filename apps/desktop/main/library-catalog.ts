@@ -94,7 +94,7 @@ export class LibraryCatalog {
     if (libraries.length !== count) await this.save(libraries);
     return libraries;
   }
-  list(active: string): Promise<LibraryCatalogSnapshot> {
+  list(active: string, includeSync = false): Promise<LibraryCatalogSnapshot> {
     return this.run(async () => {
       const libraries = await this.ensure(active);
       const directory = active
@@ -103,7 +103,9 @@ export class LibraryCatalog {
       const current = libraries.find((entry) => entry.directory === directory);
       if (current) this.names.set(active, current.name);
       return {
-        libraries,
+        libraries: includeSync
+          ? await Promise.all(libraries.map(withSyncStatus))
+          : libraries,
         activeId: current?.id ?? null,
       };
     });
@@ -209,6 +211,28 @@ export class LibraryCatalog {
           libraries.find((item) => item.directory === directory)?.id ?? null,
       };
     });
+  }
+}
+
+async function withSyncStatus(entry: LibraryEntry): Promise<LibraryEntry> {
+  try {
+    const config = JSON.parse(
+      await readFile(join(entry.directory, "webdav-sync.json"), "utf8"),
+    );
+    return {
+      ...entry,
+      sync: {
+        enabled: config.enabled === true,
+        remoteId:
+          typeof config.remoteId === "string" ? config.remoteId : undefined,
+        account:
+          typeof config.account === "string" ? config.account : undefined,
+      },
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { ...entry, sync: { enabled: false } };
+    throw error;
   }
 }
 

@@ -36,6 +36,8 @@ import {
   type LibraryEntry,
 } from "../../../packages/neoread-core/src/library-archive";
 import { LibraryCatalog } from "./library-catalog";
+import { prepareCloudLibrary } from "./cloud-library";
+import type { WebDAVConfig } from "../../../packages/neoread-core/src/webdav-sync";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { createStartupWindow } from "./startup-window";
@@ -1249,8 +1251,78 @@ app
     };
     ipcMain.handle("neoread:library-catalog", (event) => {
       settingsSender(event);
-      return libraryCatalog.list(activeLibrary || "");
+      return libraryCatalog.list(activeLibrary || "", true);
     });
+    ipcMain.handle(
+      "neoread:sync-remote-library",
+      async (event, remoteId: unknown) => {
+        settingsSender(event);
+        if (typeof remoteId !== "string" || !/^[a-f0-9]{32}$/.test(remoteId))
+          throw new Error("云端书库编号无效");
+        if (choosingLibrary || closing || restartRequested || librarySwitching)
+          return false;
+        if (recoveryServer || !activeLibrary)
+          throw new Error("请先通过恢复页面切换书库。");
+        choosingLibrary = true;
+        const started = performance.now();
+        try {
+          // Recheck the selected identity before creating anything. Credentials
+          // remain in NeoRead's local connection settings, never in the renderer.
+          const response = await fetch(
+            serverURL + "/api/sync/webdav/libraries/" + remoteId,
+            {
+              headers: { Authorization: "Bearer " + serverToken },
+              signal: runtimeController.signal,
+            },
+          );
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || "无法读取云端书库");
+          }
+          const config = (await response.json()) as WebDAVConfig;
+          const snapshot = await libraryCatalog.list(activeLibrary, true);
+          const existing = snapshot.libraries.find(
+            (entry) =>
+              entry.sync?.remoteId === remoteId &&
+              entry.sync.account === config.account,
+          );
+          if (existing) {
+            if (existing.id === snapshot.activeId) return false;
+            return await switchLibrary(existing.directory, () =>
+              validateLibraryDirectory(existing.directory, serverBinary()),
+            );
+          }
+          const entry = await libraryCatalog.allocate(
+            activeLibrary,
+            config.folder,
+          );
+          const source = activeLibrary;
+          const result = await switchLibrary(
+            entry.directory,
+            () => prepareCloudLibrary(entry.directory, source, config),
+            false,
+            entry,
+          );
+          if (result)
+            diagnostics?.logs.record("desktop", {
+              level: "info",
+              event: "library.cloud_connected",
+              durationMs: Math.round(performance.now() - started),
+            });
+          return result;
+        } catch (error) {
+          diagnostics?.logs.record("desktop", {
+            level: "error",
+            event: "library.cloud_connect_failed",
+            errorCode: "connect",
+            durationMs: Math.round(performance.now() - started),
+          });
+          throw error;
+        } finally {
+          choosingLibrary = false;
+        }
+      },
+    );
     ipcMain.handle("neoread:create-library", async (event, name: unknown) => {
       settingsSender(event);
       if (typeof name !== "string") throw new Error("书库名称无效");

@@ -29,6 +29,7 @@ interface Window {
     >;
     switchLibrary?: (id: string) => Promise<boolean>;
     createLibrary?: (name: string) => Promise<boolean>;
+    syncRemoteLibrary?: (remoteId: string) => Promise<boolean>;
     deleteLibrary?: (id: string, deleteCloud: boolean) => Promise<boolean>;
     renameLibrary?: (
       id: string,

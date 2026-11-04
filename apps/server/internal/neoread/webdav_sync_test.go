@@ -34,6 +34,105 @@ func syncFixture(t *testing.T, remote *httptest.Server, name string) *Server {
 	t.Cleanup(server.Close)
 	return server
 }
+
+func TestWebDAVCloudLibraryDiscoveryIsReadOnlyAndKeepsRemoteIdentity(t *testing.T) {
+	remote, directory := testDAV(t)
+	s := syncFixture(t, remote, "Mac")
+	s.Token = "test-secret"
+	liveID, deletedID := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	root := filepath.Join(directory, "NeoRead", ".libraries")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, location := range []syncLocation{{ID: liveID, Folder: "云端研究库"}, {ID: deletedID, Folder: "已删除", Deleted: true}} {
+		if err := os.WriteFile(filepath.Join(root, location.ID+".json"), []byte(jsonText(location)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.webdav.factory = func(c webdavConfig) *davClient {
+		client := testDAVClient(c, remote)
+		client.http.Transport = davTestTransport(func(r *http.Request) (*http.Response, error) {
+			if r.Method != "GET" && r.Method != "PROPFIND" {
+				t.Errorf("discovery mutated the cloud: %s", r.Method)
+			}
+			return http.DefaultTransport.RoundTrip(r)
+		})
+		return client
+	}
+	response := request(t, s, "GET", "/api/sync/webdav/libraries", nil)
+	var libraries []webdavLibrary
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &libraries) != nil || len(libraries) != 1 || libraries[0].ID != liveID {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "application-password") {
+		t.Fatal("credentials leaked")
+	}
+	response = request(t, s, "GET", "/api/sync/webdav/libraries/"+liveID, nil)
+	var config webdavConfig
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &config) != nil || config.RemoteID != liveID || config.Folder != "云端研究库" || !config.Enabled || config.Password != "" {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	response = request(t, s, "GET", "/api/sync/webdav/libraries/"+deletedID, nil)
+	if response.Code == 200 {
+		t.Fatal("deleted library can be imported")
+	}
+	response = request(t, s, "GET", "/api/sync/webdav/libraries/invalid", nil)
+	if response.Code != 400 {
+		t.Fatal("invalid identity accepted", response.Code)
+	}
+	local, err := s.readSyncConfig()
+	if err != nil || local.RemoteID != "" || local.Folder != "论文库" {
+		t.Fatal("discovery changed local sync target", local, err)
+	}
+}
+
+func TestWebDAVEmptyCloudCatalogDoesNotCreateAnything(t *testing.T) {
+	remote, directory := testDAV(t)
+	s := syncFixture(t, remote, "Mac")
+	libraries, err := s.remoteLibraries(t.Context())
+	if err != nil || len(libraries) != 0 {
+		t.Fatal(libraries, err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "NeoRead")); !os.IsNotExist(err) {
+		t.Fatal("discovery created a directory", err)
+	}
+}
+
+func TestWebDAVImportedCloudLibraryDownloadsOnStartupWithSyncEnabled(t *testing.T) {
+	remote, _ := testDAV(t)
+	a := syncFixture(t, remote, "Mac")
+	syncDocumentFixture(t, a.Store, "cloud-paper", "研究")
+	runSync(t, a)
+	source, _ := a.readSyncConfig()
+	config, err := a.remoteLibraryConfig(t.Context(), source.RemoteID)
+	if err != nil || !config.Enabled {
+		t.Fatal(config, err)
+	}
+	b := testServer(t)
+	b.webdav.factory = func(c webdavConfig) *davClient { return testDAVClient(c, remote) }
+	b.webdav.beforeApply = func(context.Context) error { return nil }
+	if err := b.writeSyncConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	b.StartWebDAV(t.Context())
+	waitSyncPhase(t, b, "complete")
+	if _, err := b.Store.Document("cloud-paper"); err != nil {
+		t.Fatal("cloud-only document not downloaded", err)
+	}
+	connected, err := b.readSyncConfig()
+	if err != nil || !connected.Enabled || connected.RemoteID != source.RemoteID {
+		t.Fatal("import did not retain the enabled cloud identity", connected, err)
+	}
+	if _, err := b.Store.DB.Exec("UPDATE document_notes SET body='本地继续修改' WHERE document_id='cloud-paper'"); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, b)
+	runSync(t, a)
+	var note string
+	if err := a.Store.DB.QueryRow("SELECT body FROM document_notes WHERE document_id='cloud-paper'").Scan(&note); err != nil || note != "本地继续修改" {
+		t.Fatal("imported library did not continue pushing changes", note, err)
+	}
+}
 func TestWebDAVDoesNotAcknowledgeEditsThatArriveDuringDownload(t *testing.T) {
 	remote, _ := testDAV(t)
 	a := syncFixture(t, remote, "Mac")

@@ -1,4 +1,13 @@
-import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Cloud,
+  CloudOff,
+  LoaderCircle,
+  Plus,
+  Trash2,
+} from "lucide-react";
+import { api } from "@neoread/api";
 import { Switch } from "@neoread/ui/components/switch";
 import { useWebDAVSync } from "./webdav-sync";
 import { useEffect, useRef, useState } from "react";
@@ -6,7 +15,7 @@ import { toast } from "sonner";
 import type { LibraryCatalogSnapshot } from "../../../packages/neoread-core/src/library-archive";
 import { Input } from "@neoread/ui/components/input";
 import { doubleClickWindow } from "./DetailSheet";
-import type { LibraryMode } from "@neoread/core";
+import type { LibraryMode, WebDAVLibrary } from "@neoread/core";
 import { Button } from "@neoread/ui/components/button";
 import {
   Dialog,
@@ -50,10 +59,45 @@ export function LibraryModeSwitcher({
   const [deleting, setDeleting] = useState(false);
   const [deleteCloud, setDeleteCloud] = useState(false);
   const syncConfig = useWebDAVSync((state) => state.config);
+  const [remote, setRemote] = useState<WebDAVLibrary[]>([]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteError, setRemoteError] = useState("");
+  const [connecting, setConnecting] = useState<WebDAVLibrary>();
+  const remoteRequest = useRef(0);
+  const remoteLoaded = useRef(0);
+  const configured = !!syncConfig?.passwordSet;
   const cloudConnected = !!syncConfig?.remoteId;
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saving = useRef(false);
   const canceled = useRef(false);
+  useEffect(() => {
+    remoteRequest.current++;
+    remoteLoaded.current = 0;
+    setRemote([]);
+    setRemoteLoading(false);
+    setRemoteError("");
+    setConnecting(undefined);
+    return () => {
+      remoteRequest.current++;
+    };
+  }, [syncConfig?.account, configured]);
+  const loadRemote = async () => {
+    if (!configured || !desktop?.syncRemoteLibrary) return;
+    const request = ++remoteRequest.current;
+    setRemoteLoading(true);
+    setRemoteError("");
+    try {
+      const libraries = await api.webdavLibraries();
+      if (request !== remoteRequest.current) return;
+      setRemote(libraries);
+      remoteLoaded.current = Date.now();
+    } catch (error) {
+      if (request === remoteRequest.current)
+        setRemoteError((error as Error).message);
+    } finally {
+      if (request === remoteRequest.current) setRemoteLoading(false);
+    }
+  };
   useEffect(() => {
     let current = true;
     void desktop
@@ -71,6 +115,26 @@ export function LibraryModeSwitcher({
     (entry) => entry.id === catalog.activeId,
   );
   const name = active?.name ?? libraryModes[mode].label;
+  const remoteOnly = remote.filter(
+    (cloud) =>
+      !catalog?.libraries.some(
+        (entry) =>
+          entry.sync?.remoteId === cloud.id &&
+          entry.sync.account === syncConfig?.account,
+      ),
+  );
+  const connect = async () => {
+    if (busy || !connecting || !desktop?.syncRemoteLibrary) return;
+    setBusy(true);
+    try {
+      if (await desktop.syncRemoteLibrary(connecting.id))
+        setConnecting(undefined);
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const rename = async () => {
     if (
       canceled.current ||
@@ -139,6 +203,12 @@ export function LibraryModeSwitcher({
       <DropdownMenu
         open={open}
         onOpenChange={(next, details) => {
+          if (
+            next &&
+            !remoteLoading &&
+            (remoteError || Date.now() - remoteLoaded.current > 60_000)
+          )
+            void loadRemote();
           if (next)
             void desktop
               ?.libraryCatalog?.()
@@ -192,10 +262,54 @@ export function LibraryModeSwitcher({
                   .finally(() => setBusy(false));
               }}
             >
+              {(
+                entry.id === catalog.activeId
+                  ? (syncConfig?.enabled ?? entry.sync?.enabled)
+                  : entry.sync?.enabled
+              ) ? (
+                <Cloud
+                  className="size-4 text-muted-foreground"
+                  aria-label="已开启同步"
+                />
+              ) : (
+                <CloudOff
+                  className="size-4 text-muted-foreground"
+                  aria-label="未开启同步"
+                />
+              )}
               <span className="min-w-0 flex-1 truncate">{entry.name}</span>
               {entry.id === catalog.activeId && <Check className="size-4" />}
             </DropdownMenuItem>
           ))}
+          {remoteOnly.map((entry) => (
+            <DropdownMenuItem
+              key={"cloud-" + entry.id}
+              className="text-muted-foreground"
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                setConnecting(entry);
+              }}
+            >
+              <Cloud className="size-4" aria-label="云端书库" />
+              <span className="min-w-0 flex-1 truncate">{entry.folder}</span>
+            </DropdownMenuItem>
+          ))}
+          {remoteLoading && (
+            <DropdownMenuItem disabled>
+              <LoaderCircle className="size-4 animate-spin" />
+              正在获取云端书库…
+            </DropdownMenuItem>
+          )}
+          {remoteError && (
+            <DropdownMenuItem
+              className="text-muted-foreground"
+              title={remoteError}
+              onClick={() => void loadRemote()}
+            >
+              重新获取云端书库
+            </DropdownMenuItem>
+          )}
           {desktop?.createLibrary && (
             <DropdownMenuItem
               disabled={busy}
@@ -249,6 +363,33 @@ export function LibraryModeSwitcher({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      <Dialog
+        open={!!connecting}
+        onOpenChange={(value) => {
+          if (!busy && !value) setConnecting(undefined);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>同步“{connecting?.folder}”到本地？</DialogTitle>
+            <DialogDescription>
+              创建对应的本地书库并开始下载，默认开启后续双向同步。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => setConnecting(undefined)}
+            >
+              取消
+            </Button>
+            <Button disabled={busy} onClick={() => void connect()}>
+              {busy ? "正在连接…" : "同步到本地"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={creating}
         onOpenChange={(value) => {

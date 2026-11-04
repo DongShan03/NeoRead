@@ -69,6 +69,7 @@ func publicSyncConfig(config webdavConfig) webdavConfig {
 	return config
 }
 func (s *Server) registerWebDAV(mux *http.ServeMux) {
+	s.registerRemoteLibraries(mux)
 	mux.HandleFunc("DELETE /api/sync/webdav/library", func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		s.diagnosticEvent(slog.LevelInfo, "sync.library_delete_started")
