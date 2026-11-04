@@ -40,15 +40,31 @@ export function AnnotationNoteWindow({
     x: number;
     y: number;
     frame: Frame;
+    next: Frame;
+    viewport: { width: number; height: number };
   } | null>(null);
+  const paint = useRef<number | null>(null);
+  const cancelPaint = () => {
+    if (paint.current !== null) window.cancelAnimationFrame(paint.current);
+    paint.current = null;
+  };
+  const stop = () => {
+    const current = drag.current;
+    if (!current) return;
+    cancelPaint();
+    drag.current = null;
+    setFrame(current.next);
+  };
   const constrain = (value: Frame) =>
     constrainPreviewFrame(value, window.innerWidth, window.innerHeight);
   useLayoutEffect(() => {
+    cancelPaint();
     drag.current = null;
     if (!open || !popup) {
       setFrame(null);
       return;
     }
+    delete popup.dataset.moved;
     const width = popup.offsetWidth || 320,
       height = popup.offsetHeight || 200;
     setFrame(
@@ -63,7 +79,8 @@ export function AnnotationNoteWindow({
         height,
       }),
     );
-    const resize = () =>
+    const resize = () => {
+      stop();
       setFrame(
         (value) =>
           value &&
@@ -73,39 +90,57 @@ export function AnnotationNoteWindow({
             height: popup.offsetHeight || height,
           }),
       );
+    };
     const observer = new ResizeObserver(resize);
     observer.observe(popup);
     window.addEventListener("resize", resize);
     return () => {
+      cancelPaint();
+      drag.current = null;
       observer.disconnect();
       window.removeEventListener("resize", resize);
     };
   }, [open, anchor, popup]);
+  useLayoutEffect(() => {
+    if (!popup || drag.current) return;
+    popup.style.transform = "";
+    delete popup.dataset.dragging;
+  }, [frame, popup]);
   const start = (event: PointerEvent<HTMLElement>) => {
-    if (event.button !== 0 || !frame) return;
+    if (event.button !== 0 || !frame || !popup || drag.current) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
+    popup.dataset.dragging = "";
+    popup.dataset.moved = "";
     drag.current = {
       pointer: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       frame,
+      next: { ...frame },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
     };
   };
   const move = (event: PointerEvent<HTMLElement>) => {
     const current = drag.current;
     if (!current || current.pointer !== event.pointerId) return;
-    setFrame(
-      constrain({
+    current.next = constrainPreviewFrame(
+      {
         ...current.frame,
         x: current.frame.x + event.clientX - current.x,
         y: current.frame.y + event.clientY - current.y,
-      }),
+      },
+      current.viewport.width,
+      current.viewport.height,
     );
-  };
-  const stop = () => {
-    drag.current = null;
+    if (paint.current !== null) return;
+    paint.current = window.requestAnimationFrame(() => {
+      paint.current = null;
+      const latest = drag.current;
+      if (!latest || !popup) return;
+      popup.style.transform = `translate3d(${latest.next.x - latest.frame.x}px, ${latest.next.y - latest.frame.y}px, 0)`;
+    });
   };
   return (
     <Dialog
@@ -147,11 +182,13 @@ export function AnnotationNoteWindow({
                 event.preventDefault();
                 event.stopPropagation();
                 const step = event.shiftKey ? 40 : 10;
+                const current = drag.current?.next ?? frame;
+                stop();
                 setFrame(
                   constrain({
-                    ...frame,
-                    x: frame.x + direction[0] * step,
-                    y: frame.y + direction[1] * step,
+                    ...current,
+                    x: current.x + direction[0] * step,
+                    y: current.y + direction[1] * step,
                   }),
                 );
               }}
