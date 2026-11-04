@@ -8,7 +8,7 @@ import {
   stat,
   realpath,
 } from "node:fs/promises";
-import { join, basename, isAbsolute } from "node:path";
+import { join, basename, isAbsolute, relative, sep } from "node:path";
 import {
   uniqueLibraryName,
   type LibraryEntry,
@@ -137,6 +137,39 @@ export class LibraryCatalog {
           ),
         });
       await this.save(libraries);
+    });
+  }
+  remove(
+    active: string,
+    id: string,
+    trash: (directory: string) => Promise<void>,
+  ) {
+    return this.run(async () => {
+      const libraries = await this.ensure(active);
+      if (libraries.length <= 1) throw new Error("至少需要保留一个书库。");
+      const entry = libraries.find((item) => item.id === id);
+      if (!entry) throw new Error("书库已不存在。");
+      const current = await realpath(active);
+      if (entry.directory === current) throw new Error("请先切换到其他书库。");
+      const remaining = libraries.filter((item) => item.id !== id);
+      if (
+        remaining.some((item) => {
+          const path = relative(entry.directory, item.directory);
+          return (
+            !path ||
+            (!isAbsolute(path) && path !== ".." && !path.startsWith(".." + sep))
+          );
+        })
+      )
+        throw new Error("此书库目录包含其他书库，请先更改它们的位置。");
+      await this.save(remaining);
+      try {
+        await trash(entry.directory);
+      } catch (error) {
+        await this.save(libraries);
+        throw error;
+      }
+      this.names.delete(entry.directory);
     });
   }
   rename(

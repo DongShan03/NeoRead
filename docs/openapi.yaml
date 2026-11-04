@@ -4,6 +4,29 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/sync/webdav/library":
+        {
+          "delete":
+            {
+              "summary": "Delete the connected cloud library and retain its deletion identity record",
+              "responses":
+                {
+                  "204": { "description": "Cloud library deleted" },
+                  "default":
+                    {
+                      "description": "Failed",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/sync/webdav/config":
         {
           "get":

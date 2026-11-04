@@ -1,4 +1,6 @@
-import { Check, ChevronDown, Plus } from "lucide-react";
+import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Switch } from "@neoread/ui/components/switch";
+import { useWebDAVSync } from "./webdav-sync";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { LibraryCatalogSnapshot } from "../../../packages/neoread-core/src/library-archive";
@@ -45,6 +47,10 @@ export function LibraryModeSwitcher({
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("论文库");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteCloud, setDeleteCloud] = useState(false);
+  const syncConfig = useWebDAVSync((state) => state.config);
+  const cloudConnected = !!syncConfig?.remoteId;
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saving = useRef(false);
   const canceled = useRef(false);
@@ -88,6 +94,18 @@ export function LibraryModeSwitcher({
     setBusy(true);
     try {
       if (await desktop.createLibrary(newName.trim())) setCreating(false);
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (busy || !active || !desktop?.deleteLibrary) return;
+    setBusy(true);
+    try {
+      if (await desktop.deleteLibrary(active.id, deleteCloud))
+        setDeleting(false);
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -191,6 +209,20 @@ export function LibraryModeSwitcher({
               新建书库
             </DropdownMenuItem>
           )}
+          {desktop?.deleteLibrary && (
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={busy || !catalog || catalog.libraries.length <= 1}
+              onClick={() => {
+                setOpen(false);
+                setDeleteCloud(false);
+                setDeleting(true);
+              }}
+            >
+              <Trash2 className="size-4" />
+              删除当前书库…
+            </DropdownMenuItem>
+          )}
           {(!!catalog?.libraries.length || !!desktop?.createLibrary) && (
             <DropdownMenuSeparator />
           )}
@@ -259,6 +291,53 @@ export function LibraryModeSwitcher({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={deleting}
+        onOpenChange={(value) => {
+          if (!busy) setDeleting(value);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除“{name}”？</DialogTitle>
+            <DialogDescription>
+              本机书库及其文件移到系统废纸篓。删除后返回默认书库；删除默认书库时，将切换到剩余书库。
+            </DialogDescription>
+          </DialogHeader>
+          {cloudConnected && (
+            <label className="flex items-center justify-between gap-4 text-sm">
+              <span>
+                同时删除坚果云副本
+                <span className="block text-xs text-muted-foreground">
+                  云端文件会删除，其他设备停止同步此书库。
+                </span>
+              </span>
+              <Switch
+                aria-label="同时删除坚果云副本"
+                checked={deleteCloud}
+                disabled={busy}
+                onCheckedChange={(value) => setDeleteCloud(!!value)}
+              />
+            </label>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => setDeleting(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
+              {busy ? "正在删除…" : "确认删除书库"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

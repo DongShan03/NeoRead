@@ -4,13 +4,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { LibraryModeSwitcher } from "./LibraryModeSwitcher";
+import { useWebDAVSync } from "./webdav-sync";
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 const create = vi.fn();
 const changed = vi.fn();
+const remove = vi.fn();
 let root: Root, host: HTMLDivElement;
 beforeEach(async () => {
   vi.clearAllMocks();
   create.mockReset().mockResolvedValue(true);
+  remove.mockReset().mockResolvedValue(true);
+  useWebDAVSync.setState({ config: undefined });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("PointerEvent", MouseEvent);
   vi.stubGlobal(
@@ -32,6 +36,7 @@ beforeEach(async () => {
       libraries: [{ id: "first", name: "论文库", directory: "/library" }],
     })),
     createLibrary: create,
+    deleteLibrary: remove,
   });
   host = document.createElement("div");
   document.body.append(host);
@@ -107,4 +112,54 @@ it("keeps the requested name for retry if local library creation fails", async (
   expect(name().value).toBe("研究库");
   await submit();
   expect(create).toHaveBeenCalledTimes(2);
+});
+
+it("blocks deleting the last library and asks before deleting a default library with a cloud option", async () => {
+  const deletion = () =>
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (node) => node.textContent?.trim() === "删除当前书库…",
+    )!;
+  await openMenu();
+  expect(deletion().getAttribute("aria-disabled")).toBe("true");
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label^="切换书库"]')!
+      .click(),
+  );
+  vi.mocked(window.neoreadDesktop!.libraryCatalog!).mockResolvedValue({
+    activeId: "first",
+    libraries: [
+      { id: "first", name: "默认库改名", directory: "/library" },
+      { id: "second", name: "其他库", directory: "/other" },
+    ],
+  });
+  useWebDAVSync.setState({
+    config: {
+      account: "reader@example.com",
+      passwordSet: true,
+      remoteId: "cloud",
+      enabled: true,
+      folder: "默认库改名",
+      deviceName: "Mac",
+      intervalMinutes: 15,
+    },
+  });
+  await openMenu();
+  await act(async () => deletion().click());
+  expect(remove).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    "默认库改名",
+  );
+  await act(async () =>
+    document
+      .querySelector<HTMLButtonElement>(
+        '[role="switch"][aria-label="同时删除坚果云副本"]',
+      )!
+      .click(),
+  );
+  const confirm = [
+    ...document.querySelectorAll<HTMLButtonElement>("button"),
+  ].find((node) => node.textContent === "确认删除书库")!;
+  await act(async () => confirm.click());
+  expect(remove).toHaveBeenCalledExactlyOnceWith("first", true);
 });

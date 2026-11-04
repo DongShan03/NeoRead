@@ -808,6 +808,37 @@ func TestWebDAVReusingARenamedLibraryNameCreatesAnIndependentLibrary(t *testing.
 		t.Fatal("new library received unrelated documents")
 	}
 }
+
+func TestWebDAVDeletedLibraryCannotBeRecreatedByAnOfflineDevice(t *testing.T) {
+	remote, directory := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "分类")
+	runSync(t, a)
+	runSync(t, b)
+	before, _ := a.readSyncConfig()
+	if err := a.deleteRemoteLibrary(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "NeoRead", "论文库")); !os.IsNotExist(err) {
+		t.Fatal("cloud library still exists", err)
+	}
+	config, _ := b.readSyncConfig()
+	if err := b.runWebDAV(t.Context(), config); err == nil {
+		t.Fatal("offline device recreated deleted library")
+	}
+	if _, err := b.Store.Document("paper"); err != nil {
+		t.Fatal("failed sync deleted local content", err)
+	}
+	c := syncFixture(t, remote, "New library")
+	runSync(t, c)
+	created, _ := c.readSyncConfig()
+	if created.RemoteID == before.RemoteID {
+		t.Fatal("reused deleted library identity")
+	}
+	if _, err := c.Store.Document("paper"); err == nil {
+		t.Fatal("new library received deleted data")
+	}
+}
 func TestWebDAVConfigDefaultsIntervalsAndCredentialsStayLocal(t *testing.T) {
 	remote, directory := testDAV(t)
 	s := NewServer(archiveFixture(t, t.TempDir()), "test-token", "")

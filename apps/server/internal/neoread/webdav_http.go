@@ -69,6 +69,18 @@ func publicSyncConfig(config webdavConfig) webdavConfig {
 	return config
 }
 func (s *Server) registerWebDAV(mux *http.ServeMux) {
+	mux.HandleFunc("DELETE /api/sync/webdav/library", func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		s.diagnosticEvent(slog.LevelInfo, "sync.library_delete_started")
+		err := s.deleteRemoteLibrary(r.Context())
+		if err != nil {
+			s.diagnosticEvent(slog.LevelError, "sync.library_delete_failed", "errorCode", "delete", "durationMs", time.Since(started).Milliseconds())
+			fail(w, 502, err.Error())
+			return
+		}
+		s.diagnosticEvent(slog.LevelInfo, "sync.library_deleted", "durationMs", time.Since(started).Milliseconds())
+		w.WriteHeader(204)
+	})
 	mux.HandleFunc("GET /api/sync/webdav/config", func(w http.ResponseWriter, r *http.Request) {
 		config, err := s.readSyncConfig()
 		if err != nil {
@@ -332,4 +344,67 @@ func (s *Server) registerWebDAV(mux *http.ServeMux) {
 		}
 		respond(w, 200, map[string]bool{"queued": config.LibraryConfigured && config.Account != ""})
 	})
+}
+
+func (s *Server) deleteRemoteLibrary(ctx context.Context) (err error) {
+	s.webdav.mu.Lock()
+	closed := s.webdav.closed
+	s.webdav.closed = true
+	cancel, done := s.webdav.cancel, s.webdav.done
+	s.webdav.mu.Unlock()
+	defer func() {
+		if err != nil {
+			s.webdav.mu.Lock()
+			s.webdav.closed = closed
+			s.webdav.mu.Unlock()
+		}
+	}()
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	s.webdav.operation.Lock()
+	defer s.webdav.operation.Unlock()
+	config, err := s.readSyncConfig()
+	if err != nil {
+		return err
+	}
+	if config.RemoteID == "" || config.Account == "" || config.Password == "" {
+		return errors.New("此书库尚未连接坚果云")
+	}
+	dav := s.dav(config)
+	root := dav.rootClient()
+	name := ".libraries/" + config.RemoteID + ".json"
+	location, err := readSyncLocation(ctx, root, name)
+	if davNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if location.ID != config.RemoteID {
+		return errors.New("云端书库标识不一致")
+	}
+	// Keep a small deletion record so offline devices cannot recreate this
+	// library, and a later library with the same name gets a new identity.
+	location.Deleted = true
+	if err = root.put(ctx, name, []byte(jsonText(location))); err != nil {
+		return err
+	}
+	dav.setFolder(location.Folder)
+	response, err := dav.request(ctx, "DELETE", "", nil)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 && response.StatusCode != 204 && response.StatusCode != 404 {
+		return davStatus(response)
+	}
+	return nil
 }

@@ -4,6 +4,42 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LibraryCatalog } from "./library-catalog";
 
+it("deletes a renamed default library only after switching, rolls back failed deletion, and keeps the last library", async () => {
+  const root = await mkdtemp(join(tmpdir(), "neoread-delete-catalog-"));
+  try {
+    const original = join(root, "library"),
+      other = join(root, "other");
+    for (const directory of [original, other]) {
+      await mkdir(directory);
+      await writeFile(join(directory, "neoread.sqlite"), "");
+    }
+    const catalog = new LibraryCatalog(root);
+    const initial = await catalog.list(original);
+    const id = initial.activeId!;
+    await catalog.rename(original, id, "重命名的默认库");
+    await catalog.remember({ id: "other", name: "其他库", directory: other });
+    await expect(catalog.remove(original, id, async () => {})).rejects.toThrow(
+      "先切换",
+    );
+    await expect(
+      catalog.remove(other, id, async () => {
+        throw new Error("trash failed");
+      }),
+    ).rejects.toThrow("trash failed");
+    expect((await catalog.list(other)).libraries).toHaveLength(2);
+    await catalog.remove(other, id, (directory) =>
+      rm(directory, { recursive: true }),
+    );
+    const remaining = await catalog.list(other);
+    expect(remaining.libraries.map((entry) => entry.id)).toEqual(["other"]);
+    await expect(
+      catalog.remove(other, "other", async () => {}),
+    ).rejects.toThrow("至少需要保留一个书库");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("serializes cloud rename notification with the active local library rename", async () => {
   const root = await mkdtemp(join(tmpdir(), "neoread-sync-catalog-"));
   try {

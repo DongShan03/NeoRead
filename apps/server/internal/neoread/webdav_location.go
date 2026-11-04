@@ -14,8 +14,9 @@ import (
 )
 
 type syncLocation struct {
-	ID     string `json:"id"`
-	Folder string `json:"folder"`
+	ID      string `json:"id"`
+	Folder  string `json:"folder"`
+	Deleted bool   `json:"deleted,omitempty"`
 }
 
 func validSyncFolder(name string) bool {
@@ -90,7 +91,7 @@ func (s *Server) resolveSyncLocation(ctx context.Context, config webdavConfig) (
 				}
 				location.ID = syncBytesHash([]byte(seed))[:32]
 				registered, e := readSyncLocation(ctx, root, ".libraries/"+location.ID+".json")
-				if davNotFound(e) || e == nil && registered.Folder == config.Folder {
+				if davNotFound(e) || e == nil && !registered.Deleted && registered.Folder == config.Folder {
 					break
 				}
 				if e != nil {
@@ -122,6 +123,9 @@ func (s *Server) resolveSyncLocation(ctx context.Context, config webdavConfig) (
 			return config, nil, errors.New("云端书库标识不一致")
 		}
 		location = registered
+	}
+	if location.Deleted {
+		return config, nil, errors.New("此云端书库已被删除，请关闭同步或连接其他书库")
 	}
 	dav.setFolder(location.Folder)
 	config.RemoteID = location.ID

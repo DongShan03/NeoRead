@@ -199,7 +199,10 @@ const commandLineHost = () => ({
   binary: bundledBinary("neoread"),
   env: process.env,
 });
-async function startServer(reuse?: { url: string; token: string }, empty = false) {
+async function startServer(
+  reuse?: { url: string; token: string },
+  empty = false,
+) {
   const childEnv = process.env;
   serverToken = reuse?.token ?? randomBytes(32).toString("hex");
   diagnostics?.logs.secrets.push(serverToken);
@@ -1302,6 +1305,72 @@ app
         );
       },
     );
+    ipcMain.handle(
+      "neoread:delete-library",
+      async (event, id: unknown, deleteCloud: unknown) => {
+        settingsSender(event);
+        if (typeof id !== "string" || typeof deleteCloud !== "boolean")
+          throw new Error("书库删除选项无效");
+        if (choosingLibrary || closing || restartRequested || librarySwitching)
+          return false;
+        if (recoveryServer || !activeLibrary)
+          throw new Error("请先恢复书库连接。");
+        choosingLibrary = true;
+        let cloudDeleted = false;
+        try {
+          const snapshot = await libraryCatalog.list(activeLibrary);
+          if (snapshot.libraries.length <= 1)
+            throw new Error("至少需要保留一个书库。");
+          if (id !== snapshot.activeId)
+            throw new Error("请先切换到要删除的书库。");
+          const fallback = snapshot.libraries.find((entry) => entry.id !== id)!;
+          await validateLibraryDirectory(fallback.directory, serverBinary());
+          if (deleteCloud) {
+            const response = await fetch(
+              serverURL + "/api/sync/webdav/library",
+              {
+                method: "DELETE",
+                headers: { Authorization: "Bearer " + serverToken },
+                signal: AbortSignal.timeout(120000),
+              },
+            );
+            if (!response.ok) {
+              const result = await response.json();
+              throw new Error(result.error || "无法删除坚果云书库");
+            }
+            cloudDeleted = true;
+          }
+          if (!(await switchLibrary(fallback.directory, async () => {}))) {
+            if (cloudDeleted)
+              throw new Error("云端副本已删除，本机书库仍保留，请重试删除。");
+            return false;
+          }
+          await libraryCatalog.remove(activeLibrary!, id, (directory) =>
+            shell.trashItem(directory),
+          );
+          diagnostics?.logs.record("desktop", {
+            level: "info",
+            event: "library.deleted",
+            cloudDeleted,
+          });
+          return true;
+        } catch (error) {
+          diagnostics?.logs.record("desktop", {
+            level: "error",
+            event: "library.delete_failed",
+            errorCode: "delete",
+            cloudDeleted,
+          });
+          if (cloudDeleted)
+            throw new Error(
+              "云端副本已删除，本机删除未完成：" + (error as Error).message,
+            );
+          throw error;
+        } finally {
+          choosingLibrary = false;
+        }
+      },
+    );
     ipcMain.handle("neoread:switch-library", async (event, id: unknown) => {
       settingsSender(event);
       if (typeof id !== "string") throw new Error("书库无效");
@@ -1558,10 +1627,13 @@ app
       settingsSender(event);
       return (await proxyReady).state();
     });
-    ipcMain.handle("neoread:save-proxy-settings", async (event, value: unknown) => {
-      settingsSender(event);
-      return (await proxyReady).save(value);
-    });
+    ipcMain.handle(
+      "neoread:save-proxy-settings",
+      async (event, value: unknown) => {
+        settingsSender(event);
+        return (await proxyReady).save(value);
+      },
+    );
     ipcMain.handle("neoread:check-proxy", async (event, value: unknown) => {
       settingsSender(event);
       return (await proxyReady).check(value, serverBinary());

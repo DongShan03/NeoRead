@@ -58,6 +58,8 @@ let archivePrepare: ReturnType<typeof vi.fn>;
 let archiveDownload: ReturnType<typeof vi.fn>;
 let catalogRemember: ReturnType<typeof vi.fn>;
 let catalogAllocate: ReturnType<typeof vi.fn>;
+let catalogRemove: ReturnType<typeof vi.fn>;
+let trashLibrary: ReturnType<typeof vi.fn>;
 const event = () => ({
   sender: window.webContents,
   senderFrame: window.webContents.mainFrame,
@@ -163,6 +165,10 @@ beforeEach(async ({ task }) => {
     prepareLibraryArchive: archivePrepare,
   }));
   catalogRemember = vi.fn(async () => {});
+  trashLibrary = vi.fn(async () => {});
+  catalogRemove = vi.fn(async (_active, id, trash) =>
+    trash(id === "original" ? "/old/library" : "/userdata/libraries/imported"),
+  );
   catalogAllocate = vi.fn(async () => ({
     id: "imported",
     name: "archive",
@@ -185,6 +191,7 @@ beforeEach(async ({ task }) => {
       allocate = catalogAllocate;
       remember = catalogRemember;
       rename = vi.fn();
+      remove = catalogRemove;
     },
   }));
   vi.doMock("electron", () => ({
@@ -204,7 +211,7 @@ beforeEach(async ({ task }) => {
       },
     },
     nativeTheme: {},
-    shell: {},
+    shell: { trashItem: trashLibrary },
     BrowserWindow: class extends EventEmitter {
       destroyed = false;
       webContents = Object.assign(new EventEmitter(), {
@@ -632,6 +639,30 @@ const switchTo = async (id: string) => {
   ipc.emit("neoread:flushed", event(), null);
   return result;
 };
+it("switches to a remaining library before deleting the renamed original library", async () => {
+  window.webContents.send.mockClear();
+  const result = handlers.get("neoread:delete-library")!(
+    event(),
+    "original",
+    false,
+  );
+  await vi.waitFor(() =>
+    expect(window.webContents.send).toHaveBeenCalledWith("neoread:flush"),
+  );
+  expect(trashLibrary).not.toHaveBeenCalled();
+  ipc.emit("neoread:flushed", event(), null);
+  expect(await result).toBe(true);
+  expect(saveLocation).toHaveBeenLastCalledWith(
+    "/userdata",
+    "/userdata/libraries/imported",
+  );
+  expect(catalogRemove).toHaveBeenCalledWith(
+    "/userdata/libraries/imported",
+    "original",
+    expect.any(Function),
+  );
+  expect(trashLibrary).toHaveBeenCalledExactlyOnceWith("/old/library");
+});
 it("leaves native undo and redo available while an editable field is focused", () => {
   const key = (shift = false) =>
     window.webContents.emit(
