@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assignText, decodeRegions, isAsset } from "./layout";
+import {
+  assignText,
+  decodeRegions,
+  isAsset,
+  readingRegions,
+} from "./layout";
 import forceFigures from "./fixtures/force-figure-groups.json";
 describe("layout boundary", () => {
   it("rejects invalid boxes, clips coordinates and retains logical reading order", () => {
@@ -67,7 +72,93 @@ describe("layout boundary", () => {
   });
 });
 
-import { readingRegions } from "./layout";
+it("keeps DMN Figure 5's text-filled panels inside the original graphic", () => {
+  const panels = [
+    { x: 0.133937, y: 0.277039, width: 0.725807, height: 0.050037 },
+    { x: 0.136018, y: 0.091118, width: 0.725807, height: 0.119998 },
+    { x: 0.133937, y: 0.218965, width: 0.725807, height: 0.049999 },
+  ];
+  const regions = [
+    {
+      label: "image",
+      confidence: 0.9,
+      order: 1,
+      bounds: { x: 0.137695, y: 0.093048, width: 0.714355, height: 0.112 },
+    },
+    {
+      label: "figure_title",
+      confidence: 0.9,
+      order: 2,
+      bounds: { x: 0.140137, y: 0.225647, width: 0.712891, height: 0.039673 },
+    },
+    {
+      label: "figure_title",
+      confidence: 0.9,
+      order: 3,
+      bounds: { x: 0.140381, y: 0.282455, width: 0.719238, height: 0.039581 },
+    },
+    {
+      label: "figure_title",
+      confidence: 0.9,
+      order: 4,
+      bounds: { x: 0.115234, y: 0.340385, width: 0.769531, height: 0.029678 },
+    },
+    {
+      label: "text",
+      confidence: 0.9,
+      order: 5,
+      bounds: { x: 0.1, y: 0.4, width: 0.8, height: 0.1 },
+    },
+  ];
+  const texts = [
+    "Input image sequence:",
+    "Input text: diagram instructions",
+    "GPT-5 output: diagram example",
+    "Figure 5: An example of input sequence and output.",
+    "Ordinary prose after the figure.",
+  ];
+  const spans = regions.map((r, i) => ({ text: texts[i], bounds: r.bounds }));
+  const output = readingRegions(regions, spans, panels);
+  const image = output.find((r) => r.label === "image")!;
+  expect(image.bounds.y).toBeLessThanOrEqual(panels[1].y);
+  expect(image.bounds.y + image.bounds.height).toBeGreaterThanOrEqual(
+    panels[0].y + panels[0].height,
+  );
+  expect(
+    output.filter((r) => r.label === "figure_title").map((r) => r.text),
+  ).toEqual([texts[3]]);
+  expect(output.some((r) => r.label === "text" && r.text === texts[4])).toBe(
+    true,
+  );
+});
+
+it("does not turn ordinary boxed prose into an image without a detected figure", () => {
+  const regions = [
+    {
+      label: "text",
+      confidence: 0.9,
+      order: 1,
+      bounds: { x: 0.1, y: 0.1, width: 0.8, height: 0.2 },
+    },
+    {
+      label: "figure_title",
+      confidence: 0.9,
+      order: 2,
+      bounds: { x: 0.1, y: 0.32, width: 0.8, height: 0.04 },
+    },
+  ];
+  const output = readingRegions(
+    regions,
+    [
+      { text: "A theorem and its explanation.", bounds: regions[0].bounds },
+      { text: "Figure 1: A following example.", bounds: regions[1].bounds },
+    ],
+    [regions[0].bounds],
+  );
+  expect(output.some((r) => r.label === "image")).toBe(false);
+  expect(output.some((r) => r.text.includes("theorem"))).toBe(true);
+});
+
 // Actual PP-DocLayoutV3 detections and PDF.js labels from FORCE figures 3 and 4.
 it.each(forceFigures)(
   "keeps the complete FORCE figure on page $page",

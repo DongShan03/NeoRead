@@ -6,8 +6,14 @@ import { resolve, join, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
 import { detectRegions } from "./detect";
-import { assignText, readingRegions, isAsset, type Region } from "./layout";
+import {
+  assignText,
+  readingRegions,
+  isAsset,
+  type Region,
+} from "./layout";
 import { extractTextSpans } from "./text";
+import { graphicPanels } from "./graphic-panels";
 import { digest, model, resolveModel } from "./model";
 import { renderPage } from "./render-page";
 
@@ -112,7 +118,11 @@ try {
     const regions = await detectRegions(session, canvas);
     stage("page_text", number);
     const spans = await extractTextSpans(page, scale);
-    const composed = readingRegions(regions, spans);
+    const composed = readingRegions(
+      regions,
+      spans,
+      await graphicPanels(page, scale),
+    );
     const assigned = assignText(composed, spans);
     const pageBlocks: Block[] = composed.map((region, i) => ({
       ...region,

@@ -214,11 +214,12 @@ function union(boxes: Box[]): Box {
 export function readingRegions(
   raw: Region[],
   spans: TextSpan[],
+  panels: Box[] = [],
 ): ReadingRegion[] {
   const regions = raw.filter((r) => r.label !== "inline_formula");
   const assigned = assignText(regions, spans);
   const fitted = pdfAssetBounds(regions, spans);
-  const entries: ReadingRegion[] = regions.map((r, i) => ({
+  let entries: ReadingRegion[] = regions.map((r, i) => ({
     ...r,
     text: assigned.texts[i],
     bounds: fitted[i],
@@ -226,6 +227,73 @@ export function readingRegions(
   const captions = entries.filter(
     (r) => r.label === "figure_title" && mainCaption.test(r.text),
   );
+  // Expand from a caption through connected native filled panels. Require an
+  // independently detected image inside the group, so ordinary boxed prose
+  // cannot become a figure merely because its background is colored.
+  for (const caption of captions.filter((c) => /^fig/i.test(c.text))) {
+    const cb = caption.bounds;
+    const horizontal = (a: Box, b: Box) =>
+      Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+    const members = panels.filter(
+      (b) =>
+        cb.y - b.y - b.height >= -0.01 &&
+        cb.y - b.y - b.height <= 0.045 &&
+        horizontal(b, cb) >= Math.min(b.width, cb.width) * 0.8,
+    );
+    if (!members.length) continue;
+    for (;;) {
+      const before = members.length;
+      for (const b of panels) {
+        if (members.includes(b) || b.y + b.height > cb.y + 0.01) continue;
+        if (
+          members.some(
+            (p) =>
+              horizontal(b, p) >= Math.min(b.width, p.width) * 0.8 &&
+              Math.max(0, p.y - b.y - b.height, b.y - p.y - p.height) <= 0.03 &&
+              !entries.some(
+                (r) =>
+                  !mainCaption.test(r.text) &&
+                  r.label === "text" &&
+                  r.bounds.y > Math.min(b.y + b.height, p.y + p.height) &&
+                  r.bounds.y + r.bounds.height < Math.max(b.y, p.y),
+              ),
+          )
+        )
+          members.push(b);
+      }
+      if (members.length === before) break;
+    }
+    const assets = entries.filter(
+      (r) =>
+        isFigure(r.label) &&
+        members.some(
+          (b) =>
+            intersection(r.bounds, b) / (r.bounds.width * r.bounds.height) >
+            0.5,
+        ),
+    );
+    if (!assets.length) continue;
+    const bounds = union(members);
+    const consumed = entries.filter(
+      (r) =>
+        r !== caption &&
+        !mainCaption.test(r.text) &&
+        members.some(
+          (b) =>
+            intersection(r.bounds, b) / (r.bounds.width * r.bounds.height) >
+            0.85,
+        ),
+    );
+    const image: ReadingRegion = {
+      ...assets[0],
+      label: "image",
+      bounds,
+      text: assignText([{ ...assets[0], bounds }], spans).texts[0],
+      order: Math.min(...consumed.map((r) => r.order)),
+      members: consumed.map((r) => r.order),
+    };
+    entries = [...entries.filter((r) => !consumed.includes(r)), image];
+  }
   const groups = new Map<ReadingRegion, ReadingRegion[]>();
   const remaining = new Set(
     entries.filter((r) => isFigure(r.label) || r.label === "table"),
