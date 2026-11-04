@@ -61,6 +61,39 @@ func (s *Server) translations(documentID string, m translationInput) ([]Translat
 	return s.translationRecords(documentID, m, false)
 }
 
+// Scheduling and counters need status columns, never cached prose alignment.
+func (s *Server) translationStates(documentID string, m translationInput) ([]TranslationBlock, error) {
+	d, err := s.Store.Document(documentID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.Store.DB.Query("SELECT block_id,source_hash,status FROM translations WHERE document_id=?", documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	saved := map[string]string{}
+	for rows.Next() {
+		var block, hash, status string
+		if err := rows.Scan(&block, &hash, &status); err != nil {
+			return nil, err
+		}
+		saved[block+":"+hash] = status
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	items := m.translationItems()
+	for i := range items {
+		if status, ok := saved[items[i].BlockID+":"+items[i].SourceHash]; ok {
+			items[i].Status = status
+		} else if d.Library == "books" || d.Type == "epub" {
+			items[i].Status = "idle"
+		}
+	}
+	return items, nil
+}
+
 func (s *Server) visibleTranslations(documentID string, m translationInput) ([]TranslationBlock, error) {
 	return s.translationRecords(documentID, m, true)
 }

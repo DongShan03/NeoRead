@@ -91,6 +91,24 @@ func TestTranslationBatchBoundariesAndContext(t *testing.T) {
 		t.Fatal("metadata not attached")
 	}
 }
+
+func TestTranslationProgressUsesCurrentSourceStatusWithoutDecodingCachedProse(t *testing.T) {
+	s, p, m := translationFixture(t)
+	block := newTranslation(m.Blocks[0])
+	if _, err := s.Store.DB.Exec("INSERT INTO translations(document_id,block_id,source_hash,status,body) VALUES(?,?,?,?,?)", "doc", block.BlockID, block.SourceHash, "complete", "unreadable old prose"); err != nil {
+		t.Fatal(err)
+	}
+	old := newTranslation(m.Blocks[1])
+	if _, err := s.Store.DB.Exec("INSERT INTO translations(document_id,block_id,source_hash,status,body) VALUES(?,?,?,?,?)", "doc", old.BlockID, "old-version", "complete", "old body"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.refreshTranslationCounts(&p, m); err != nil || p.TranslationsDone != 1 || p.TranslationsTotal != len(m.translationItems()) {
+		t.Fatal("progress decoded prose or counted an obsolete source", p, err)
+	}
+	if _, err := s.visibleTranslations("doc", m); err == nil {
+		t.Fatal("reading no longer validates saved translation bodies")
+	}
+}
 func TestTranslationJSONLPublishesOnlyCompleteValidatedLines(t *testing.T) {
 	p := translationParagraph{"p1-b1", "version", "Sentence."}
 	var saved []TranslationBlock

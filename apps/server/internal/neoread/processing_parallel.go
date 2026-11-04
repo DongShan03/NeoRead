@@ -94,7 +94,7 @@ func (s *Server) processTranslation(ctx context.Context, p *Processing) error {
 	}
 	s.processingMu.Lock()
 	if runErr == nil && ctx.Err() == nil && work.Status != "waiting" {
-		items, readErr := s.translations(work.DocumentID, m)
+		items, readErr := s.translationStates(work.DocumentID, m)
 		if readErr == nil {
 			for _, item := range items {
 				if item.Status == "pending" || item.Status == "running" {

@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 )
 
-const translationBatchCharacters = 10000
+const translationBatchCharacters = 3000
 const translationBatchConcurrency = 3
 const translationBatchTimeout = time.Hour
 
@@ -559,7 +559,7 @@ func (s *Server) settleTranslations(ctx context.Context, p *Processing, m transl
 
 // Text batches never reset or count the concurrently converted formula records.
 func (s *Server) textTranslations(documentID string, m translationInput) ([]TranslationBlock, error) {
-	items, err := s.translations(documentID, m)
+	items, err := s.translationStates(documentID, m)
 	textIDs := map[string]bool{}
 	for _, p := range m.translationParagraphs() {
 		textIDs[p.BlockID] = true
@@ -574,7 +574,7 @@ func (s *Server) textTranslations(documentID string, m translationInput) ([]Tran
 }
 
 func (s *Server) refreshTranslationCounts(p *Processing, m translationInput) error {
-	items, err := s.translations(p.DocumentID, m)
+	items, err := s.translationStates(p.DocumentID, m)
 	if err != nil {
 		return err
 	}
