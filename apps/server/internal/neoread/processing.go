@@ -434,13 +434,8 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 				case <-tick.C:
 				}
 				s.processingMu.Lock()
-				var body string
 				// Documents in the trash keep their queue position until restored.
-				e := s.Store.DB.QueryRow("SELECT p.body FROM document_processing p JOIN documents d ON d.id=p.document_id WHERE p.phase=? AND p.status='queued' AND json_extract(p.body,'$.enabled')=1 AND d.deleted_at='' ORDER BY p.rowid LIMIT 1", phase).Scan(&body)
-				var p Processing
-				if e == nil {
-					e = json.Unmarshal([]byte(body), &p)
-				}
+				p, e := s.Store.nextProcessing(phase)
 				if e == nil && (s.activeProcessing[p.DocumentID] != nil || s.blockedProcessing[p.DocumentID]) {
 					e = errors.New("processing still finishing")
 				}
@@ -491,6 +486,11 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 				} else {
 					e = s.processTranslation(work, &p)
 				}
+				if phase == "translating" && p.Status == "complete" {
+					if _, err := s.Store.DB.Exec("DELETE FROM settings WHERE key=?", "translation-priority:"+p.DocumentID); err != nil {
+						s.diagnosticEvent(slog.LevelError, "translation.priority_clear_failed", "documentId", p.DocumentID, "errorCode", "save")
+					}
+				}
 				if e != nil && phase == "learning" {
 					if ctx.Err() != nil {
 						p.Status = "queued"
@@ -526,6 +526,18 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 	workers.Add(1)
 	go func() { defer workers.Done(); s.paperRefreshWorker(ctx) }()
 	return func() { cancel(); workers.Wait() }
+}
+
+func (s *Store) nextProcessing(phase string) (Processing, error) {
+	var body string
+	err := s.DB.QueryRow(`SELECT p.body FROM document_processing p JOIN documents d ON d.id=p.document_id
+ WHERE p.phase=? AND p.status='queued' AND json_extract(p.body,'$.enabled')=1 AND d.deleted_at=''
+ ORDER BY COALESCE((SELECT CAST(value AS INTEGER) FROM settings WHERE key='translation-priority:'||p.document_id),0) DESC,p.rowid LIMIT 1`, phase).Scan(&body)
+	var p Processing
+	if err == nil {
+		err = json.Unmarshal([]byte(body), &p)
+	}
+	return p, err
 }
 func (s *Server) wakeProcessing() {
 	if _, err := s.Store.DB.Exec("UPDATE document_overview_jobs SET status='queued',error='' WHERE status='waiting'"); err != nil {

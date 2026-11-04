@@ -1,5 +1,6 @@
 import {
   ArrowRightLeft,
+  ArrowUpToLine,
   BookOpen,
   ExternalLink,
   FileDown,
@@ -13,7 +14,14 @@ import {
   Tag,
   Trash2,
 } from "lucide-react";
-import { neoreadLink, type Document, type ReadingStatus } from "@neoread/core";
+import {
+  neoreadLink,
+  type Document,
+  type ReadingStatus,
+  type Processing,
+} from "@neoread/core";
+import { api } from "@neoread/api";
+import { toast } from "sonner";
 import { copyText } from "../chat/clipboard";
 import {
   ContextMenuCheckboxItem,
@@ -98,12 +106,14 @@ export function PaperMenuItems({
   docs,
   actions,
   extra,
+  job,
   inPanel = false,
 }: {
   kind: keyof typeof kits;
   docs: Document[];
   actions: PaperMenuActions;
   extra?: React.ReactNode;
+  job?: Processing;
   /** The detail panel has its own open, star and pin buttons. */
   inPanel?: boolean;
 }) {
@@ -243,6 +253,21 @@ export function PaperMenuItems({
       {one && (
         <>
           <K.Separator />
+          {job?.enabled &&
+            job.phase === "translating" &&
+            (job.status === "queued" || job.status === "running") && (
+              <K.Item
+                onClick={() =>
+                  void api
+                    .setAssistance(one.id, "prioritize")
+                    .then(() => toast.success("已设为优先翻译"))
+                    .catch((error) => toast.error(error.message))
+                }
+              >
+                <ArrowUpToLine />
+                优先翻译
+              </K.Item>
+            )}
           <K.Item onClick={() => void reparseDocument(one)}>
             <RefreshCw />
             重新解析

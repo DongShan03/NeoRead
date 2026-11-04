@@ -3537,6 +3537,7 @@
                                           "pause",
                                           "resume",
                                           "retranslate",
+                                          "prioritize",
                                         ],
                                       "description": "retranslate restarts completed paper text with saved current translation choices, retaining previous translations until replacement succeeds. Books keep chapter translation controls.",
                                     },

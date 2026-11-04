@@ -774,6 +774,7 @@ export function PaperLibrary({
             kind="context"
             docs={menuDocs(doc)}
             actions={actions}
+            job={jobs.get(doc.id)}
           />
         }
         moreMenu={
@@ -781,6 +782,7 @@ export function PaperLibrary({
             kind="dropdown"
             docs={menuDocs(doc)}
             actions={actions}
+            job={jobs.get(doc.id)}
           />
         }
       />

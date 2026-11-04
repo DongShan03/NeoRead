@@ -38,6 +38,47 @@ func assistanceRequest(t *testing.T, s *Server, action string) Processing {
 	}
 	return p
 }
+
+func TestPrioritizeTranslationReordersQueueAndCancelsOnlyOtherTranslation(t *testing.T) {
+	s, p := processingFixture(t)
+	s.Token = "test-secret"
+	p.Enabled, p.Phase, p.Status = true, "translating", "queued"
+	p.Translating = &ProcessingStage{Status: "queued", Detail: "等待翻译"}
+	if err := s.Store.saveProcessing(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec("INSERT INTO documents(id,type,title,author,size,created_at,last_opened_at,library) VALUES('other','pdf','other','',1,?,?,'papers')", now(), now()); err != nil {
+		t.Fatal(err)
+	}
+	other := p
+	other.DocumentID = "other"
+	if err := s.Store.saveProcessing(other); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Store.nextProcessing("translating")
+	if err != nil || first.DocumentID != "doc" {
+		t.Fatal(first, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s.activeProcessing = map[string]*documentTask{"doc": {cancel: cancel}}
+	response := request(t, s, "POST", "/api/documents/other/assistance", strings.NewReader(`{"action":"prioritize"}`))
+	if response.Code != 200 || ctx.Err() == nil {
+		t.Fatal("priority did not interrupt the old translation", response.Code)
+	}
+	first, err = s.Store.nextProcessing("translating")
+	if err != nil || first.DocumentID != "other" {
+		t.Fatal("queue order ignored saved priority", first, err)
+	}
+	other.Enabled = false
+	if err := s.Store.saveProcessing(other); err != nil {
+		t.Fatal(err)
+	}
+	response = request(t, s, "POST", "/api/documents/other/assistance", strings.NewReader(`{"action":"prioritize"}`))
+	if response.Code != 409 {
+		t.Fatal("paused translation was prioritized", response.Code)
+	}
+}
 func TestAssistancePauseSurvivesRestart(t *testing.T) {
 	s, p := processingFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())

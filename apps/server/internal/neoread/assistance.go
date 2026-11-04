@@ -1,7 +1,10 @@
 package neoread
 
 import (
+	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 // Controls serialize with worker claims. Cancellation joins processing only,
@@ -31,6 +34,10 @@ func (s *Server) setAssistance(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Action == "retranslate" {
 		s.requestRetranslation(w, r, req.Restart)
+		return
+	}
+	if req.Action == "prioritize" {
+		s.prioritizeTranslation(w, r)
 		return
 	}
 	if req.Action != "start" && req.Action != "pause" && req.Action != "resume" {
@@ -139,6 +146,39 @@ func (s *Server) setAssistance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ = s.Store.processing(d.ID)
+	respond(w, 200, p)
+}
+
+func (s *Server) prioritizeTranslation(w http.ResponseWriter, r *http.Request) {
+	s.processingControlMu.Lock()
+	defer s.processingControlMu.Unlock()
+	s.processingMu.Lock()
+	defer s.processingMu.Unlock()
+	d, err := s.Store.Document(r.PathValue("id"))
+	if err != nil || d.DeletedAt != "" {
+		fail(w, 404, "文档不存在")
+		return
+	}
+	p, err := s.Store.processing(d.ID)
+	if err != nil || !p.Enabled || p.Phase != "translating" || (p.Status != "queued" && p.Status != "running") {
+		fail(w, 409, "此文档没有正在进行的翻译任务")
+		return
+	}
+	if _, err := s.Store.DB.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "translation-priority:"+d.ID, strconv.FormatInt(time.Now().UnixNano(), 10)); err != nil {
+		fail(w, 500, "无法保存翻译优先级")
+		return
+	}
+	// Reuse normal cancellation: completed paragraphs survive, and unfinished
+	// requests requeue with their previous translations intact.
+	for id, task := range s.activeProcessing {
+		if id == d.ID {
+			continue
+		}
+		if current, err := s.Store.processing(id); err == nil && current.Phase == "translating" {
+			task.cancel()
+		}
+	}
+	s.diagnosticEvent(slog.LevelInfo, "translation.prioritized", "documentId", d.ID)
 	respond(w, 200, p)
 }
 func (s *Server) finishProcessingTask(id string, t *documentTask) {

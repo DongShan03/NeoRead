@@ -3193,7 +3193,7 @@ export interface paths {
                          * @description retranslate restarts completed paper text with saved current translation choices, retaining previous translations until replacement succeeds. Books keep chapter translation controls.
                          * @enum {string}
                          */
-                        action: "start" | "pause" | "resume" | "retranslate";
+                        action: "start" | "pause" | "resume" | "retranslate" | "prioritize";
                         /**
                          * @description Explicit full reparse and translation restart, also for paused papers or papers without prior completed translations
                          * @default false
