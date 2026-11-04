@@ -1,6 +1,19 @@
 import { expect, it } from "vitest";
 import { joinInlineText } from "./inline-math";
 import type { TextSpan } from "./layout";
+import omni from "./fixtures/omni-safety-inline-math.json";
+
+it("keeps Omni-Safety's mean bars and layer superscripts on h rather than v", () => {
+  const text = joinInlineText(omni.spans);
+  expect(text).toContain(
+    String.raw`\mathbf{v}_{\mathrm{refu}}=\mathbf{v}_{\mathrm{text}}`,
+  );
+  expect(text).toContain(
+    String.raw`\bar{\mathbf{h}}_{\mathrm{harm}}^{(l)}−\bar{\mathbf{h}}_{\mathrm{safe}}^{(l)}`,
+  );
+  expect(text).not.toContain(String.raw`¯^{(l)}`);
+  expect(text).not.toContain(String.raw`\mathbf{v}^{(l)}`);
+});
 
 function span(
   text: string,

@@ -27,7 +27,15 @@ function mathText(spans: TextSpan[]) {
   };
   const nodes: Node[] = spans
     .filter((s) => !accents[s.text])
-    .map((span) => ({ span, text: tex(span.text), sub: [], sup: [] }));
+    .map((span) => ({
+      span,
+      text:
+        !span.math && /^[a-zA-Z]+$/.test(span.text)
+          ? `\\mathrm{${span.text}}`
+          : tex(span.text),
+      sub: [],
+      sup: [],
+    }));
   for (const accent of spans.filter((s) => accents[s.text])) {
     const center = accent.bounds.x + accent.bounds.width / 2;
     const owner = nodes
@@ -35,7 +43,7 @@ function mathText(spans: TextSpan[]) {
         ({ span }) =>
           center >= span.bounds.x &&
           center <= span.bounds.x + span.bounds.width &&
-          Math.abs(span.baseline! - accent.baseline!) < accent.fontSize! * 0.25,
+          Math.abs(span.baseline! - accent.baseline!) < accent.fontSize! * 0.75,
       )
       .sort(
         (a, b) =>
@@ -100,7 +108,7 @@ export function joinInlineText(spans: TextSpan[]) {
   )!.fontSize!;
   const lines: { baseline: number; spans: TextSpan[] }[] = [];
   const anchors = spans
-    .filter((s) => s.fontSize! >= size * 0.88)
+    .filter((s) => s.fontSize! >= size * 0.88 && !accents[s.text])
     .sort((a, b) => a.baseline! - b.baseline!);
   for (const span of anchors) {
     const line = lines.find(
@@ -109,7 +117,9 @@ export function joinInlineText(spans: TextSpan[]) {
     if (line) line.spans.push(span);
     else lines.push({ baseline: span.baseline!, spans: [span] });
   }
-  for (const span of spans.filter((s) => s.fontSize! < size * 0.88)) {
+  for (const span of spans.filter(
+    (s) => s.fontSize! < size * 0.88 || accents[s.text],
+  )) {
     const line = [...lines].sort(
       (a, b) =>
         Math.abs(a.baseline - span.baseline!) -
@@ -128,7 +138,19 @@ export function joinInlineText(spans: TextSpan[]) {
         if (math.length) parts.push(mathText(math.splice(0)));
       };
       for (const span of line.spans.sort((a, b) => a.bounds.x - b.bounds.x)) {
-        if (span.math) math.push(span);
+        const script = line.spans.some((parent) => {
+          const gap = span.bounds.x - parent.bounds.x - parent.bounds.width;
+          return (
+            parent.math &&
+            !accents[parent.text] &&
+            span.fontSize! < parent.fontSize! * 0.85 &&
+            Math.abs(span.baseline! - parent.baseline!) >
+              parent.fontSize! * 0.07 &&
+            gap >= -parent.fontSize! * 0.35 &&
+            gap <= parent.fontSize! * 2.5
+          );
+        });
+        if (span.math || script) math.push(span);
         else {
           flush();
           parts.push(span.text);
