@@ -5,26 +5,38 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { api } from "@neoread/api";
 import { toast } from "sonner";
 import { flushProgress } from "./progress";
-import { flushPaperNotes } from "./paper-note-state";
+import { flushPaperNotes, importWithPaperNotes } from "./paper-note-state";
 import { flushLibraryPreferences } from "./store";
 import { WebDAVSyncButton } from "./WebDAVSyncButton";
 import {
   emptyWebDAVStatus,
+  installWebDAVSync,
   setWebDAVStatus,
   useWebDAVSync,
 } from "./webdav-sync";
 
-vi.mock("@neoread/api", () => ({ api: { runWebdav: vi.fn() } }));
+vi.mock("@neoread/api", () => ({
+  api: {
+    runWebdav: vi.fn(),
+    webdavConfig: vi.fn(),
+    webdavStatus: vi.fn(),
+    applyWebdav: vi.fn(),
+  },
+}));
 vi.mock("./progress", () => ({
   flushProgress: vi.fn(async () => {}),
   hasPendingProgress: () => false,
 }));
 vi.mock("./paper-note-state", () => ({
   flushPaperNotes: vi.fn(async () => {}),
+  importWithPaperNotes: vi.fn(async (run: () => Promise<unknown>) => run()),
   hasPendingPaperNotes: () => false,
 }));
 vi.mock("./store", () => ({
   flushLibraryPreferences: vi.fn(async () => {}),
+  loadLibraryPreferences: vi.fn(),
+  refreshLibrary: vi.fn(),
+  refreshTrash: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 const config = {
@@ -179,3 +191,41 @@ it("reports automatic failures once per run using the red notification", async (
   );
   expect(marker()).toBe("failed");
 });
+
+it.each(["preferences", "progress", "notes"])(
+  "ends automatic sync when the %s save fails",
+  async (kind) => {
+    vi.mocked(api.webdavConfig).mockResolvedValue(config);
+    vi.mocked(api.webdavStatus).mockResolvedValue({
+      ...emptyWebDAVStatus,
+      phase: "ready",
+      applyToken: "pending-apply",
+    });
+    vi.mocked(api.applyWebdav).mockResolvedValue({
+      ...emptyWebDAVStatus,
+      phase: "failed",
+      failed: true,
+    });
+    if (kind === "preferences")
+      vi.mocked(flushLibraryPreferences).mockRejectedValueOnce(
+        new Error("save failed"),
+      );
+    else if (kind === "progress")
+      vi.mocked(flushProgress).mockRejectedValueOnce(new Error("save failed"));
+    else
+      vi.mocked(importWithPaperNotes).mockRejectedValueOnce(
+        new Error("save failed"),
+      );
+    const stop = installWebDAVSync();
+    try {
+      await vi.waitFor(() =>
+        expect(api.applyWebdav).toHaveBeenCalledExactlyOnceWith(
+          "pending-apply",
+          false,
+        ),
+      );
+    } finally {
+      stop();
+    }
+  },
+);
