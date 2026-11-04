@@ -174,7 +174,7 @@ it("keeps a non-modal annotation draft open while reading elsewhere and saves ag
   const selected = {
     text: "Original sentence.",
     location: { type: "pdf" as const, page: 1, y: 0.2 },
-    anchor: { x: 30, top: 20, bottom: 40 },
+    anchor: { x: 30, top: 20, bottom: 40, bounds: { right: 300, bottom: 180 } },
   };
   await act(async () => panels.readerEvents!.selection(selected));
   await act(async () =>
@@ -185,9 +185,12 @@ it("keeps a non-modal annotation draft open while reading elsewhere and saves ag
       .click(),
   );
   const dialog = document.querySelector('[role="dialog"]')!;
+  expect((dialog as HTMLElement).style.left).toBe("308px");
+  expect((dialog as HTMLElement).style.top).toBe("188px");
   expect(dialog.getAttribute("aria-modal")).not.toBe("true");
   expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
   const field = dialog.querySelector<HTMLTextAreaElement>("textarea")!;
+  expect(document.activeElement).toBe(field);
   await act(async () => {
     Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
@@ -195,6 +198,46 @@ it("keeps a non-modal annotation draft open while reading elsewhere and saves ag
     )!.set!.call(field, "Keep this draft");
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  const handle = dialog.querySelector<HTMLButtonElement>(
+    '[aria-label="移动批注窗口"]',
+  )!;
+  handle.setPointerCapture = vi.fn();
+  await act(async () =>
+    handle.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: 20,
+        clientY: 20,
+      }),
+    ),
+  );
+  const readerRenders = panels.readerRenders;
+  await act(async () =>
+    handle.dispatchEvent(
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 80,
+        clientY: 60,
+      }),
+    ),
+  );
+  expect((dialog as HTMLElement).style.left).toBe("368px");
+  expect((dialog as HTMLElement).style.top).toBe("228px");
+  expect(panels.readerRenders).toBe(readerRenders);
+  await act(async () => {
+    handle.dispatchEvent(
+      new MouseEvent("pointerup", { bubbles: true, clientX: 80, clientY: 60 }),
+    );
+    handle.dispatchEvent(
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 300,
+        clientY: 300,
+      }),
+    );
+  });
+  expect((dialog as HTMLElement).style.left).toBe("368px");
   const outside = document.createElement("button");
   const clicked = vi.fn();
   outside.addEventListener("click", clicked);

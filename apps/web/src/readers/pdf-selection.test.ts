@@ -126,6 +126,7 @@ it("records the release point near the selected line rather than the reader bott
     x: 240,
     top: 100,
     bottom: 120,
+    bounds: { right: 240, bottom: 120 },
   });
 });
 it("preserves the selection for toolbar actions but clears it when clicking another panel", () => {

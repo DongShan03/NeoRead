@@ -186,6 +186,7 @@ it("converts the EPUB mouse release point into renderer coordinates", () => {
     x: 510,
     top: 160,
     bottom: 180,
+    bounds: { right: 520, bottom: 180 },
   });
 });
 
@@ -387,7 +388,12 @@ it("publishes a selected passage and toolbar anchor when iframe.src is empty", (
   expect(changed).toHaveBeenLastCalledWith(
     expect.objectContaining({
       text: "Selected passage",
-      anchor: { x: 510, top: 160, bottom: 180 },
+      anchor: {
+        x: 510,
+        top: 160,
+        bottom: 180,
+        bounds: { right: 520, bottom: 180 },
+      },
     }),
   );
   const location = adapter.getSelection()!.location;

@@ -110,6 +110,10 @@ export function hoveredSentenceSelection(
         2,
       top: Math.min(...rects.map((r) => r.top)),
       bottom: Math.max(...rects.map((r) => r.bottom)),
+      bounds: {
+        right: Math.max(...rects.map((r) => r.right)),
+        bottom: Math.max(...rects.map((r) => r.bottom)),
+      },
     },
   };
 }

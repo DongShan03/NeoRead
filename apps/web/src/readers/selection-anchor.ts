@@ -40,6 +40,16 @@ export function selectionAnchor(
     top: (frameRect?.top ?? 0) + ((frame?.clientTop ?? 0) + rect.top) * scaleY,
     bottom:
       (frameRect?.top ?? 0) + ((frame?.clientTop ?? 0) + rect.bottom) * scaleY,
+    bounds: {
+      right:
+        (frameRect?.left ?? 0) +
+        ((frame?.clientLeft ?? 0) + Math.max(...rects.map((r) => r.right))) *
+          scaleX,
+      bottom:
+        (frameRect?.top ?? 0) +
+        ((frame?.clientTop ?? 0) + Math.max(...rects.map((r) => r.bottom))) *
+          scaleY,
+    },
   };
 }
 export function isSelectionToolbar(target: EventTarget | null) {

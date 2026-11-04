@@ -22,6 +22,7 @@ import {
 } from "./selection-translation-anchor";
 import { LinkPreviewPanel } from "./LinkPreviewPanel";
 import { AnnotationHoverCard } from "./AnnotationHoverCard";
+import { AnnotationNoteWindow } from "./AnnotationNoteWindow";
 import { AnnotationQuote } from "./AnnotationQuote";
 import {
   useCallback,
@@ -98,13 +99,6 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@neoread/ui/components/popover";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@neoread/ui/components/dialog";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -852,7 +846,11 @@ export function Workspace({
     setHoveredAnnotation(null);
     setNoteKind(annotation.kind === "question" ? "question" : "note");
     setEditingAnnotation(annotation);
-    setNoteSelection({ text: annotation.quote, location: annotation.location });
+    setNoteSelection({
+      text: annotation.quote,
+      location: annotation.location,
+      anchor: hoveredAnnotation?.anchor ?? annotationTarget?.anchor,
+    });
     setNote(annotation.note);
     setNoteOpen(true);
     adapter?.clearSelection();
@@ -2155,10 +2153,21 @@ export function Workspace({
           onClose={() => setPreviewImage(undefined)}
         />
       )}
-      <Dialog
+      <AnnotationNoteWindow
         open={active && noteOpen}
-        modal={false}
-        disablePointerDismissal
+        anchor={noteSelection?.anchor}
+        title={
+          noteKind === "question"
+            ? editingAnnotation
+              ? "编辑问题"
+              : "提问"
+            : editingAnnotation?.note.trim()
+              ? "编辑批注"
+              : "添加批注"
+        }
+        description={
+          noteKind === "question" ? "就当前选区提问" : "为当前选区添加批注"
+        }
         onOpenChange={(open) => {
           if (noteSaving) return;
           setNoteOpen(open);
@@ -2168,82 +2177,58 @@ export function Workspace({
           }
         }}
       >
-        <DialogContent
-          showOverlay={false}
-          finalFocus={false}
-          className="w-80 gap-3"
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {noteKind === "question"
-                ? editingAnnotation
-                  ? "编辑问题"
-                  : "提问"
-                : editingAnnotation?.note.trim()
-                  ? "编辑批注"
-                  : "添加批注"}
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              {noteKind === "question"
-                ? "就当前选区提问"
-                : "为当前选区添加批注"}
-            </DialogDescription>
-          </DialogHeader>
-          <blockquote className="note-preview max-h-24 overflow-y-auto">
-            {noteSelection && (
-              <AnnotationQuote
-                quote={noteSelection.text}
-                location={noteSelection.location}
-              />
-            )}
-          </blockquote>
-          <Textarea
-            autoFocus
-            placeholder={
-              noteKind === "question" ? "想弄清楚什么？" : "批注内容…"
-            }
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          {noteKind === "question" ? (
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => void annotate("question", note)}
-                disabled={noteSaving || !note.trim()}
-              >
-                <Check />
-                保存问题
-              </Button>
-              {!editingAnnotation && (
-                <Button
-                  className="flex-1"
-                  disabled={noteSaving || !note.trim() || !provider}
-                  onClick={() =>
-                    void annotate("question", note).then((saved) => {
-                      if (saved) void answerQuestion(saved);
-                    })
-                  }
-                >
-                  <Sparkles />
-                  保存并让 AI 回答
-                </Button>
-              )}
-            </div>
-          ) : (
+        <blockquote className="note-preview max-h-24 overflow-y-auto">
+          {noteSelection && (
+            <AnnotationQuote
+              quote={noteSelection.text}
+              location={noteSelection.location}
+            />
+          )}
+        </blockquote>
+        <Textarea
+          autoFocus
+          placeholder={noteKind === "question" ? "想弄清楚什么？" : "批注内容…"}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        {noteKind === "question" ? (
+          <div className="flex gap-2">
             <Button
-              onClick={() => void annotate("note", note)}
-              disabled={
-                noteSaving || (!note.trim() && !editingAnnotation?.note.trim())
-              }
+              variant="outline"
+              className="flex-1"
+              onClick={() => void annotate("question", note)}
+              disabled={noteSaving || !note.trim()}
             >
               <Check />
-              保存批注
+              保存问题
             </Button>
-          )}
-        </DialogContent>
-      </Dialog>
+            {!editingAnnotation && (
+              <Button
+                className="flex-1"
+                disabled={noteSaving || !note.trim() || !provider}
+                onClick={() =>
+                  void annotate("question", note).then((saved) => {
+                    if (saved) void answerQuestion(saved);
+                  })
+                }
+              >
+                <Sparkles />
+                保存并让 AI 回答
+              </Button>
+            )}
+          </div>
+        ) : (
+          <Button
+            onClick={() => void annotate("note", note)}
+            disabled={
+              noteSaving || (!note.trim() && !editingAnnotation?.note.trim())
+            }
+          >
+            <Check />
+            保存批注
+          </Button>
+        )}
+      </AnnotationNoteWindow>
       {active && exportingNotes && (
         <ExportDocumentDialog
           key={`export-${doc.id}`}

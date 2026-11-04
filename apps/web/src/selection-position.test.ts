@@ -45,11 +45,13 @@ it("uses the focus end for reversed selections and translates EPUB iframe coordi
     x: 340,
     top: 90,
     bottom: 110,
+    bounds: { right: 500, bottom: 130 },
   });
   expect(selectionAnchor(selected, { x: 180, y: 62 }, frame)).toEqual({
     x: 480,
     top: 110,
     bottom: 130,
+    bounds: { right: 500, bottom: 130 },
   });
   frame.remove();
 });

@@ -116,6 +116,7 @@ export function translatedSelection(
       x: (rect.left + rect.right) / 2,
       top: rect.top,
       bottom: rect.bottom,
+      bounds: { right: rect.right, bottom: rect.bottom },
     },
     location: {
       ...("location" in block

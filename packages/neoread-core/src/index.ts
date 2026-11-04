@@ -347,6 +347,8 @@ export interface SelectionAnchor {
   x: number;
   top: number;
   bottom: number;
+  /** Bottom-right corner of the entire selection, independent of drag direction. */
+  bounds?: { right: number; bottom: number };
 }
 export interface ReaderSelection {
   /** Nearby source text, captured before the DOM selection is cleared. */
