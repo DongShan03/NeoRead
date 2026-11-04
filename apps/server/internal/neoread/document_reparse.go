@@ -13,27 +13,29 @@ import (
 
 // Reparse is exclusive with document workers. Keep the original and all user
 // records in place until a fully validated replacement can be published.
-func (s *Server) beginDocumentReparse(d Document) (func(), error) {
+func (s *Server) beginDocumentReparse(parent context.Context, d Document) (context.Context, func(), error) {
 	s.documentMu.Lock()
 	if s.documentClosed || s.deletingDocuments[d.ID] || s.reparsingDocuments[d.ID] || d.DeletedAt != "" {
 		s.documentMu.Unlock()
-		return nil, errors.New("文档当前不可重新解析")
+		return nil, nil, errors.New("文档当前不可重新解析")
 	}
 	if len(s.documentTasks[d.ID]) > 0 {
 		s.documentMu.Unlock()
-		return nil, errors.New("文档正在处理，请稍后重试")
+		return nil, nil, errors.New("文档正在处理，请稍后重试")
 	}
 	if s.reparsingDocuments == nil {
 		s.reparsingDocuments = make(map[string]bool)
 	}
 	s.reparsingDocuments[d.ID] = true
+	ctx, finish := s.registerDocumentTask(parent, d.ID)
 	s.documentMu.Unlock()
 	end := func() {
 		s.documentMu.Lock()
 		delete(s.reparsingDocuments, d.ID)
 		s.documentMu.Unlock()
+		finish()
 	}
-	return end, nil
+	return ctx, end, nil
 }
 
 func (s *Server) reparseDocument(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +44,7 @@ func (s *Server) reparseDocument(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "文档不存在")
 		return
 	}
-	finish, err := s.beginDocumentReparse(d)
+	ctx, finish, err := s.beginDocumentReparse(r.Context(), d)
 	if err != nil {
 		fail(w, 409, err.Error())
 		return
@@ -50,12 +52,16 @@ func (s *Server) reparseDocument(w http.ResponseWriter, r *http.Request) {
 	defer finish()
 	s.diagnosticEvent(slog.LevelInfo, "document.reparse.start", "documentId", d.ID, "type", d.Type)
 	if d.Type == "epub" {
-		err = s.reparseEPUB(r.Context(), d)
+		err = s.reparseEPUB(ctx, d)
 	} else {
-		err = s.reparsePDF(r.Context(), d)
+		err = s.reparsePDF(ctx, d)
 	}
 	if err != nil {
-		s.diagnosticEvent(slog.LevelError, "document.reparse.finish", "documentId", d.ID, "type", d.Type, "outcome", "failed", "errorCode", errorKind(err))
+		level, outcome := slog.LevelError, "failed"
+		if ctx.Err() != nil {
+			level, outcome = slog.LevelInfo, "cancelled"
+		}
+		s.diagnosticEvent(level, "document.reparse.finish", "documentId", d.ID, "type", d.Type, "outcome", outcome, "errorCode", errorKind(err))
 		fail(w, 500, "重新解析失败："+err.Error())
 		return
 	}

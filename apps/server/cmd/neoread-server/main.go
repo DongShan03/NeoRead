@@ -252,7 +252,9 @@ func main() {
 			stop <- os.Interrupt
 		}()
 	}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-stop
 		slog.Info("server.stopping")
 		cancelRun()
@@ -263,4 +265,5 @@ func main() {
 	if err = httpServer.Serve(listener); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+	<-shutdownDone
 }

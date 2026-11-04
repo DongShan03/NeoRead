@@ -49,6 +49,12 @@ func (s *Server) beginDocumentTask(parent context.Context, id string) (context.C
 	if d.DeletedAt != "" {
 		return nil, nil, errors.New("document is in the trash")
 	}
+	ctx, finish := s.registerDocumentTask(parent, id)
+	return ctx, finish, nil
+}
+
+// The caller holds documentMu after checking whether this work may start.
+func (s *Server) registerDocumentTask(parent context.Context, id string) (context.Context, func()) {
 	if s.documentTasks == nil {
 		s.documentTasks = make(map[string]map[*documentTask]struct{})
 	}
@@ -67,7 +73,7 @@ func (s *Server) beginDocumentTask(parent context.Context, id string) (context.C
 			delete(s.documentTasks, id)
 		}
 		close(task.done)
-	}, nil
+	}
 }
 
 func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {

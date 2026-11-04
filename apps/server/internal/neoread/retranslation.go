@@ -146,7 +146,7 @@ func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request, re
 		<-task.done
 	}
 	if fresh {
-		finish, e := s.beginDocumentReparse(d)
+		_, finish, e := s.beginDocumentReparse(r.Context(), d)
 		if e != nil {
 			s.processingMu.Lock()
 			delete(s.blockedProcessing, d.ID)

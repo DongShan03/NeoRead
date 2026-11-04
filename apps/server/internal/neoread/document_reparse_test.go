@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func epubWithTOCAnchor(t *testing.T) []byte {
@@ -394,5 +395,53 @@ func TestReparseDoesNotEnablePausedManualOrBookTranslation(t *testing.T) {
 				t.Fatalf("reparse changed translation consent: %+v %v", current, err)
 			}
 		})
+	}
+}
+
+func TestServerCloseCancelsAndJoinsExclusiveReparse(t *testing.T) {
+	s, _ := processingFixture(t)
+	d, err := s.Store.Document("doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, finish, err := s.beginDocumentReparse(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := false
+	defer func() {
+		if !finished {
+			finish()
+		}
+	}()
+	closed := make(chan struct{})
+	go func() { s.Close(); close(closed) }()
+	select {
+	case <-work.Done():
+	case <-time.After(time.Second):
+		t.Fatal("reparse was not cancelled")
+	}
+	select {
+	case <-closed:
+		t.Fatal("server closed before reparse cleanup finished")
+	default:
+	}
+	if _, end, err := s.beginDocumentTask(context.Background(), d.ID); err == nil {
+		end()
+		t.Fatal("work started during server close")
+	}
+	if _, end, err := s.beginDocumentReparse(context.Background(), d); err == nil {
+		end()
+		t.Fatal("reparse started during server close")
+	}
+	finish()
+	finished = true
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("server did not finish closing after reparse cleanup")
+	}
+	if len(s.reparsingDocuments) != 0 || len(s.documentTasks) != 0 {
+		t.Fatal("reparse lifecycle was retained")
 	}
 }
