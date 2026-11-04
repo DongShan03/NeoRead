@@ -223,7 +223,8 @@ func translationSentenceParts(text string) []string {
 	if pending != "" {
 		parts = append(parts, pending)
 	}
-	return parts
+	parts = reattachSentenceQuotes(parts)
+	return slices.DeleteFunc(parts, func(part string) bool { return strings.TrimSpace(part) == "" })
 }
 
 // Split a paragraph-sized legacy pair only when source and target have the
@@ -244,5 +245,5 @@ func translationSentencePairs(input []TranslationSentence) ([]TranslationSentenc
 			output = append(output, TranslationSentence{Source: strings.TrimSpace(source[i]), Target: target[i]})
 		}
 	}
-	return output, nil
+	return reattachTranslationQuotes(output), nil
 }

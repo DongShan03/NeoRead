@@ -5,6 +5,7 @@ import {
   sentenceBounds,
   sentenceRoot,
 } from "./sentence-selection";
+import { sentenceSegments } from "./sentence-segmentation";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -39,6 +40,34 @@ it("finds sentence bounds in English and Chinese", () => {
   expect(at(en, "Done")).toBe("Done");
   const zh = "第一句话。第二句很长，对吧？第三句";
   expect(at(zh, "很长")).toBe("第二句很长，对吧？");
+});
+
+it.each([
+  "The query includes “ money laundering service. ” Using an LLM, we continue.",
+  'The query includes "money laundering service. " Using an LLM, we continue.',
+  "The query includes ‘money laundering service.\n’ Using an LLM, we continue.",
+  'The query includes “money laundering service. " Using an LLM, we continue.',
+  'The query includes "money laundering service. ” Using an LLM, we continue.',
+])("keeps spaced closing quotes with the selected sentence: %s", (text) => {
+  const parts = sentenceSegments(text);
+  expect(parts).toHaveLength(2);
+  expect(parts[1].segment.trimStart()).toBe("Using an LLM, we continue.");
+  expect(parts.map((part) => part.segment).join("")).toBe(text);
+  const bounds = sentenceBounds(text, text.indexOf("money"))!;
+  expect(text.slice(bounds.start, bounds.end)).toMatch(/[”"’]$/);
+  expect(sentenceBounds(text, bounds.end - 1)).toEqual(bounds);
+});
+
+it("preserves opening quotes and apostrophes instead of moving them to the previous sentence", () => {
+  const text = "Readers' examples end here. \"Don't move this opening quote.\"";
+  const parts = sentenceSegments(text);
+  expect(parts).toHaveLength(2);
+  expect(parts[1].segment).toBe('"Don\'t move this opening quote."');
+  expect(parts.map((part) => part.segment).join("")).toBe(text);
+  const ending = "A “quoted sentence. ”";
+  expect(sentenceSegments(ending).map((part) => part.segment)).toEqual([
+    ending,
+  ]);
 });
 
 it("grows a word to its sentence across PDF text layer lines", () => {

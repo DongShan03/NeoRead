@@ -213,19 +213,56 @@ it("keeps a non-modal annotation draft open while reading elsewhere and saves ag
     ),
   );
   const readerRenders = panels.readerRenders;
-  await act(async () =>
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  const schedule = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      frames.set(++frameId, callback);
+      return frameId;
+    });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+    frames.delete(id);
+  });
+  const measure = vi.spyOn(dialog, "getBoundingClientRect");
+  await act(async () => {
+    for (let i = 0; i < 100; i++)
+      handle.dispatchEvent(
+        new MouseEvent("pointermove", {
+          bubbles: true,
+          clientX: 20 + i,
+          clientY: 20 + i / 2,
+        }),
+      );
     handle.dispatchEvent(
       new MouseEvent("pointermove", {
         bubbles: true,
         clientX: 80,
         clientY: 60,
       }),
-    ),
+    );
+  });
+  expect(schedule).toHaveBeenCalledOnce();
+  expect((dialog as HTMLElement).style.left).toBe("308px");
+  expect((dialog as HTMLElement).style.top).toBe("188px");
+  expect(measure).not.toHaveBeenCalled();
+  await act(async () => {
+    const callback = [...frames.values()][0];
+    frames.clear();
+    callback(performance.now());
+  });
+  expect((dialog as HTMLElement).style.transform).toBe(
+    "translate3d(60px, 40px, 0)",
   );
-  expect((dialog as HTMLElement).style.left).toBe("368px");
-  expect((dialog as HTMLElement).style.top).toBe("228px");
   expect(panels.readerRenders).toBe(readerRenders);
   await act(async () => {
+    handle.dispatchEvent(
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 80,
+        clientY: 60,
+      }),
+    );
     handle.dispatchEvent(
       new MouseEvent("pointerup", { bubbles: true, clientX: 80, clientY: 60 }),
     );
@@ -238,6 +275,10 @@ it("keeps a non-modal annotation draft open while reading elsewhere and saves ag
     );
   });
   expect((dialog as HTMLElement).style.left).toBe("368px");
+  expect((dialog as HTMLElement).style.top).toBe("228px");
+  expect((dialog as HTMLElement).style.transform).toBe("");
+  expect(frames.size).toBe(0);
+  schedule.mockRestore();
   const outside = document.createElement("button");
   const clicked = vi.fn();
   outside.addEventListener("click", clicked);

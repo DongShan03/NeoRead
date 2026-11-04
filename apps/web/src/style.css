@@ -1687,6 +1687,13 @@ kbd {
 [data-slot="dialog-content"].annotation-note-window {
   -webkit-app-region: no-drag;
   app-region: no-drag;
+  transition: none;
+}
+.annotation-note-window[data-dragging] {
+  will-change: transform;
+}
+.annotation-note-window[data-moved] {
+  animation: none;
 }
 .page-navigation {
   display: flex;
