@@ -610,6 +610,10 @@ func (s *Server) beginWebDAVSync(ctx context.Context, manual ...bool) error {
 		s.webdav.operation.Unlock()
 		return errors.New("请先保存坚果云账号和应用密码")
 	}
+	if !config.Enabled {
+		s.webdav.operation.Unlock()
+		return errors.New("请先开启此书库同步")
+	}
 	s.webdav.mu.Lock()
 	if s.webdav.closed {
 		s.webdav.mu.Unlock()
