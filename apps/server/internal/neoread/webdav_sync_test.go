@@ -467,6 +467,9 @@ func TestWebDAVMergesIndependentEditsAndPreservesNoteConflicts(t *testing.T) {
 	if _, err := b.Store.DB.Exec("UPDATE document_notes SET body='版本 B' WHERE document_id='paper'"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := b.Store.DB.Exec(`UPDATE annotations SET body=json_set(body,'$.note','independent annotation') WHERE id='annotation-paper'`); err != nil {
+		t.Fatal(err)
+	}
 	runSync(t, a)
 	runSync(t, b)
 	status := b.syncStatus()
@@ -502,6 +505,11 @@ func TestWebDAVMergesIndependentEditsAndPreservesNoteConflicts(t *testing.T) {
 	}
 	if err = b.Store.DB.QueryRow("SELECT body FROM document_notes WHERE document_id='paper'").Scan(&note); err != nil || note != "版本 A" {
 		t.Fatal(note, err)
+	}
+	for _, server := range []*Server{a, b} {
+		if err = server.Store.DB.QueryRow(`SELECT json_extract(body,'$.note') FROM annotations WHERE id='annotation-paper'`).Scan(&note); err != nil || note != "independent annotation" {
+			t.Fatal("selecting a note version lost an independent annotation", note, err)
+		}
 	}
 }
 
