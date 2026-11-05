@@ -245,7 +245,7 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 			}
 		}
 		deviceID := strings.TrimSuffix(device.Name, ".json")
-		catalog, err := s.readSyncDevice(ctx, dav, config, deviceID, body, previous)
+		catalog, err := decodeSyncDeviceHeader(body, deviceID)
 		if err != nil {
 			return err
 		}
@@ -398,11 +398,6 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 					}
 				}
 			}
-			if catalog.Index.Legacy != "" {
-				if e = s.publishSyncVersion(ctx, dav, config, catalog, key, version); e != nil {
-					return e
-				}
-			}
 		}
 		if len(versions) == 0 {
 			continue
@@ -525,11 +520,6 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 		state.Files = snapshot.Files
 		if e = s.saveSyncDocumentState(config, state, key); e != nil {
 			return e
-		}
-	}
-	for _, catalog := range catalogs {
-		if err = s.finishSyncStorageMigration(ctx, dav, config, catalog); err != nil {
-			return err
 		}
 	}
 	s.webdav.mu.Lock()

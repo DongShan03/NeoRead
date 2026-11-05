@@ -84,7 +84,15 @@ func syncSchema(ctx context.Context, q syncQuery) (map[string]syncTable, error) 
 }
 
 func syncRows(ctx context.Context, q syncQuery, name string, table syncTable, owners ...string) ([]syncRow, error) {
-	query := "SELECT " + strings.Join(table.columns, ",") + " FROM " + name
+	columns := slices.Clone(table.columns)
+	if name == "chat_runs" || name == "library_chat_runs" {
+		for i, column := range columns {
+			if column == "body" {
+				columns[i] = "json_remove(body,'$.events')"
+			}
+		}
+	}
+	query := "SELECT " + strings.Join(columns, ",") + " FROM " + name
 	var args []any
 	if name == "settings" {
 		query += " WHERE key='preferences:library'"

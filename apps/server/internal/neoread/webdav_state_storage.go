@@ -43,7 +43,7 @@ func syncStoredRecordPath(root, key, hash string) (string, error) {
 		}
 		directory = filepath.Join("documents", strings.TrimPrefix(key, "document/"))
 	}
-	return filepath.Join(filepath.Dir(root), directory, "state", hash+".json"), nil
+	return filepath.Join(filepath.Dir(root), directory, "state", hash+".json.gz"), nil
 }
 
 func readSyncStoredState(root *os.Root, name string) (*syncLocalState, error) {
@@ -74,22 +74,29 @@ func readSyncStoredState(root *os.Root, name string) (*syncLocalState, error) {
 		return &state, nil
 	}
 	var stored syncStoredRoot
-	if decodeSyncJSON(body, &stored) != nil || stored.Format != "neoread-sync-state" || stored.Version != 2 || !syncID(stored.Device) || stored.Clock == nil || stored.Documents == nil || stored.Remotes == nil {
+	if decodeSyncJSON(body, &stored) != nil || stored.Format != "neoread-sync-state" || (stored.Version != 2 && stored.Version != syncStorageVersion) || !syncID(stored.Device) || stored.Clock == nil || stored.Documents == nil || stored.Remotes == nil {
 		return nil, errors.New("本地同步状态版本无效，已保留书库数据")
 	}
 	state := newSyncState()
 	state.Device, state.Clock, state.Remotes, state.LastSync = stored.Device, stored.Clock, stored.Remotes, stored.LastSync
 	state.StoredRecords = stored.Documents
+	state.LegacyStorage = stored.Version != syncStorageVersion
 	for key, hash := range stored.Documents {
 		file, err := syncStoredRecordPath(name, key, hash)
 		if err != nil {
 			return nil, err
+		}
+		if stored.Version == 2 {
+			file = strings.TrimSuffix(file, ".gz")
 		}
 		info, err := root.Lstat(file)
 		if err != nil || !info.Mode().IsRegular() {
 			return nil, errors.New("同步文档状态缺失，已保留书库数据")
 		}
 		body, err := root.ReadFile(file)
+		if err == nil && stored.Version == syncStorageVersion {
+			body, err = unpackSyncMetadata(body, 8*syncManifestLimit)
+		}
 		if err != nil || syncBytesHash(body) != hash {
 			return nil, errors.New("同步文档状态校验失败，已保留书库数据")
 		}
@@ -181,18 +188,6 @@ func (s *Server) saveSyncDocumentState(config webdavConfig, state *syncLocalStat
 
 func writeSyncStoredStateAt(name string, state *syncLocalState, only *string) error {
 	if state.LegacyStorage {
-		body, err := os.ReadFile(name)
-		if err != nil {
-			return err
-		}
-		backup := filepath.Join(filepath.Dir(name), "state-v1.backup.json")
-		if _, err = os.Stat(backup); os.IsNotExist(err) {
-			if err = atomicFile(backup, body); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
 		// The legacy format also persisted unpublished uploads in its large
 		// state. Preserve them in the existing append-only recovery log.
 		file, err := os.OpenFile(filepath.Join(filepath.Dir(name), "uploads.txt"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -221,7 +216,7 @@ func writeSyncStoredStateAt(name string, state *syncLocalState, only *string) er
 			return closeErr
 		}
 	}
-	stored := syncStoredRoot{Format: "neoread-sync-state", Version: 2, Device: state.Device, Clock: state.Clock, Documents: map[string]string{}, Remotes: state.Remotes, LastSync: state.LastSync}
+	stored := syncStoredRoot{Format: "neoread-sync-state", Version: syncStorageVersion, Device: state.Device, Clock: state.Clock, Documents: map[string]string{}, Remotes: state.Remotes, LastSync: state.LastSync}
 	documents := map[string]*syncStoredDocument{}
 	if only != nil && state.StoredRecords != nil && !state.LegacyStorage {
 		stored.Documents = maps.Clone(state.StoredRecords)
@@ -245,9 +240,25 @@ func writeSyncStoredStateAt(name string, state *syncLocalState, only *string) er
 			return err
 		}
 		info, statErr := os.Lstat(file)
-		if state.StoredRecords[key] != hash || statErr != nil || !info.Mode().IsRegular() || info.Size() != int64(len(body)) {
-			if err = atomicFile(file, body); err != nil {
+		if state.LegacyStorage || state.StoredRecords[key] != hash || statErr != nil || !info.Mode().IsRegular() {
+			packed, err := packSyncMetadata(body)
+			if err != nil {
 				return err
+			}
+			if err = atomicFile(file, packed); err != nil {
+				return err
+			}
+		}
+		if state.LegacyStorage {
+			// Verify every replacement before the root can stop referencing the
+			// previous format. A failed read leaves the old root and files usable.
+			packed, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			decoded, err := unpackSyncMetadata(packed, 8*syncManifestLimit)
+			if err != nil || syncBytesHash(decoded) != hash {
+				return errors.New("迁移同步状态校验失败，已保留旧文件")
 			}
 		}
 		stored.Documents[key] = hash
@@ -259,13 +270,22 @@ func writeSyncStoredStateAt(name string, state *syncLocalState, only *string) er
 	if err = atomicFile(name, body); err != nil {
 		return err
 	}
+	migrated := state.LegacyStorage
 	state.LegacyStorage = false
 	state.StoredRecords = maps.Clone(stored.Documents)
+	if migrated {
+		root, err := os.OpenRoot(filepath.Dir(name))
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		return cleanupOldSyncState(root, filepath.Base(name), state)
+	}
 	return nil
 }
 
 func pruneStoredSyncRecords(root *os.Root, name string, state *syncLocalState) (int, int64, error) {
-	if state.StoredRecords == nil { // Legacy states do not reference record files.
+	if state.LegacyStorage || state.StoredRecords == nil { // Old roots still reference their original record files.
 		return 0, 0, nil
 	}
 	live := map[string]bool{}
@@ -309,7 +329,7 @@ func pruneStoredSyncRecords(root *os.Root, name string, state *syncLocalState) (
 		}
 		for _, item := range items {
 			file := filepath.Join(directory, item.Name())
-			if live[file] || !strings.HasSuffix(item.Name(), ".json") || !syncCacheHash(strings.TrimSuffix(item.Name(), ".json")) {
+			if live[file] || !syncCacheHash(strings.TrimSuffix(strings.TrimSuffix(item.Name(), ".gz"), ".json")) || !(strings.HasSuffix(item.Name(), ".json") || strings.HasSuffix(item.Name(), ".json.gz")) {
 				continue
 			}
 			info, err := item.Info()
@@ -329,7 +349,27 @@ func pruneStoredSyncRecords(root *os.Root, name string, state *syncLocalState) (
 	return count, bytes, nil
 }
 
-// Upgrade local synchronization metadata on opening a library, including paused
+// Cleanup is retryable on startup after the new root has committed. Original
+// documents and received chunks are outside these state-record directories.
+func cleanupOldSyncState(root *os.Root, name string, state *syncLocalState) error {
+	if _, _, err := pruneStoredSyncRecords(root, name, state); err != nil {
+		return err
+	}
+	backup := filepath.Join(filepath.Dir(name), "state-v1.backup.json")
+	info, err := root.Lstat(backup)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("旧同步备份不是普通文件")
+	}
+	return root.Remove(backup)
+}
+
+// Upgrade synchronization metadata when opening a library, including paused
 // connections. Original files and SQLite user records are never moved here.
 func migrateLocalSyncStorage(directory string) {
 	root, err := os.OpenRoot(directory)
@@ -354,18 +394,19 @@ func migrateLocalSyncStorage(directory string) {
 		if os.IsNotExist(err) {
 			continue
 		}
-		if err == nil && !state.LegacyStorage {
-			continue
-		}
 		if err == nil && (!syncID(state.Device) || state.Clock == nil || state.Own == nil || state.Base == nil || state.BaseClocks == nil || state.Files == nil || state.Uploaded == nil || state.Remotes == nil || state.Choices == nil) {
 			err = errors.New("旧版同步状态不完整")
 		}
-		if err == nil {
+		migrating := err == nil && state.LegacyStorage
+		if migrating {
+			slog.Info("sync.storage_migration_started", "phase", "local", "count", len(state.Own))
 			err = writeSyncStoredStateAt(filepath.Join(directory, name), state, nil)
+		} else if err == nil {
+			err = cleanupOldSyncState(root, name, state)
 		}
 		if err != nil {
 			slog.Warn("sync.storage_migration_failed", "phase", "local", "errorCode", "state")
-		} else {
+		} else if migrating {
 			slog.Info("sync.storage_migrated", "phase", "local", "count", len(state.StoredRecords))
 		}
 	}

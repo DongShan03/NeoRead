@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"golang.org/x/net/webdav"
 	"net/http"
 	"net/http/httptest"
@@ -1347,7 +1348,11 @@ func TestWebDAVTrashRestoreAndPermanentDeletionReachTheCloudAndOtherDevices(t *t
 	var catalog *syncDeviceCatalog
 	if err == nil {
 		catalog, err = decodeSyncDeviceIndex(body, state.Device, func(name, hash string) ([]byte, error) {
-			return os.ReadFile(filepath.Join(directory, "NeoRead", "论文库", filepath.FromSlash(name)))
+			packed, err := os.ReadFile(filepath.Join(directory, "NeoRead", "论文库", filepath.FromSlash(name)))
+			if err != nil {
+				return nil, err
+			}
+			return unpackSyncMetadata(packed, syncManifestLimit)
 		})
 	}
 	if err != nil || catalog.Versions["document/paper"] == nil || !catalog.Versions["document/paper"].Deleted {
@@ -1586,6 +1591,20 @@ func TestWebDAVCacheReclaimsOldVersionsAfterSuccessfulSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var index syncDeviceIndex
+	indexPath := filepath.Join(filepath.Dir(s.syncStatePath(config)), "remotes", state.Device+".json")
+	body, err := os.ReadFile(indexPath)
+	if err != nil || json.Unmarshal(body, &index) != nil {
+		t.Fatal("missing cached index", err)
+	}
+	metadata, err := syncMetadataPath("document/paper", "versions", index.Entries["document/paper"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMetadata := filepath.Join(filepath.Dir(s.syncStatePath(config)), "metadata", filepath.FromSlash(metadata))
+	if _, err = os.Stat(oldMetadata); err != nil {
+		t.Fatal("missing initial metadata", err)
+	}
 	name := "cache/paper/analysis/manifest.json"
 	oldHash := state.Files[name].File.Chunks[0].Hash
 	if err := os.WriteFile(filepath.Join(s.Store.Root, filepath.FromSlash(name)), []byte(`{"pages":1,"blocks":[],"revision":2}`), 0600); err != nil {
@@ -1596,6 +1615,9 @@ func TestWebDAVCacheReclaimsOldVersionsAfterSuccessfulSync(t *testing.T) {
 	runSync(t, s)
 	if _, err := os.Stat(s.syncBlob(oldHash)); !os.IsNotExist(err) {
 		t.Fatal("unreferenced old chunk retained", err)
+	}
+	if _, err := os.Stat(oldMetadata); !os.IsNotExist(err) {
+		t.Fatal("superseded metadata retained", err)
 	}
 	state, err = s.loadSyncState(config)
 	if err != nil {
@@ -1846,7 +1868,7 @@ func TestWebDAVV2InterruptedReceiveSurvivesRestartAndPreservesOfflineNoteConflic
 	}
 }
 
-func TestWebDAVV2MigratesLegacyStorageAndOnlyPublishesChangedPaperMetadata(t *testing.T) {
+func TestWebDAVCompressedStorageOnlyPublishesChangedPaperMetadata(t *testing.T) {
 	remote, directory := testDAV(t)
 	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
 	for _, owner := range []string{"alpha", "beta"} {
@@ -1858,33 +1880,16 @@ func TestWebDAVV2MigratesLegacyStorageAndOnlyPublishesChangedPaperMetadata(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := []byte(jsonText(syncManifest{Format: "neoread-webdav", Version: 1, Device: state.Device, Entries: state.Own}))
 	remoteRoot := filepath.Join(directory, "NeoRead", "论文库")
 	remoteIndex := filepath.Join(remoteRoot, "devices", state.Device+".json")
-	if err = os.WriteFile(remoteIndex, legacy, 0600); err != nil {
-		t.Fatal(err)
-	}
-	runSync(t, b)
 	body, err := os.ReadFile(remoteIndex)
 	var converted syncDeviceIndex
-	if err != nil || json.Unmarshal(body, &converted) != nil || converted.Version != 2 || converted.Legacy != "" || len(converted.Entries) != 3 {
-		t.Fatal("cloud migration not committed", string(body), err)
+	if err != nil || json.Unmarshal(body, &converted) != nil || converted.Version != syncStorageVersion || len(converted.Entries) != 3 {
+		t.Fatal("compact index not committed", string(body), err)
 	}
-	backup := filepath.Join(remoteRoot, filepath.FromSlash(legacySyncMetadataPath(state.Device, syncBytesHash(legacy))))
-	if saved, e := os.ReadFile(backup); e != nil || !bytes.Equal(saved, legacy) {
-		t.Fatal("cloud migration lost its legacy backup", e)
-	}
-	localLegacy := []byte(jsonText(state))
-	if err = atomicFile(a.syncStatePath(config), localLegacy); err != nil {
-		t.Fatal(err)
-	}
-	migrateLocalSyncStorage(a.Store.Root)
-	if saved, e := os.ReadFile(filepath.Join(filepath.Dir(a.syncStatePath(config)), "state-v1.backup.json")); e != nil || !bytes.Equal(saved, localLegacy) {
-		t.Fatal("local migration lost its legacy backup", e)
-	}
-	state, err = a.loadSyncState(config)
-	if err != nil || state.LegacyStorage || len(state.StoredRecords) != 3 {
-		t.Fatal("local migration did not load", state, err)
+	runSync(t, b)
+	if _, err = b.Store.Document("beta"); err != nil {
+		t.Fatal("compressed paper did not arrive", err)
 	}
 	betaFile, err := syncStoredRecordPath(a.syncStatePath(config), "document/beta", state.StoredRecords["document/beta"])
 	if err != nil {
@@ -1926,7 +1931,7 @@ func TestWebDAVV2MigratesLegacyStorageAndOnlyPublishesChangedPaperMetadata(t *te
 	}
 }
 
-func TestWebDAVV2SyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T) {
+func TestWebDAVSyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T) {
 	remote, _ := testDAV(t)
 	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
 	a.Token = "test-secret"
@@ -1939,11 +1944,23 @@ func TestWebDAVV2SyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T)
 			t.Fatal(err)
 		}
 	}
+	run := chatRunRecord{ChatRun: ChatRun{ID: id(), SessionID: item.ID, DocumentID: libraryChatOwner, Provider: "codex", Status: "completed", StartedAt: now(), FinishedAt: now()}, Events: []chatRunEvent{{Event: "delta", Data: json.RawMessage(jsonText(strings.Repeat("saved review", 500)))}}}
+	if _, err := a.Store.DB.Exec("INSERT INTO library_chat_runs(id,session_id,body) VALUES(?,?,?)", run.ID, item.ID, jsonText(run)); err != nil {
+		t.Fatal(err)
+	}
 	runSync(t, a)
 	runSync(t, b)
 	items, err := b.Store.chatHistory(libraryChatOwner, item.ID)
 	if err != nil || len(items) != 2 || items[1].Content != "saved review" {
 		t.Fatal("library transcript did not arrive", items, err)
+	}
+	localRun, err := a.Store.readChatRun(item.ID, run.ID)
+	if err != nil || len(localRun.Events) != 1 {
+		t.Fatal("sync removed local replay events", err)
+	}
+	remoteRun, err := b.Store.readChatRun(item.ID, run.ID)
+	if err != nil || len(remoteRun.Events) != 0 || remoteRun.Status != "completed" {
+		t.Fatal("replayed events were transferred with the transcript", remoteRun, err)
 	}
 	scope, err := b.Store.libraryScope(item.ID)
 	if err != nil || len(scope.DocumentIDs) != 2 {
@@ -1964,6 +1981,120 @@ func TestWebDAVV2SyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T)
 	items, err = b.Store.chatHistory(libraryChatOwner, item.ID)
 	if err != nil || len(items) != 3 || items[2].Content != "follow-up" {
 		t.Fatal(items, err)
+	}
+}
+
+func TestWebDAVLocalStorageMigrationRemovesReplacedStateAfterCommit(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			remote, _ := testDAV(t)
+			s := syncFixture(t, remote, "Mac")
+			syncDocumentFixture(t, s.Store, "paper", "研究")
+			runSync(t, s)
+			config, _ := s.readSyncConfig()
+			state, err := s.loadSyncState(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state.Choices["document/paper"] = syncChoice{Conflict: "saved-conflict", KeepBoth: true}
+			state.Own["document/deleted"] = newSyncVersion(state, nil, emptySyncDocument(), "Mac")
+			upload := strings.Repeat("d", 64)
+			state.Uploaded[upload] = true
+			name := s.syncStatePath(config)
+			var legacy []byte
+			if version == 1 {
+				legacy = []byte(jsonText(state))
+			} else {
+				stored := syncStoredRoot{Format: "neoread-sync-state", Version: 2, Device: state.Device, Clock: state.Clock, Documents: map[string]string{}, Remotes: state.Remotes, LastSync: state.LastSync}
+				for key, document := range syncStoredDocuments(state) {
+					body := []byte(jsonText(document))
+					hash := syncBytesHash(body)
+					file, err := syncStoredRecordPath(name, key, hash)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err = atomicFile(strings.TrimSuffix(file, ".gz"), body); err != nil {
+						t.Fatal(err)
+					}
+					stored.Documents[key] = hash
+				}
+				legacy = []byte(jsonText(stored))
+				if err = s.recordSyncUpload(config, upload); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = atomicFile(name, legacy); err != nil {
+				t.Fatal(err)
+			}
+			backup := filepath.Join(filepath.Dir(name), "state-v1.backup.json")
+			if err = atomicFile(backup, legacy); err != nil {
+				t.Fatal(err)
+			}
+			migrateLocalSyncStorage(s.Store.Root)
+			loaded, err := s.loadSyncState(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.LegacyStorage || loaded.Device != state.Device || syncHash(loaded.Own) != syncHash(state.Own) || syncHash(loaded.Base) != syncHash(state.Base) || syncHash(loaded.BaseClocks) != syncHash(state.BaseClocks) || syncHash(loaded.Choices) != syncHash(state.Choices) || !loaded.Uploaded[upload] || loaded.LastSync != state.LastSync || syncHash(loaded.Clock) != syncHash(state.Clock) {
+				t.Fatal("migration changed sync history")
+			}
+			if _, err = os.Stat(backup); !os.IsNotExist(err) {
+				t.Fatal("old backup retained", err)
+			}
+			for key, hash := range loaded.StoredRecords {
+				file, err := syncStoredRecordPath(name, key, hash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = os.Stat(file); err != nil {
+					t.Fatal("compressed state missing", err)
+				}
+				if _, err = os.Stat(strings.TrimSuffix(file, ".gz")); !os.IsNotExist(err) {
+					t.Fatal("old state copy retained", err)
+				}
+			}
+			if _, err = os.Stat(s.Store.File(Document{ID: "paper", Type: "pdf"})); err != nil {
+				t.Fatal("original paper removed", err)
+			}
+			// Cleanup may have been interrupted after committing the root.
+			if err = atomicFile(backup, legacy); err != nil {
+				t.Fatal(err)
+			}
+			migrateLocalSyncStorage(s.Store.Root)
+			if _, err = os.Stat(backup); !os.IsNotExist(err) {
+				t.Fatal("committed migration did not finish cleanup", err)
+			}
+		})
+	}
+}
+
+func TestWebDAVLocalStorageMigrationFailurePreservesOldState(t *testing.T) {
+	s := testServer(t)
+	config := webdavConfig{Account: "reader@example.com", RemoteID: strings.Repeat("a", 32)}
+	state := newSyncState()
+	state.Own["document/paper"] = newSyncVersion(state, emptySyncDocument(), nil, "Mac")
+	name := s.syncStatePath(config)
+	legacy := []byte(jsonText(state))
+	if err := atomicFile(name, legacy); err != nil {
+		t.Fatal(err)
+	}
+	file, err := syncStoredRecordPath(name, "document/paper", syncHash(buildSyncStoredDocument(state, "document/paper")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(file, 0700); err != nil {
+		t.Fatal(err)
+	}
+	migrateLocalSyncStorage(s.Store.Root)
+	if body, err := os.ReadFile(name); err != nil || !bytes.Equal(body, legacy) {
+		t.Fatal("failed migration replaced the old commit", err)
+	}
+	if err = os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	migrateLocalSyncStorage(s.Store.Root)
+	if loaded, err := s.loadSyncState(config); err != nil || loaded.LegacyStorage || loaded.Device != state.Device {
+		t.Fatal("migration could not resume", err)
 	}
 }
 
@@ -2007,5 +2138,23 @@ func TestWebDAVRecreatesExternallyClearedCloudWithoutLosingLocalData(t *testing.
 				t.Fatal("recreated index referenced missing chunks", err)
 			}
 		})
+	}
+}
+
+func TestWebDAVCompressedMetadataChecksLimitsAndIntegrity(t *testing.T) {
+	body := []byte(strings.Repeat(`{"text":"long translation paragraph"}`, 1000))
+	packed, err := packSyncMetadata(body)
+	if err != nil || len(packed) >= len(body)/2 {
+		t.Fatal("metadata was not compressed", err)
+	}
+	if decoded, err := unpackSyncMetadata(packed, int64(len(body))); err != nil || !bytes.Equal(decoded, body) {
+		t.Fatal("metadata roundtrip failed", err)
+	}
+	if _, err = unpackSyncMetadata(packed, int64(len(body)-1)); err == nil {
+		t.Fatal("decompression limit ignored")
+	}
+	packed[len(packed)-5] ^= 1
+	if _, err = unpackSyncMetadata(packed, int64(len(body))); err == nil {
+		t.Fatal("damaged gzip accepted")
 	}
 }

@@ -68,6 +68,7 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 	}
 	live := map[string]struct{}{}
 	storedStates := map[string]*syncLocalState{}
+	metadata := map[string]map[string]bool{}
 	currentIdentity := filepath.Base(filepath.Dir(s.syncStatePath(config)))
 	keep := func(doc *syncDocument) {
 		if doc == nil {
@@ -95,6 +96,7 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 			return 0, 0, err
 		}
 		folder := filepath.Join(directory, identity.Name())
+		metadata[filepath.Join(folder, "metadata")] = map[string]bool{}
 		state := current
 		if identity.Name() != currentIdentity {
 			state, err = readSyncStoredState(root, filepath.Join(folder, "state.json"))
@@ -138,17 +140,28 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 			if err = ctx.Err(); err != nil {
 				return 0, 0, err
 			}
-			manifest, err := readSyncCachedManifest(root, filepath.Join(folder, "remotes", remote.Name()), device)
+			catalog, err := readSyncCachedCatalog(root, filepath.Join(folder, "remotes", remote.Name()), device)
 			if err != nil {
 				return 0, 0, err
 			}
-			for _, version := range manifest.Entries {
+			for _, version := range catalog.Versions {
 				keep(version.Body)
+			}
+			for name := range catalog.Known {
+				metadata[filepath.Join(folder, "metadata")][filepath.FromSlash(name)] = true
 			}
 		}
 	}
 	for name, state := range storedStates {
 		pruned, removedBytes, err := pruneStoredSyncRecords(root, name, state)
+		if err != nil {
+			return count, bytes, err
+		}
+		count += pruned
+		bytes += removedBytes
+	}
+	for directory, live := range metadata {
+		pruned, removedBytes, err := pruneSyncMetadata(root, directory, live)
 		if err != nil {
 			return count, bytes, err
 		}
@@ -193,4 +206,40 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 		}
 	}
 	return count, bytes, nil
+}
+
+func pruneSyncMetadata(root *os.Root, directory string, live map[string]bool) (int, int64, error) {
+	count, bytes := 0, int64(0)
+	err := fs.WalkDir(root.FS(), directory, func(name string, entry fs.DirEntry, walkErr error) error {
+		if os.IsNotExist(walkErr) && name == directory {
+			return nil
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(directory, name)
+		if err != nil {
+			return err
+		}
+		if live[rel] || !(strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".json.gz")) || !syncCacheHash(strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".gz"), ".json")) {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		if err = root.Remove(name); err != nil {
+			return err
+		}
+		count++
+		bytes += info.Size()
+		return nil
+	})
+	return count, bytes, err
 }
