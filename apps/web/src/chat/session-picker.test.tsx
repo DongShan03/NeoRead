@@ -177,41 +177,58 @@ it.each(["doc", "library"])(
     expect(onChange).not.toHaveBeenCalled();
   },
 );
-it("discards an unsent draft locally and selects another conversation", async () => {
-  const draft: DocumentChatSession = {
-    id: "draft-local",
-    documentId: "doc",
-    title: "新会话",
-    provider: "api",
-    createdAt: "now",
-    updatedAt: "now",
-  };
-  const saved = { ...draft, id: "saved", title: "已保存" };
-  const onChange = vi.fn(),
-    onDeleted = vi.fn();
-  await act(async () =>
-    root.render(
-      <SessionPicker
-        documentId="doc"
-        sessions={[draft, saved]}
-        current={draft}
-        onCreate={async () => {}}
-        onChange={onChange}
-        onDeleted={onDeleted}
-        onRefresh={async () => {}}
-      />,
-    ),
-  );
-  await act(async () =>
-    host.querySelector<HTMLButtonElement>('[aria-label="选择会话"]')!.click(),
-  );
-  await act(async () =>
-    document
-      .querySelector<HTMLElement>('[aria-label="删除会话：新会话"]')!
-      .click(),
-  );
-  expect(mocks.remove).not.toHaveBeenCalled();
-  expect(mocks.forget).toHaveBeenCalledWith("doc", "draft-local");
-  expect(onDeleted).toHaveBeenCalledWith("draft-local");
-  expect(onChange).toHaveBeenCalledWith("saved");
-});
+it.each(["doc", "library"])(
+  "reuses the current unsent draft on new and can discard it locally for %s",
+  async (documentId) => {
+    const draft: DocumentChatSession = {
+      id: "draft-local",
+      documentId,
+      title: "新会话",
+      provider: "api",
+      createdAt: "now",
+      updatedAt: "now",
+    };
+    const saved = { ...draft, id: "saved", title: "已保存" };
+    const onChange = vi.fn(),
+      onDeleted = vi.fn(),
+      onCreate = vi.fn(async () => {});
+    await act(async () =>
+      root.render(
+        <SessionPicker
+          documentId={documentId}
+          sessions={[draft, saved]}
+          current={draft}
+          onCreate={onCreate}
+          onChange={onChange}
+          onDeleted={onDeleted}
+          onRefresh={async () => {}}
+        />,
+      ),
+    );
+    await act(async () => {
+      const create = host.querySelector<HTMLButtonElement>(
+        '[aria-label="新建会话"]',
+      )!;
+      create.click();
+      create.click();
+    });
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[aria-label="选择会话"]')!.click(),
+    );
+    expect(
+      document.querySelector('[data-slot="dropdown-menu-content"]')
+        ?.textContent,
+    ).not.toContain("未发送");
+    await act(async () =>
+      document
+        .querySelector<HTMLElement>('[aria-label="删除会话：新会话"]')!
+        .click(),
+    );
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(mocks.forget).toHaveBeenCalledWith(documentId, "draft-local");
+    expect(onDeleted).toHaveBeenCalledWith("draft-local");
+    expect(onChange).toHaveBeenCalledWith("saved");
+  },
+);

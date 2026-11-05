@@ -70,6 +70,12 @@ export function SessionPicker({
     setSaving(false);
   }, [current?.id]);
   const create = async () => {
+    if (
+      current &&
+      isDraftSession(current.id) &&
+      !chatSessionRecordId(documentId, current.id)
+    )
+      return;
     setSaving(true);
     try {
       await onCreate();
@@ -151,11 +157,7 @@ export function SessionPicker({
                   </span>
                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
                   <span className="ml-2 shrink-0 text-xs text-muted-foreground">
-                    {isDraftSession(s.id)
-                      ? "未发送"
-                      : s.latestRun
-                        ? statusLabels[s.latestRun.status]
-                        : ""}
+                    {s.latestRun ? statusLabels[s.latestRun.status] : ""}
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
