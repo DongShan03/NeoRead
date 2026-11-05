@@ -15,6 +15,9 @@ var sentenceAbbreviation = regexp.MustCompile(`(?i)(?:\bet al\.|\be\.g\.|\bi\.e\
 var mathDecoration = regexp.MustCompile(`\\(bar|overline|hat|widehat|tilde|widetilde|dot|ddot|mathcal|mathbb|mathbf|bigsqcup|sqcup|sum|dagger|ddagger)`)
 
 func matchingMathDecorations(source, target string) bool {
+	// Compatibility unit glyphs may be translated into prose. Count them before
+	// canonicalization merges them with the required Greek letters μ and Ω.
+	optional := map[string]int{"mu": strings.Count(source, "\u00b5"), "Omega": strings.Count(source, "\u2126")}
 	source, target = canonicalMathSymbols(source), canonicalMathSymbols(target)
 	counts := func(text string) map[string]int {
 		result := map[string]int{}
@@ -46,12 +49,12 @@ func matchingMathDecorations(source, target string) bool {
 	}
 	expected, actual := counts(source), counts(target)
 	for name, count := range expected {
-		if actual[name] != count {
+		if actual[name] < count-optional[name] || actual[name] > count {
 			return false
 		}
 	}
 	for name, count := range actual {
-		if mathGreekName(name) && expected[name] != count {
+		if mathGreekName(name) && count > expected[name] {
 			return false
 		}
 	}

@@ -1495,16 +1495,16 @@ func TestTranslationRepairsJSONMathEscapesWithoutChangingProse(t *testing.T) {
 func TestCachedTranslationRepairsMathEscapesWithoutRewritingSavedHistory(t *testing.T) {
 	s, _, m := translationFixture(t)
 	m.Blocks = m.Blocks[:1]
-	m.Blocks[0].Text = `The threshold is $\tau$.`
+	m.Blocks[0].Text = `The threshold is $\tau$ with ∆, µ and Ω.`
 	item := newTranslation(m.Blocks[0])
 	item.Status = "complete"
-	target := "阈值为 $\tau$。"
+	target := "阈值为 $\tau$，涉及 ∆、µ 和 Ω。"
 	item.Sentences = []TranslationSentence{{Source: m.Blocks[0].Text, Target: target}}
 	if err := s.saveTranslation("doc", item, m); err != nil {
 		t.Fatal(err)
 	}
 	current, err := s.translations("doc", m)
-	if err != nil || len(current) != 1 || current[0].Sentences[0].Target != `阈值为 $\tau$。` {
+	if err != nil || len(current) != 1 || current[0].Sentences[0].Target != `阈值为 $\tau$，涉及 ∆、µ 和 Ω。` || current[0].Sentences[0].Source != m.Blocks[0].Text {
 		t.Fatal(current, err)
 	}
 	var body string
@@ -1512,7 +1512,101 @@ func TestCachedTranslationRepairsMathEscapesWithoutRewritingSavedHistory(t *test
 		t.Fatal(err)
 	}
 	var stored TranslationBlock
-	if json.Unmarshal([]byte(body), &stored) != nil || stored.Sentences[0].Target != target {
+	if json.Unmarshal([]byte(body), &stored) != nil || stored.Sentences[0].Target != target || stored.Sentences[0].Source != m.Blocks[0].Text {
 		t.Fatal("cache repair rewrote stored history", body)
+	}
+}
+
+const deltaIIDParagraph = `IID effects are substantial. Most models show sizable in-distribution ∆ RR-Judge ( − 2.8 to − 40.0 percentage points; median − 17.0), so detected neu- rons account for a meaningful share of refusal on in-distribution harmful images.`
+const deltaControlParagraph = `Control-neuron null and BH-FDR correction. A nonzero ∆ $P_{n}^{q}$ alone is not sufficient evidence: any neuron’s perturbation may shift the output.`
+
+func TestTranslationMathCompatibilityGlyphs(t *testing.T) {
+	for _, tt := range []struct {
+		name, source, glyph, greek, latex string
+		spans                             int
+	}{
+		{"iid_increment_U2206", deltaIIDParagraph, "\u2206", "Δ", `\Delta`, 1},
+		{"control_increment_U2206", deltaControlParagraph, "\u2206", "Δ", `\Delta`, 2},
+		{"micro_U00B5", "The distance is 5 \u00b5m.", "\u00b5", "μ", `\mu`, 1},
+		{"ohm_U2126", "The resistance is 5 \u2126.", "\u2126", "Ω", `\Omega`, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, symbol := range []string{tt.glyph, tt.greek, "$" + tt.latex + "$"} {
+				target := strings.ReplaceAll(tt.source, tt.glyph, symbol)
+				if !matchingMathDecorations(tt.source, target) || !matchingMathDecorations(target, tt.source) {
+					t.Errorf("equivalent notation rejected: %U -> %q", []rune(tt.glyph)[0], symbol)
+				}
+				pairs := []TranslationSentence{}
+				for _, part := range translationSentenceParts(tt.source) {
+					part = strings.TrimSpace(part)
+					pairs = append(pairs, TranslationSentence{Source: part, Target: strings.ReplaceAll(part, tt.glyph, symbol)})
+				}
+				parsed, err := parseTranslationSource(jsonText(map[string]any{"sentences": pairs}), tt.source, true)
+				if err != nil {
+					t.Errorf("equivalent notation rejected by translation parser: %v", err)
+				} else if jsonText(parsed) != jsonText(pairs) {
+					t.Fatal("comparison rewrote source or target", parsed)
+				}
+			}
+			for _, symbol := range []string{`$\delta$`, `$\Gamma$`} {
+				if matchingMathDecorations(tt.source, strings.ReplaceAll(tt.source, tt.glyph, symbol)) {
+					t.Errorf("lost or different symbol accepted: %U -> %q", []rune(tt.glyph)[0], symbol)
+				}
+			}
+			spans := inlineMathSpans(tt.source)
+			if len(spans) != tt.spans {
+				t.Fatalf("got %d math spans, want %d: %+v", len(spans), tt.spans, spans)
+			}
+			if got := tt.source[spans[0].Start:spans[0].End]; got != tt.glyph || strings.TrimSpace(spans[0].Formula) != tt.latex {
+				t.Fatal("span did not preserve original glyph and canonical formula", got, spans[0])
+			}
+		})
+	}
+}
+
+func TestTranslationUnitGlyphsAreOptional(t *testing.T) {
+	for _, tt := range []struct {
+		name, source, target string
+		valid                bool
+	}{
+		{"micro_unit_words", "5 \u00b5m", "5 微米", true},
+		{"ohm_unit_words", "10 \u2126", "10 欧姆", true},
+		{"kiloohm_unit_words", "10 k\u2126", "10 千欧", true},
+		{"micro_greek", "5 \u00b5m", "5 μm", true},
+		{"micro_latex", "5 \u00b5m", `5 $\mu$m`, true},
+		{"ohm_greek", "10 \u2126", "10 Ω", true},
+		{"ohm_latex", "10 \u2126", `10 $\Omega$`, true},
+		{"micro_omitted", "5 \u00b5m", "5 m", true},
+		{"ohm_omitted", "10 \u2126", "10", true},
+		{"mixed_micro_required_retained", "µ μ", "μ", true},
+		{"mixed_ohm_required_retained", "Ω Ω", "Ω", true},
+		{"two_optional_micro_one_retained", "µ µ", "μ", true},
+		{"two_optional_micro_both_retained", "µ µ", `μ $\mu$`, true},
+		{"extra_micro", "5 \u00b5m", "5 μm μ", false},
+		{"extra_ohm", "10 \u2126", `10 Ω $\Omega$`, false},
+		{"micro_replaced_by_alpha", "5 \u00b5m", `$\alpha$`, false},
+		{"micro_replaced_by_omega", "5 \u00b5m", `$\Omega$`, false},
+		{"required_mu_omitted", "5 \u03bcm", "5 微米", false},
+		{"required_omega_omitted", "10 \u03a9", "10 欧姆", false},
+		{"mixed_micro_required_omitted", "µ μ", "省略符号", false},
+		{"mixed_ohm_required_omitted", "Ω Ω", "省略符号", false},
+		{"increment_omitted", "\u2206 RR-Judge", "RR-Judge", false},
+		{"increment_changed_to_delta", "\u2206 RR-Judge", `$\delta$ RR-Judge`, false},
+		{"increment_changed_to_gamma", "\u2206 RR-Judge", `$\Gamma$ RR-Judge`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchingMathDecorations(tt.source, tt.target); got != tt.valid {
+				t.Fatalf("matchingMathDecorations(%q, %q) = %v, want %v", tt.source, tt.target, got, tt.valid)
+			}
+			pairs := []TranslationSentence{{Source: tt.source, Target: tt.target}}
+			parsed, err := parseTranslationSource(jsonText(map[string]any{"sentences": pairs}), tt.source, true)
+			if tt.valid {
+				if err != nil || jsonText(parsed) != jsonText(pairs) {
+					t.Fatal("valid unit translation rejected or rewritten", parsed, err)
+				}
+			} else if !errors.Is(err, errTranslationMath) {
+				t.Fatal("invalid symbols accepted by translation parser", parsed, err)
+			}
+		})
 	}
 }

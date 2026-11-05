@@ -65,7 +65,17 @@ func (s *Server) recoverTranslationMath(ctx context.Context, doc Document, m lay
 			break
 		}
 	}
-	if block == nil || isImageAsset(*block) || translationSource(*block) != paragraph.Source {
+	skipReason := ""
+	switch {
+	case block == nil:
+		skipReason = "block_not_found"
+	case isImageAsset(*block):
+		skipReason = "image_asset"
+	case translationSource(*block) != paragraph.Source:
+		skipReason = "source_mismatch"
+	}
+	if skipReason != "" {
+		s.diagnosticEvent(slog.LevelWarn, "translation.math_recovery.skipped", "documentId", doc.ID, "target", paragraph.BlockID, "reasonCode", skipReason)
 		return recovered, errTranslationMath
 	}
 	parts := translationSentenceParts(paragraph.Source)
@@ -79,6 +89,7 @@ func (s *Server) recoverTranslationMath(ctx context.Context, doc Document, m lay
 		}
 	}
 	if len(formulas) == 0 {
+		s.diagnosticEvent(slog.LevelWarn, "translation.math_recovery.skipped", "documentId", doc.ID, "target", paragraph.BlockID, "reasonCode", "no_formulas")
 		return recovered, errTranslationMath
 	}
 	p, err := s.Store.processing(doc.ID)
@@ -188,6 +199,9 @@ func (s *Server) recoverTranslationMath(ctx context.Context, doc Document, m lay
 		return recovered, err
 	}
 	if !decoder.completed[paragraph.BlockID] || len(translated.Sentences) != len(parts) {
+		if reason := decoder.invalid[paragraph.BlockID]; reason != "" {
+			return recovered, generationError(ErrorProtocol, "公式修复后的译文未完整逐句对应："+reason)
+		}
 		return recovered, generationError(ErrorProtocol, "公式修复后的译文未完整逐句对应")
 	}
 	pairs := make([]TranslationSentence, len(parts))

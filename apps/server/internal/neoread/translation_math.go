@@ -10,6 +10,8 @@ import (
 var errTranslationMath = errors.New("译文改变了公式符号、重音、字体或上下标，请重试此段")
 
 var greekMathNames = map[rune]string{
+	// PDF fonts can map Greek letters to these Unicode compatibility glyphs.
+	'\u2206': "Delta", '\u00b5': "mu", '\u2126': "Omega",
 	'α': "alpha", 'β': "beta", 'γ': "gamma", 'δ': "delta", 'ε': "varepsilon", 'ϵ': "epsilon", 'ζ': "zeta", 'η': "eta", 'θ': "theta", 'ϑ': "vartheta", 'ι': "iota", 'κ': "kappa", 'ϰ': "varkappa", 'λ': "lambda", 'μ': "mu", 'ν': "nu", 'ξ': "xi", 'π': "pi", 'ϖ': "varpi", 'ρ': "rho", 'ϱ': "varrho", 'σ': "sigma", 'ς': "varsigma", 'τ': "tau", 'υ': "upsilon", 'φ': "varphi", 'ϕ': "phi", 'χ': "chi", 'ψ': "psi", 'ω': "omega",
 	'Γ': "Gamma", 'Δ': "Delta", 'Θ': "Theta", 'Λ': "Lambda", 'Ξ': "Xi", 'Π': "Pi", 'Σ': "Sigma", 'Υ': "Upsilon", 'Φ': "Phi", 'Ψ': "Psi", 'Ω': "Omega",
 }

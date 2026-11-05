@@ -1,12 +1,14 @@
 package neoread
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"image"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +20,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"neoread.local/server/internal/diagnostics"
 )
 
 func TestFormulaMarkdownRequiresFormulaOnlyResponse(t *testing.T) {
@@ -581,7 +585,7 @@ cp "$NEOREAD_TEST_MATH_CROP" "$out/page-$page.png"
 }
 
 func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *testing.T) {
-	for _, mode := range []string{"complete", "missing_token", "extra_formula", "truncated", "changed_source", "invalid_ocr", "unverified_image", "canceled"} {
+	for _, mode := range []string{"complete", "missing_token", "extra_formula", "invalid_math", "invalid_source_hash", "truncated", "changed_source", "invalid_ocr", "unverified_image", "canceled"} {
 		t.Run(mode, func(t *testing.T) {
 			s, _, m := translationFixture(t)
 			ctx, cancel := context.WithCancel(t.Context())
@@ -638,10 +642,17 @@ func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *t
 						if mode == "extra_formula" {
 							target += `$z$`
 						}
+						if mode == "invalid_math" {
+							target += `$\Gamma$`
+						}
 					}
 					pairs = append(pairs, TranslationSentence{Source: strings.TrimSpace(part), Target: target})
 				}
-				line := jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": para.SourceHash, "sentences": pairs}) + "\n"
+				hash := para.SourceHash
+				if mode == "invalid_source_hash" {
+					hash = "wrong-version"
+				}
+				line := jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": hash, "sentences": pairs}) + "\n"
 				if mode == "truncated" && strings.Contains(para.Source, "NEOREAD_MATH_") {
 					w.Header().Set("Content-Type", "text/event-stream")
 					sendTranslationDelta(w, line)
@@ -664,6 +675,33 @@ func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *t
 			}
 			service := s.taskGenerationService(s.aiConfig(), taskTranslation)
 			paragraph := m.translationParagraphs()[0]
+			if mode == "invalid_math" || mode == "invalid_source_hash" {
+				logs, e := diagnostics.New(t.TempDir(), "math-recovery-test")
+				if e != nil {
+					t.Fatal(e)
+				}
+				s.SetDiagnostics(logs)
+				_, err := s.recoverTranslationMath(ctx, doc, m, paragraph, service)
+				reason := errTranslationMath.Error()
+				if mode == "invalid_source_hash" {
+					reason = "译文原文版本不匹配"
+				}
+				if err == nil || errorKind(err) != ErrorProtocol || err.Error() != "公式修复后的译文未完整逐句对应："+reason {
+					t.Fatal("lost decoder failure reason or protocol classification", err)
+				}
+				files, e := filepath.Glob(filepath.Join(logs.Dir, "*.jsonl"))
+				if e != nil || len(files) != 1 {
+					t.Fatal(files, e)
+				}
+				data, e := os.ReadFile(files[0])
+				if e != nil || !bytes.Contains(data, []byte(`"event":"translation.math_recovery.finished"`)) || !bytes.Contains(data, []byte(`"errorCode":"protocol"`)) || !bytes.Contains(data, []byte(`"phase":"translating"`)) || bytes.Contains(data, []byte(reason)) {
+					t.Fatal("recovery lost diagnostic classification or logged raw failure", string(data), e)
+				}
+				if texts.Load() != 1 || images.Load() != 1 {
+					t.Fatal("unexpected recovery calls", texts.Load(), images.Load())
+				}
+				return
+			}
 			err = s.translateBatch(ctx, doc, m, translationBatch{Paragraphs: []translationParagraph{paragraph}}, service, func() {})
 			if mode == "canceled" {
 				if !errors.Is(err, context.Canceled) {
@@ -720,5 +758,228 @@ func TestFormulaRecognitionSpansPreserveLegacyMathScriptsAndProse(t *testing.T) 
 	spans := inlineMathSpans(text)
 	if len(spans) != 3 || text[spans[0].Start:spans[0].End] != `𝜏_i` || text[spans[1].Start:spans[1].End] != "ℝ" || spans[2].Formula != `\hat{x}` {
 		t.Fatal(spans)
+	}
+}
+
+func TestTranslationMathRecoveryRestoresDroppedCompatibilityGlyphs(t *testing.T) {
+	for _, tt := range []struct {
+		name, source, glyph string
+		formulas            []string
+	}{
+		{"iid_increment", deltaIIDParagraph, "\u2206", []string{`\Delta`}},
+		{"control_increment", deltaControlParagraph, "\u2206", []string{`\Delta`, `P_{n}^{q}`}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _, m := translationFixture(t)
+			m.Blocks = m.Blocks[:1]
+			m.Blocks[0].Text = tt.source
+			if err := atomicFile(filepath.Join(s.analysisDir("doc"), "manifest.json"), []byte(jsonText(m))); err != nil {
+				t.Fatal(err)
+			}
+			fakeTranslationMathCrop(t)
+			var texts, images atomic.Int32
+			imageAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				images.Add(1)
+				var request struct {
+					Messages []struct {
+						Content json.RawMessage `json:"content"`
+					} `json:"messages"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				var input struct {
+					Formulas []recognizedInlineFormula `json:"formulas"`
+				}
+				var content []struct {
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(request.Messages[len(request.Messages)-1].Content, &content); err != nil {
+					t.Error(err)
+					return
+				}
+				_, raw, ok := strings.Cut(content[0].Text, "输入资料：\n")
+				if !ok || json.Unmarshal([]byte(raw), &input) != nil || len(input.Formulas) != len(tt.formulas) {
+					t.Error("recovery did not recognize all math spans", input)
+					return
+				}
+				output := []map[string]any{}
+				for i, formula := range tt.formulas {
+					if strings.TrimSpace(input.Formulas[i].Formula) != formula {
+						t.Error("unexpected formula", input.Formulas[i])
+					}
+					output = append(output, map[string]any{"index": i, "latex": formula})
+				}
+				writeAPIReply(w, jsonText(map[string]any{"formulas": output}))
+			}))
+			defer imageAPI.Close()
+			textAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				texts.Add(1)
+				para := readTranslationInput(t, r).Batch.Paragraphs[0]
+				pairs := []TranslationSentence{}
+				for _, part := range translationSentenceParts(para.Source) {
+					part = strings.TrimSpace(part)
+					// Both ordinary attempts drop the glyph. Recovery must protect
+					// it along with any existing delimited formulas.
+					target := strings.ReplaceAll(part, tt.glyph, "")
+					if strings.Contains(para.Source, "NEOREAD_MATH_") {
+						tokens := regexp.MustCompile(`NEOREAD_MATH_[a-f0-9]+_[0-9]+`).FindAllString(part, -1)
+						target = "译文 " + strings.Join(tokens, " ") + "。"
+					}
+					pairs = append(pairs, TranslationSentence{Source: part, Target: target})
+				}
+				writeAPIReply(w, jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": para.SourceHash, "sentences": pairs})+"\n")
+			}))
+			defer textAPI.Close()
+			configureFormulaTest(t, s, textAPI.URL, imageAPI.URL)
+			doc, err := s.Store.Document("doc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			paragraph := m.translationParagraphs()[0]
+			service := s.taskGenerationService(s.aiConfig(), taskTranslation)
+			if err := s.translateBatch(t.Context(), doc, m, translationBatch{Paragraphs: []translationParagraph{paragraph}}, service, func() {}); err != nil {
+				t.Fatal(err)
+			}
+			items, err := s.translations("doc", m)
+			if err != nil || len(items) != 1 || items[0].Status != "complete" {
+				t.Fatal("dropped glyph left paragraph failed", items, err)
+			}
+			if texts.Load() != 3 || images.Load() != 1 {
+				t.Fatal("unexpected recovery calls", texts.Load(), images.Load())
+			}
+			parts := translationSentenceParts(tt.source)
+			if len(items[0].Sentences) != len(parts) {
+				t.Fatal("lost sentence", items[0])
+			}
+			var targets strings.Builder
+			for i, pair := range items[0].Sentences {
+				anchor := pair.Anchor
+				if anchor == "" {
+					anchor = pair.Source
+				}
+				if anchor != strings.TrimSpace(parts[i]) {
+					t.Fatal("changed original PDF anchor", pair)
+				}
+				targets.WriteString(pair.Target)
+			}
+			for _, formula := range tt.formulas {
+				if !strings.Contains(targets.String(), "$"+formula+"$") {
+					t.Fatal("formula not restored", formula, items[0])
+				}
+			}
+			stored, err := s.readLayout("doc")
+			if err != nil || stored.Blocks[0].Text != tt.source || paragraph.Source != tt.source {
+				t.Fatal("rewrote original source", stored, err)
+			}
+		})
+	}
+}
+
+func TestTranslationMathRecoverySkipsAreDiagnosed(t *testing.T) {
+	const privateText = "PRIVATE_MATH_SOURCE_AND_MODEL_OUTPUT"
+	for _, reason := range []string{"block_not_found", "image_asset", "source_mismatch", "no_formulas"} {
+		t.Run(reason, func(t *testing.T) {
+			s, _, m := translationFixture(t)
+			m.Blocks = m.Blocks[:1]
+			m.Blocks[0].Text = privateText
+			paragraph := m.translationParagraphs()[0]
+			switch reason {
+			case "block_not_found":
+				m.Blocks = nil
+			case "image_asset":
+				m.Blocks[0].Image = "private-image.png"
+			case "source_mismatch":
+				m.Blocks[0].Text += " changed"
+			}
+			logs, err := diagnostics.New(t.TempDir(), "math-recovery-test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.SetDiagnostics(logs)
+			// A skipped recovery returns before rendering or calling a provider.
+			if _, err := s.recoverTranslationMath(t.Context(), Document{ID: "doc"}, m, paragraph, nil); !errors.Is(err, errTranslationMath) {
+				t.Fatal("changed skipped recovery behavior", err)
+			}
+			files, err := filepath.Glob(filepath.Join(logs.Dir, "*.jsonl"))
+			if err != nil || len(files) != 1 {
+				t.Fatal(files, err)
+			}
+			data, err := os.ReadFile(files[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var event map[string]any
+			if err := json.Unmarshal(data, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event["event"] != "translation.math_recovery.skipped" || event["level"] != "warn" || event["documentId"] != "doc" || event["target"] != paragraph.BlockID || event["reasonCode"] != reason {
+				t.Fatal("skipped recovery lost identifiers or stable reason", event)
+			}
+			if bytes.Contains(data, []byte(privateText)) || bytes.Contains(data, []byte("private-image")) {
+				t.Fatal("source or image path entered persistent diagnostics")
+			}
+			var bundle bytes.Buffer
+			if err := logs.Export(&bundle, s.Store.Root, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			archive, err := zip.NewReader(bytes.NewReader(bundle.Bytes()), int64(bundle.Len()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range archive.File {
+				reader, err := file.Open()
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err := io.ReadAll(reader)
+				reader.Close()
+				if err != nil || bytes.Contains(data, []byte(privateText)) || bytes.Contains(data, []byte("private-image")) {
+					t.Fatal("source or image path entered exported diagnostics", file.Name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestTranslationUnitGlyphsDoNotRequireMathRecovery(t *testing.T) {
+	for _, tt := range []struct{ name, source, target string }{
+		{"micro", "The distance is 5 \u00b5m.", "距离为 5 微米。"},
+		{"ohm", "The resistance is 10 \u2126.", "电阻为 10 欧姆。"},
+		{"kiloohm", "The resistance is 10 k\u2126.", "电阻为 10 千欧。"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _, m := translationFixture(t)
+			m.Blocks = m.Blocks[:1]
+			m.Blocks[0].Text = tt.source
+			var texts atomic.Int32
+			textAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				texts.Add(1)
+				para := readTranslationInput(t, r).Batch.Paragraphs[0]
+				pairs := []TranslationSentence{{Source: para.Source, Target: tt.target}}
+				writeAPIReply(w, jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": para.SourceHash, "sentences": pairs})+"\n")
+			}))
+			defer textAPI.Close()
+			// No image provider or verified image capability is configured.
+			configureTranslationTest(t, s, textAPI.URL)
+			doc, err := s.Store.Document("doc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := s.taskGenerationService(s.aiConfig(), taskTranslation)
+			batch := translationBatch{Paragraphs: m.translationParagraphs()}
+			if err := s.translateBatch(t.Context(), doc, m, batch, service, func() {}); err != nil {
+				t.Fatal(err)
+			}
+			items, err := s.translations("doc", m)
+			if err != nil || len(items) != 1 || items[0].Status != "complete" || len(items[0].Sentences) != 1 {
+				t.Fatal("unit translation required recovery", items, err)
+			}
+			pair := items[0].Sentences[0]
+			if texts.Load() != 1 || pair.Source != tt.source || pair.Target != tt.target {
+				t.Fatal("unit translation retried or changed text", texts.Load(), pair)
+			}
+		})
 	}
 }
