@@ -189,6 +189,23 @@ it("switches conversations and preserves drafts by category, with multiple conve
   expect(api.createLibraryChatSession).toHaveBeenCalledTimes(2);
 });
 
+it("keeps the current conversation when synchronization adds a newer conversation", async () => {
+  await render();
+  await type("正在编辑的草稿");
+  vi.mocked(api.libraryChatSessions).mockResolvedValue([
+    { ...saved, id: "library-synced", title: "另一台设备的新会话" },
+    saved,
+  ]);
+  await act(async () => {
+    window.dispatchEvent(
+      new CustomEvent("neoread:sync-applied", { detail: ["library"] }),
+    );
+  });
+  expect(selected().options).toHaveLength(2);
+  expect(selected().value).toBe(saved.id);
+  expect(host.querySelector("textarea")?.value).toBe("正在编辑的草稿");
+});
+
 it("keeps a conversation's paper scope fixed when the category membership changes", async () => {
   await render();
   await render("模型安全", ["alpha", "beta", "gamma"]);

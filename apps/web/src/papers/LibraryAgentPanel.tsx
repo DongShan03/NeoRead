@@ -181,6 +181,9 @@ export function LibraryAgentPanel({
   const current =
     visible.find((item) => item.id === selected[key]) ?? visible[0];
   useEffect(() => {
+    if (current && selected[key] !== current.id) select(key, current.id);
+  }, [key, current?.id, selected[key], select]);
+  useEffect(() => {
     if (
       loading ||
       error ||
