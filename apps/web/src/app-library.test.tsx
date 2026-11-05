@@ -2,17 +2,20 @@
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { defaultTheme, type Document } from "@neoread/core";
+import { defaultTheme, type Document, type Processing } from "@neoread/core";
 import { api } from "@neoread/api";
 import { App } from "./App";
 import { useReaderStore } from "./store";
 import { paper } from "./papers/fixtures";
 import { flushProgress } from "./progress";
 import type { DocumentTabs } from "./DocumentTabs";
+import type { LibraryDocuments } from "./LibraryDocuments";
+import { toast } from "sonner";
 const fixture = vi.hoisted(() => ({
   documents: [] as Document[],
   tabs: undefined as ComponentProps<typeof DocumentTabs> | undefined,
   shortcuts: new Map<string, () => void>(),
+  library: undefined as ComponentProps<typeof LibraryDocuments> | undefined,
 }));
 vi.mock("@neoread/api", () => ({
   RequestError: class extends Error {},
@@ -38,6 +41,7 @@ vi.mock("./shortcuts/shortcuts", async (original) => ({
     fixture.shortcuts.set(id, action);
   },
 }));
+vi.mock("sonner", () => ({ Toaster: () => null, toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("./progress", () => ({ flushProgress: vi.fn(async () => {}) }));
 vi.mock("./ProcessingStatus", () => ({ useProcessing: () => ({ jobs: [] }) }));
 vi.mock("./update-progress", () => ({ useUpdateProgress: vi.fn() }));
@@ -76,8 +80,10 @@ vi.mock("./papers/ImportPaperDialog", () => ({
   ImportPaperDialog: () => null,
 }));
 vi.mock("./LibraryDocuments", () => ({
-  LibraryDocuments: ({ documents }: { documents: Document[] }) =>
-    documents.map((doc) => <article key={doc.id}>{doc.title}</article>),
+  LibraryDocuments: (props: ComponentProps<typeof LibraryDocuments>) => {
+    fixture.library = props;
+    return props.documents.map((doc) => <article key={doc.id}>{doc.title}</article>);
+  },
 }));
 vi.mock("./DocumentManagement", () => ({
   LibraryFilterBar: () => null,
@@ -205,4 +211,17 @@ it("sends motion changes through the existing appearance bridge", async () => {
 it("opens the default settings tab from reader button callbacks", async () => {
   await act(async () => button("阅读设置").click());
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("agent");
+});
+
+it("keeps batch results and exits editing when recent-visit writes fail", async () => {
+  await act(async () => button("批量").click());
+  expect(fixture.library!.editing).toBe(true);
+  const blocked = paper({ id: "blocked" });
+  vi.mocked(api.processing).mockResolvedValue([{ documentId: blocked.id, phase: "learning", status: "running" } as Processing]);
+  vi.mocked(api.update).mockRejectedValueOnce(new Error("写入失败"));
+  await act(async () => fixture.library!.openDocuments!([fixture.documents[0], blocked]));
+  expect(toast.info).toHaveBeenCalledWith("已跳过 1 份文档：论文飞速解析中，请稍等");
+  expect(toast.error).toHaveBeenCalledWith("最近打开时间更新失败：写入失败");
+  await act(async () => fixture.tabs!.onLibrary());
+  expect(fixture.library!.editing).toBe(false);
 });

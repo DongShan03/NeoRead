@@ -352,12 +352,13 @@ const paperBlocked = (job?: Processing) =>
 /** Check all paper gates with one snapshot before opening a tab group. */
 export async function openLibraryDocuments(documents: Document[]) {
   const skipped: { document: Document; reason: string }[] = [];
-  if (!documents.length) return { opened: [], skipped };
+  const recentErrors: string[] = [];
+  if (!documents.length) return { opened: [], skipped, recentErrors };
   const revision = ++openRevision;
   const jobs = documents.some((doc) => doc.library === "papers")
     ? await api.processing()
     : [];
-  if (revision !== openRevision) return { opened: [], skipped };
+  if (revision !== openRevision) return { opened: [], skipped, recentErrors };
   const byId = new Map(jobs.map((job) => [job.documentId, job]));
   const opened = documents.filter((document) => {
     const job = byId.get(document.id);
@@ -367,9 +368,11 @@ export async function openLibraryDocuments(documents: Document[]) {
   });
   if (opened.length) {
     useReaderStore.getState().openMany(opened);
-    await Promise.all(opened.map((doc) => api.update(doc.id, {})));
+    const results = await Promise.allSettled(opened.map((doc) => api.update(doc.id, {})));
+    for (const result of results)
+      if (result.status === "rejected") recentErrors.push((result.reason as Error).message);
   }
-  return { opened, skipped };
+  return { opened, skipped, recentErrors };
 }
 
 /** Check the persisted parsing stage before entering a paper reader. */

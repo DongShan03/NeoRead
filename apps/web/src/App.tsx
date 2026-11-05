@@ -466,12 +466,14 @@ export function App() {
   }, [open]);
   const tabsShown = documentTabsShown({ theme, tabIds, closedTabGroups });
   const openDocuments = (docs: Document[]) => {
-    void openLibraryDocuments(docs).then(({ opened, skipped }) => {
+    void openLibraryDocuments(docs).then(({ opened, skipped, recentErrors }) => {
       if (opened.length) setEditingLibrary(false);
       if (skipped.length) {
         const reasons = [...new Set(skipped.map((item) => item.reason))].join("；");
         toast.info(`已跳过 ${skipped.length} 份文档：${reasons}`);
       }
+      if (recentErrors.length)
+        toast.error(`最近打开时间更新失败：${[...new Set(recentErrors)].join("；")}`);
     }).catch((e) => toast.error(e.message));
   };
   const filtered = useMemo(() => filterDocuments(

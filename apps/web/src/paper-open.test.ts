@@ -267,3 +267,16 @@ it("keeps Open With waiting for the learning phase before reporting incomplete t
     await rejection;
   } finally { vi.useRealTimers(); }
 });
+
+it("returns opened and skipped documents even when a recent-visit write fails", async () => {
+  const book = paper({ id: "book", library: "books" });
+  const other = paper({ id: "other", library: "books" });
+  vi.mocked(api.processing).mockResolvedValue([job()]);
+  vi.mocked(api.update).mockRejectedValueOnce(new Error("写入失败"));
+  const result = await openLibraryDocuments([book, doc, other]);
+  expect(result.opened).toEqual([book, other]);
+  expect(result.skipped).toEqual([{ document: doc, reason: "论文飞速解析中，请稍等" }]);
+  expect(result).toMatchObject({ recentErrors: ["写入失败"] });
+  expect(api.update).toHaveBeenCalledTimes(2);
+  expect(useReaderStore.getState().active).toEqual(book);
+});
