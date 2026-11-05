@@ -13,7 +13,7 @@ vi.mock("electron", () => ({
   dialog: { showErrorBox: state.failure },
 }));
 vi.mock("./startup-appearance-cache", () => ({
-  readStartupAppearance: () => "dark",
+  readStartupAppearance: () => ({ appearance: "dark", reducedMotion: true }),
 }));
 vi.mock("./startup-window", () => ({
   createStartupWindow: (...args: unknown[]) => state.create(...args),
@@ -51,7 +51,7 @@ it("creates themed feedback before importing business code and replays early ope
   const running = bootstrapDesktop(loadBusiness);
   state.app.emit("open-file", { preventDefault: vi.fn() }, "example.pdf");
   await Promise.resolve();
-  expect(state.create).toHaveBeenCalledWith(expect.any(Function), "dark");
+  expect(state.create).toHaveBeenCalledWith(expect.any(Function), "dark", true);
   expect(loadBusiness).not.toHaveBeenCalled();
   ready();
   await running;

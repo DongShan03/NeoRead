@@ -758,7 +758,12 @@ app
             ? "light"
             : "system";
       startupStage("startup.preferences_ready");
-      void saveStartupAppearance(app.getPath("userData"), appearance).catch(
+      void saveStartupAppearance(
+        app.getPath("userData"),
+        appearance ?? "system",
+        typeof preferences === "object" && preferences !== null && "reducedMotion" in preferences
+          ? preferences.reducedMotion === true : false,
+      ).catch(
         (error) =>
           diagnostics?.record("startup.appearance_cache_failed", error),
       );
@@ -1751,7 +1756,12 @@ app
         // Paper is a light theme for native chrome with its own background.
         nativeTheme.themeSource = appearance === "sepia" ? "light" : appearance;
         window.setBackgroundColor(windowBackground(appearance, palettes));
-        void saveStartupAppearance(app.getPath("userData"), appearance).catch(
+        void saveStartupAppearance(
+          app.getPath("userData"),
+          appearance,
+          typeof palettes === "object" && palettes !== null && "reducedMotion" in palettes
+            ? palettes.reducedMotion : undefined,
+        ).catch(
           (error) =>
             diagnostics?.record("startup.appearance_cache_failed", error),
         );

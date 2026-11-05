@@ -23,6 +23,7 @@ const firstContentPaint = `new Promise(resolve => {
 export function createStartupWindow(
   onClose: () => void,
   appearance: StartupAppearance = "system",
+  reducedMotion = false,
 ) {
   const dark =
     appearance === "dark" ||
@@ -78,7 +79,7 @@ export function createStartupWindow(
             `data:text/html;charset=utf-8,${encodeURIComponent(
               startupHTML.replace(
                 '<html lang="zh-CN">',
-                `<html lang="zh-CN" data-startup-theme="${dark ? "dark" : "light"}">`,
+                `<html lang="zh-CN" data-startup-theme="${dark ? "dark" : "light"}" data-reduced-motion="${reducedMotion}">`,
               ),
             )}`,
           ),

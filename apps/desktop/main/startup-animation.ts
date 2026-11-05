@@ -12,13 +12,13 @@ export type StartupAssets = {
 // The page's <script> must contain exactly this text: startup-window.ts
 // authorizes it with a CSP SHA-256 hash.
 export const startupAnimationScript = `(() => {
-  const motion = matchMedia("(prefers-reduced-motion: reduce)");
+  const reducedMotion = document.documentElement.dataset.reducedMotion === "true";
   const pick = (selector) => document.querySelector(selector);
   let running = [];
   let paused = [];
   const ease = "cubic-bezier(.2,.7,.2,1)";
   function start(entrance) {
-    if (motion.matches || typeof document.body.animate !== "function") return;
+    if (reducedMotion || typeof document.body.animate !== "function") return;
     const mark = pick(".mark"), wipe = pick(".wipe"), track = pick(".track"), bead = pick(".bead");
     const wait = entrance ? 700 : 0;
     if (entrance) running.push(
@@ -45,15 +45,12 @@ export const startupAnimationScript = `(() => {
     paused = [];
   }
   const onVisibility = () => (document.hidden ? pause() : resume());
-  const onMotion = () => (motion.matches ? stop() : running.length || start(false));
   function onPageHide() {
     stop();
     document.removeEventListener("visibilitychange", onVisibility);
-    motion.removeEventListener("change", onMotion);
     removeEventListener("pagehide", onPageHide);
   }
   document.addEventListener("visibilitychange", onVisibility);
-  motion.addEventListener("change", onMotion);
   addEventListener("pagehide", onPageHide);
   start(true);
 })();`;

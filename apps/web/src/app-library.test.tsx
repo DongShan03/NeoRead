@@ -192,3 +192,12 @@ it("imports directly from a truly empty book library", async () => {
   const button = [...host.querySelectorAll<HTMLButtonElement>(".empty-state button")].find((el) => el.textContent === "导入文档")!;
   await act(async () => button.click()); expect(click).toHaveBeenCalledOnce();
 });
+
+it("sends motion changes through the existing appearance bridge", async () => {
+  const setAppearance = vi.fn(async () => {});
+  vi.stubGlobal("neoreadDesktop", { setAppearance });
+  await act(async () => useReaderStore.getState().setTheme({ reducedMotion: true }));
+  expect(setAppearance).toHaveBeenLastCalledWith("system", expect.objectContaining({ reducedMotion: true }));
+  await act(async () => useReaderStore.getState().setTheme({ reducedMotion: false }));
+  expect(setAppearance).toHaveBeenLastCalledWith("system", expect.objectContaining({ reducedMotion: false }));
+});

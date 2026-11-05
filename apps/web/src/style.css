@@ -4518,7 +4518,7 @@ textarea.paper-note-editor-input {
   background: var(--muted);
   border-radius: 6px;
 }
-@media (prefers-reduced-motion: no-preference) {
+:root:not([data-reduced-motion="true"]) {
   .paper-note button,
   .paper-note-dialog button {
     transition:
@@ -4541,7 +4541,7 @@ textarea.paper-note-editor-input {
       box-shadow 150ms ease;
   }
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-reduced-motion="true"] {
   .paper-note-dialog,
   .paper-note-dialog *,
   .paper-note,
@@ -4582,4 +4582,3 @@ textarea.paper-note-editor-input {
   font-weight: 500;
   pointer-events: none;
 }
-

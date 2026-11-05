@@ -204,6 +204,7 @@ export function App() {
     applyDocumentTheme(resolvedTheme);
     void window.neoreadDesktop
       ?.setAppearance(theme.appearance ?? "system", {
+        reducedMotion: theme.reducedMotion === true,
         pdfDarkContrast: theme.pdfDarkContrast,
         systemLightMode: theme.systemLightMode,
         systemDarkContrast: theme.systemDarkContrast,
@@ -213,6 +214,7 @@ export function App() {
     resolvedTheme.mode,
     resolvedTheme.pdfDarkContrast,
     theme.appearance,
+    theme.reducedMotion,
     theme.pdfDarkContrast,
     theme.systemLightMode,
     theme.systemDarkContrast,
