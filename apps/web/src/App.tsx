@@ -1,3 +1,4 @@
+import { QuickFind } from "./QuickFind";
 import { useShortcut, loadBindings, isMac } from "./shortcuts/shortcuts";
 import { libraryShortcut } from "./library-shortcuts";
 import { useSaveReaderSettings } from "./neoread-settings";
@@ -12,7 +13,6 @@ import {
   FileText,
   Loader2,
   PanelLeft,
-  Command,
   X,
   Tags,
   CheckSquare,
@@ -161,7 +161,6 @@ export function App() {
   );
   const [usageDocument, setUsageDocument] = useState<Document | null>(null);
   const [query, setQuery] = useState("");
-  const [commandQuery, setCommandQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [largePapers, setLargePapers] = useState<LargePaper[]>([]);
   const [largePaperFolder, setLargePaperFolder] = useState("");
@@ -476,12 +475,6 @@ export function App() {
     filter === "all" ? "" : query,
     filters,
   ), [documents, filter, query, filters]);
-  const searchResults = useMemo(() => command ? filterDocuments(
-    documents,
-    "all",
-    commandQuery,
-    initialFilters,
-  ) : [], [command, documents, commandQuery]);
   const awaitingClassification = documents.some(
     (d) =>
       d.classificationStatus === "pending" ||
@@ -1015,53 +1008,10 @@ export function App() {
             )}
           </DialogContent>
         </Dialog>
-        <Dialog open={command} onOpenChange={setCommand}>
-          <DialogContent data-quick-find>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Command size={18} />
-                快速查找
-              </DialogTitle>
-              <DialogDescription>搜索书库，或打开常用操作。</DialogDescription>
-            </DialogHeader>
-            <Input
-              autoFocus
-              placeholder="搜索标题、作者、标签…"
-              value={commandQuery}
-              onChange={(e) => setCommandQuery(e.target.value)}
-            />
-            <div className="min-w-0 max-h-72 space-y-1 overflow-auto">
-              {searchResults.map((d) => (
-                <Button
-                  key={d.id}
-                  variant="ghost"
-                  className="min-w-0 w-full justify-start"
-                  title={d.title}
-                  onClick={() => {
-                    openDocument(d);
-                    setCommand(false);
-                  }}
-                >
-                  <BookOpen />
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {d.title}
-                  </span>
-                </Button>
-              ))}
-              <Button
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={() => {
-                  setCommand(false);
-                  openSettings();
-                }}
-              >
-                <Settings2 />
-                打开设置
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <QuickFind open={command} onOpenChange={setCommand} documents={documents} mode={mode}
+          onDocument={openDocument} onSettings={openSettings}
+          onImport={() => papers ? setImportingPaper(true) : chooseFiles()}
+          onSwitchLibrary={() => openLibrary(papers ? "books" : "papers")} />
         <LargePaperConfirmation />
         <LargePaperDialog
           papers={largePapers}
