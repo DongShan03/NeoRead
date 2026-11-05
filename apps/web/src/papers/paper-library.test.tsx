@@ -2575,3 +2575,13 @@ it("shows connection and processing failures instead of an empty paper library",
   expect(host.textContent).toContain("解析进度暂时不可用：进度读取失败");
   expect(host.textContent).not.toContain("暂无论文");
 });
+
+it("offers the existing import flow in a truly empty library", async () => {
+  const onImport = vi.fn();
+  await act(async () => root.render(
+    <PaperLibrary documents={[]} trash={[]} jobs={new Map()} loading={false}
+      onImport={onImport} openDocument={open} moveToBooks={() => {}} navOpen={false} onToggleNav={() => {}} />,
+  ));
+  const button = [...host.querySelectorAll("button")].find((el) => el.textContent === "导入论文")!;
+  await act(async () => button.click()); expect(onImport).toHaveBeenCalledOnce();
+});

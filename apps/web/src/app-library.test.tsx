@@ -185,3 +185,10 @@ it("shows an actionable favorites empty state", async () => {
     "收藏",
   );
 });
+
+it("imports directly from a truly empty book library", async () => {
+  await act(async () => useReaderStore.getState().setDocuments([]));
+  const click = vi.spyOn(host.querySelector<HTMLInputElement>('input[type="file"]')!, "click").mockImplementation(() => {});
+  const button = [...host.querySelectorAll<HTMLButtonElement>(".empty-state button")].find((el) => el.textContent === "导入文档")!;
+  await act(async () => button.click()); expect(click).toHaveBeenCalledOnce();
+});

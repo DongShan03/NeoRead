@@ -187,6 +187,7 @@ export interface PaperLibraryProps {
   loading: boolean;
   error?: string;
   processingError?: string;
+  onImport?: () => void;
   openDocument: (doc: Document) => void;
   openDocuments?: (docs: Document[]) => void;
   moveToBooks: (doc: Document) => void;
@@ -205,6 +206,7 @@ export function PaperLibrary({
   loading,
   error,
   processingError,
+  onImport,
   openDocument,
   openDocuments,
   moveToBooks,
@@ -741,6 +743,7 @@ export function PaperLibrary({
   const emptyState = (
     <div className="empty-state">
       <h2>{documents.length ? "没有符合条件的论文" : "暂无论文"}</h2>
+      {!documents.length && <Button onClick={onImport}>导入论文</Button>}
       {documents.length > 0 &&
         (query || view !== "all" || tagFilter.tags.length > 0) && (
           <Button

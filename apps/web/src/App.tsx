@@ -706,6 +706,7 @@ export function App() {
                 loading={loading}
                 error={error}
                 processingError={processingError}
+                onImport={() => setImportingPaper(true)}
                 openDocument={openDocument}
                 moveToBooks={(doc) => void moveDocument(doc, "books")}
                 navOpen={nav}
@@ -892,6 +893,8 @@ export function App() {
                             </Button>
                           )}
                           {!documents.length && filter !== "favorites" && (
+                            <>
+                            <Button onClick={() => chooseFiles()} disabled={busy}>导入文档</Button>
                             <Button
                               variant="link"
                               onClick={() => void sample()}
@@ -899,6 +902,7 @@ export function App() {
                             >
                               先体验示例文档 <ArrowUpRight className="size-3" />
                             </Button>
+                            </>
                           )}
                         </div>
                       )}
@@ -1023,6 +1027,7 @@ export function App() {
         <LibraryArchiveProgress onBackground={() => setSettings(false)} />
         <Toaster
           richColors
+          style={{ "--normal-bg": "var(--popover)", "--normal-border": "var(--border)", "--normal-text": "var(--popover-foreground)" } as React.CSSProperties}
           position="bottom-right"
           theme={resolvedTheme.mode === "dark" ? "dark" : "light"}
         />
