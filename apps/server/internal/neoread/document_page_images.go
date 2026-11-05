@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image/png"
 	"io"
+	"log/slog"
 	"neoread.local/server/internal/runtimeenv"
 	"os"
 	"path/filepath"
@@ -20,13 +21,14 @@ const pageImageVersion = "pdfjs-pages-v1"
 const pageImageTokens = 8192 // Conservative context estimate, not billable usage.
 
 type documentPageImage struct {
-	Bytes    int    `json:"bytes"`
-	Page     int    `json:"page"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	Revision string `json:"corpusRevision"`
-	Hash     string `json:"contentHash"`
-	SourceID string `json:"sourceId"`
+	DocumentID string `json:"documentId,omitempty"`
+	Bytes      int    `json:"bytes"`
+	Page       int    `json:"page"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	Revision   string `json:"corpusRevision"`
+	Hash       string `json:"contentHash"`
+	SourceID   string `json:"sourceId"`
 }
 
 func pageImageName(revision string, page int) (string, error) {
@@ -60,7 +62,7 @@ func (s *Server) cachedPageImage(documentID, revision string, page int) ([]byte,
 	if err != nil || config.Width < 1 || config.Height < 1 || int64(config.Width)*int64(config.Height) > 4_100_000 {
 		return nil, image, generationError(ErrorProtocol, "页面图片格式无效")
 	}
-	image = documentPageImage{Page: page, Width: config.Width, Height: config.Height, Bytes: len(data), Revision: revision, Hash: sourceKey(string(data))}
+	image = documentPageImage{DocumentID: documentID, Page: page, Width: config.Width, Height: config.Height, Bytes: len(data), Revision: revision, Hash: sourceKey(string(data))}
 	return data, image, nil
 }
 
@@ -135,9 +137,28 @@ func pageEvidence(image documentPageImage) documentEvidence {
 }
 
 func (a *documentAgent) pageImageData(image documentPageImage) ([]byte, error) {
-	data, actual, err := a.server.cachedPageImage(a.corpus.DocumentID, image.Revision, image.Page)
-	if err != nil || actual.Hash != image.Hash {
+	failure := func(reason string) ([]byte, error) {
+		a.server.diagnosticEvent(slog.LevelError, "document.page_image.failed", "attemptId", a.ID, "provider", a.provider, "requestId", requestID(a.ctx), "page", image.Page, "errorCode", ErrorProtocol, "reasonCode", reason)
 		return nil, generationError(ErrorProtocol, "已读页面图片不可用，请重新读取")
+	}
+	documentID := image.DocumentID
+	if documentID == "" && a.corpus.Library == nil {
+		// Existing single-document conversations predate documentId on images.
+		documentID = a.corpus.DocumentID
+	}
+	if library := a.corpus.Library; library != nil {
+		if library.Sources[documentID] == nil {
+			return failure("document_out_of_scope")
+		}
+	} else if documentID != a.corpus.DocumentID {
+		return failure("document_out_of_scope")
+	}
+	data, actual, err := a.server.cachedPageImage(documentID, image.Revision, image.Page)
+	if err != nil {
+		return failure("cache_unavailable")
+	}
+	if actual.Hash != image.Hash {
+		return failure("content_hash_mismatch")
 	}
 	return data, nil
 }
@@ -163,11 +184,11 @@ func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) 
 		return map[string]any{"error": "vision_unavailable", "message": "The current model has no verified image input capability. Do not infer unseen figures."}, nil
 	}
 	collection := a.corpus
+	corpus := collection
 	pageOffset := 0
 	if collection.Library != nil {
 		if source := collection.Library.Sources[q.DocumentID]; source != nil {
-			a.corpus = source
-			defer func() { a.corpus = collection }()
+			corpus = source
 			pageOffset = len(collection.Passages) + collection.Library.PageOffsets[q.DocumentID]
 		} else {
 			return map[string]any{"error": "invalid_document", "message": "Choose documentId from get_outline before reading pages."}, nil
@@ -175,7 +196,7 @@ func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) 
 	} else if q.DocumentID != "" && q.DocumentID != collection.DocumentID {
 		return map[string]any{"error": "invalid_document"}, nil
 	}
-	d, err := a.server.Store.Document(a.corpus.DocumentID)
+	d, err := a.server.Store.Document(corpus.DocumentID)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +205,7 @@ func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) 
 	}
 	pages, seen := []int{}, map[int]bool{}
 	for _, p := range q.Pages {
-		if p < 1 || p > a.corpus.Coverage.TotalUnits {
+		if p < 1 || p > corpus.Coverage.TotalUnits {
 			return map[string]any{"error": "invalid_page"}, nil
 		}
 		if !seen[p] {
@@ -206,14 +227,14 @@ func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) 
 			return nil, err
 		}
 	}
-	images, err := a.server.renderDocumentPages(ctx, a.corpus, pages[:count])
+	images, err := a.server.renderDocumentPages(ctx, corpus, pages[:count])
 	if err != nil {
 		return nil, err
 	}
 	if err = a.check(ctx); err != nil {
 		return nil, err
 	}
-	offset := len(a.corpus.Passages)
+	offset := len(corpus.Passages)
 	if collection.Library != nil {
 		offset = pageOffset
 	}
@@ -233,7 +254,7 @@ func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) 
 			evidence := pageEvidence(images[i])
 			if collection.Library != nil {
 				evidence.DocumentID = q.DocumentID
-				evidence.DocumentRevision = a.corpus.Revision
+				evidence.DocumentRevision = corpus.Revision
 				evidence.DocumentTitle = d.Title
 				evidence.Revision = collection.Revision
 			}

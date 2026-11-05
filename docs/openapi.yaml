@@ -7874,6 +7874,7 @@
                 ],
               "properties":
                 {
+                  "documentId": { "type": "string" },
                   "page": { "type": "integer", "minimum": 1 },
                   "width": { "type": "integer" },
                   "height": { "type": "integer" },

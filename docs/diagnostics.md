@@ -187,6 +187,8 @@ Claude/Kimi 的书库读取在提供方结束或失败时汇总 `chat.library_re
 
 `chat.document_tools` 记录 Claude/Kimi 的 `provider` 和权限检查 `status`。Claude 为 `passed/missing_tools/extra_tools`，必须在任何文字前核验四个文档工具，以及按本轮授权启用的 WebSearch/WebFetch，并确认唯一 MCP 为 connected。Kimi 为 `inventory_unavailable/unsupported_http/session_rejected`：先独立核验应用 MCP 的四工具集合，但 ACP 不提供远端实际清单，绝不把它记为通过；运行时发现额外工具即取消，不保存回答。无 HTTP MCP 能力或建立 MCP 会话被拒绝时才退回文字检索；已经输出后不回退。检索失败和零命中分开处理；回退摘要读取仍由同一文档工具及预算约束。
 
+`document.page_image.failed` 记录返回 PDF 页面图片时的读取失败，关联 `attemptId`、`requestId` 和 `provider`，仅附页码及固定 `reasonCode=document_out_of_scope / cache_unavailable / content_hash_mismatch`，分别表示来源不在当前会话范围、缓存不可用、图片内容已改变。不记录图片数据、论文标题、路径或原始异常。
+
 会话删除成功记录 `chat.session_deleted`；事务失败记录 `chat.session_delete_failed`，`errorCode=save`，原记录保持不变。两者通过 `requestId`、`documentId` 和 `sessionId` 关联操作，不记录会话标题、消息、批注或外部 thread 内容。运行中的删除拒绝和会话不存在等响应沿用 HTTP 请求日志。
 
 正文公式修复通过 `translation.math_recovery.started / finished` 记录文档、段落标识、公式数量、耗时及结果。阶段为 rendering、recognizing、translating、saving；沿用提供方生成事件记录外部调用和终态。失败日志仅包含稳定错误类别，不记录截图、公式内容、模型输出或本机路径。

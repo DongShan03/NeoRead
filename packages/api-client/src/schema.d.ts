@@ -6491,6 +6491,7 @@ export interface components {
             warnings: string[];
         };
         PageImageEvidence: {
+            documentId?: string;
             page: number;
             width: number;
             height: number;

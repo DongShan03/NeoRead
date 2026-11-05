@@ -622,6 +622,7 @@ export interface DocumentSourceReference {
   documentRevision?: string;
   /** Rendered page evidence, separate from extracted text. */
   pageImage?: {
+    documentId?: string;
     page: number;
     width: number;
     height: number;
