@@ -61,6 +61,14 @@
                               "additionalProperties": false,
                               "properties":
                                 {
+                                  "id":
+                                    {
+                                      "type": "string",
+                                      "pattern": "^library-[a-fA-F0-9]{32}$",
+                                    },
+                                  "title":
+                                    { "type": "string", "maxLength": 80 },
+
                                   "provider":
                                     {
                                       "enum":
@@ -109,6 +117,36 @@
         },
       "/api/library/chat-sessions/{session}":
         {
+          "delete":
+            {
+              "summary": "Delete an idle conversation and its saved messages",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "204": { "description": "Conversation deleted" },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+
           "patch":
             {
               "summary": "Rename a session or change its backend while idle",
@@ -6570,6 +6608,12 @@
                               "additionalProperties": false,
                               "properties":
                                 {
+                                  "id":
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-fA-F0-9]{32}$",
+                                    },
+
                                   "title":
                                     { "type": "string", "maxLength": 80 },
                                   "provider":
@@ -6616,6 +6660,42 @@
         },
       "/api/documents/{id}/chat-sessions/{session}":
         {
+          "delete":
+            {
+              "summary": "Delete an idle conversation and its saved messages",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "204": { "description": "Conversation deleted" },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+
           "patch":
             {
               "summary": "Rename a session or change its backend while idle",

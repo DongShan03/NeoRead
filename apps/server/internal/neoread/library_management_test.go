@@ -1238,6 +1238,7 @@ func chatArchiveSnapshot(t *testing.T, store *Store) map[string][]string {
 
 func TestChatSessionsPersistAndMigrateAfterEditsAndWithdrawals(t *testing.T) {
 	s, a, b, _ := chatEditFixture(t)
+	createSessionTest(t, s) // Explicitly retain an empty session; listing no longer creates one.
 	if _, err := s.Store.DB.Exec("UPDATE chat_sessions SET title=CASE id WHEN ? THEN '公式讨论' WHEN ? THEN '方法讨论' ELSE title END,provider=CASE id WHEN ? THEN 'codex' ELSE provider END", a.ID, b.ID, b.ID); err != nil {
 		t.Fatal(err)
 	}

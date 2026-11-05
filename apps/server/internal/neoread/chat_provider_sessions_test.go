@@ -920,3 +920,162 @@ func TestLibraryChatManagedCodexStreamsAndContinuesWithoutCreatingPaperRows(t *t
 		t.Fatal("withdrawal changed the wrong session", history, err)
 	}
 }
+
+func TestConversationListsStayEmptyUntilExplicitCreationAndStableIDsAreIdempotent(t *testing.T) {
+	s := testServer(t)
+	archiveDocument(t, s.Store, "doc", "研究")
+	if _, err := s.Store.DB.Exec("DELETE FROM messages"); err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{"doc", "library"} {
+		root := "/api/documents/doc/chat-sessions"
+		requestID := id()
+		body := map[string]any{"id": requestID, "title": "首条问题命名", "provider": "api"}
+		if owner == "library" {
+			root = "/api/library/chat-sessions"
+			requestID = "library-" + requestID
+			body["id"] = requestID
+			body["scope"] = libraryChatScope{Category: "研究", CategoryKey: "folder:研究", DocumentIDs: []string{"doc"}}
+		}
+		for attempt := 0; attempt < 2; attempt++ {
+			out := request(t, s, "GET", root, nil)
+			var items []ChatSession
+			if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &items) != nil || len(items) != 0 {
+				t.Fatal("listing created an empty session", out.Code, out.Body.String())
+			}
+		}
+		for attempt := 0; attempt < 2; attempt++ {
+			out := request(t, s, "POST", root, strings.NewReader(jsonText(body)))
+			if out.Code != 201 {
+				t.Fatal(out.Code, out.Body.String())
+			}
+		}
+		out := request(t, s, "GET", root, nil)
+		var items []ChatSession
+		if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &items) != nil || len(items) != 1 || items[0].ID != requestID || items[0].Title != "首条问题命名" {
+			t.Fatal("retry created another conversation", out.Body.String())
+		}
+	}
+}
+
+func TestDeleteConversationIsScopedAtomicAndDoesNotRecreateAnEmptyHistory(t *testing.T) {
+	for _, owner := range []string{"doc", "library"} {
+		t.Run(owner, func(t *testing.T) {
+			s := testServer(t)
+			archiveDocument(t, s.Store, "doc", "研究")
+			if _, err := s.Store.DB.Exec("DELETE FROM messages"); err != nil {
+				t.Fatal(err)
+			}
+			root := "/api/documents/doc/chat-sessions"
+			first, second := ChatSession{}, ChatSession{}
+			if owner == "library" {
+				root = "/api/library/chat-sessions"
+				first = createLibrarySessionTest(t, s, "doc").ChatSession
+				second = createLibrarySessionTest(t, s, "doc").ChatSession
+			} else {
+				first = createSessionTest(t, s)
+				second = createSessionTest(t, s)
+			}
+			for _, item := range []ChatSession{first, second} {
+				for _, role := range []string{"user", "assistant"} {
+					if err := s.Store.saveMessage(Message{ID: item.ID + "-" + role, DocumentID: owner, SessionID: item.ID, Role: role, Content: "saved " + role}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err := s.Store.DB.Exec("INSERT INTO "+chatTable(owner, "chat_agent_runs")+" VALUES(?,?,?)", item.ID+"-evidence", owner, jsonText(map[string]string{"messageId": item.ID + "-assistant"})); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Store.DB.Exec("INSERT INTO "+chatTable(owner, "chat_runs")+" VALUES(?,?,?)", item.ID+"-run", item.ID, jsonText(ChatRun{ID: item.ID + "-run", SessionID: item.ID, DocumentID: owner, Status: "completed"})); err != nil {
+					t.Fatal(err)
+				}
+				if err := saveDocumentConversation(t.Context(), s.Store.DB, owner, conversationProvider(item.ID, "codex"), documentConversation{ID: id(), NativeThread: "retained-external-thread"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if owner == "doc" {
+				archiveDocument(t, s.Store, "other", "研究")
+				out := request(t, s, "DELETE", "/api/documents/other/chat-sessions/"+first.ID, nil)
+				if out.Code != 404 {
+					t.Fatal("deleted another document's conversation", out.Code)
+				}
+				if _, err := s.Store.DB.Exec("DELETE FROM messages WHERE document_id='other'"); err != nil {
+					t.Fatal(err)
+				}
+				for _, item := range []ChatSession{first, second} {
+					body := jsonText(map[string]any{"id": item.ID + "-note", "documentId": owner, "note": "保留批注内容", "answerId": item.ID + "-assistant", "resolved": true})
+					if _, err := s.Store.DB.Exec("INSERT INTO annotations(id,document_id,body) VALUES(?,?,?)", item.ID+"-note", owner, body); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			s.chatReservations = map[string]bool{first.ID: true}
+			out := request(t, s, "DELETE", root+"/"+first.ID, nil)
+			if out.Code != 409 {
+				t.Fatal("deleted a reserved answer", out.Code, out.Body.String())
+			}
+			delete(s.chatReservations, first.ID)
+			// A database failure must roll back the entire transcript and continuation removal.
+			table := chatTable(owner, "chat_sessions")
+			if _, err := s.Store.DB.Exec("CREATE TRIGGER fail_session_delete BEFORE DELETE ON " + table + " BEGIN SELECT RAISE(ABORT,'test rollback'); END"); err != nil {
+				t.Fatal(err)
+			}
+			out = request(t, s, "DELETE", root+"/"+first.ID, nil)
+			if out.Code != 500 {
+				t.Fatal("failed delete was accepted", out.Code)
+			}
+			if history, err := s.Store.chatHistory(owner, first.ID); err != nil || len(history) != 2 {
+				t.Fatal("rollback lost messages", history, err)
+			}
+			if _, err := s.Store.DB.Exec("DROP TRIGGER fail_session_delete"); err != nil {
+				t.Fatal(err)
+			}
+			out = request(t, s, "DELETE", root+"/"+first.ID, nil)
+			if out.Code != 204 {
+				t.Fatal(out.Code, out.Body.String())
+			}
+			if history, err := s.Store.chatHistory(owner, second.ID); err != nil || len(history) != 2 {
+				t.Fatal("deleted another conversation", history, err)
+			}
+			if owner == "doc" {
+				for _, item := range []ChatSession{first, second} {
+					var note, answer string
+					var resolved bool
+					if err := s.Store.DB.QueryRow("SELECT json_extract(body,'$.note'),json_extract(body,'$.answerId'),json_extract(body,'$.resolved') FROM annotations WHERE id=?", item.ID+"-note").Scan(&note, &answer, &resolved); err != nil {
+						t.Fatal(err)
+					}
+					want := item.ID + "-assistant"
+					if item.ID == first.ID {
+						want = ""
+					}
+					if note != "保留批注内容" || answer != want || resolved != (item.ID == second.ID) {
+						t.Fatal("annotation content or answer association changed incorrectly", note, answer, resolved)
+					}
+				}
+			}
+			for _, name := range []string{"chat_sessions", "chat_runs", "messages", "document_conversations", "chat_agent_runs"} {
+				var count int
+				if err := s.Store.DB.QueryRow("SELECT count(*) FROM " + chatTable(owner, name)).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				want := 1
+				if name == "messages" {
+					want = 2
+				}
+				if count != want {
+					t.Fatal(name, count, want)
+				}
+			}
+			if out = request(t, s, "DELETE", root+"/"+first.ID, nil); out.Code != 204 {
+				t.Fatal("delete retry was not idempotent", out.Code)
+			}
+			if out = request(t, s, "DELETE", root+"/"+second.ID, nil); out.Code != 204 {
+				t.Fatal(out.Code)
+			}
+			out = request(t, s, "GET", root, nil)
+			var items []ChatSession
+			if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &items) != nil || len(items) != 0 {
+				t.Fatal("deleted last conversation was recreated", out.Body.String())
+			}
+		})
+	}
+}

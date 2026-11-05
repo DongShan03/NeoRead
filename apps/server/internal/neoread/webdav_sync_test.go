@@ -1982,6 +1982,19 @@ func TestWebDAVSyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T) {
 	if err != nil || len(items) != 3 || items[2].Content != "follow-up" {
 		t.Fatal(items, err)
 	}
+	if out := request(t, a, "DELETE", "/api/library/chat-sessions/"+item.ID, nil); out.Code != 204 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	runSync(t, a)
+	runSync(t, b)
+	runSync(t, a)
+	if _, err = b.Store.chatSession(libraryChatOwner, item.ID); err == nil {
+		t.Fatal("deleted conversation reappeared after sync")
+	}
+	if messages, err := b.Store.chatHistory(libraryChatOwner, item.ID); err != nil || len(messages) != 0 {
+		t.Fatal("deleted conversation messages remained on peer", messages, err)
+	}
+
 }
 
 func TestWebDAVLocalStorageMigrationRemovesReplacedStateAfterCommit(t *testing.T) {

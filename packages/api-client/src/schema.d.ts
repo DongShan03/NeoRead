@@ -53,6 +53,8 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        id?: string;
+                        title?: string;
                         /** @enum {unknown} */
                         provider: "api" | "codex" | "claude" | "kimi";
                         scope: components["schemas"]["LibraryChatScope"];
@@ -96,7 +98,36 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete an idle conversation and its saved messages */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    session: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Conversation deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         /** Rename a session or change its backend while idle */
@@ -5805,6 +5836,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        id?: string;
                         title?: string;
                         /** @enum {unknown} */
                         provider: "api" | "codex" | "claude" | "kimi";
@@ -5848,7 +5880,37 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete an idle conversation and its saved messages */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    session: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Conversation deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         /** Rename a session or change its backend while idle */

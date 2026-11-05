@@ -217,3 +217,17 @@ func (c *codexChatCache) deleteDocument(document string) {
 		c.discardLocked()
 	}
 }
+
+func (c *codexChatCache) deleteMessages(document string, ids []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entry == nil || c.entry.document != document || c.entry.pending != nil {
+		return
+	}
+	for _, id := range ids {
+		if c.entry.savedID == id {
+			c.discardLocked()
+			return
+		}
+	}
+}

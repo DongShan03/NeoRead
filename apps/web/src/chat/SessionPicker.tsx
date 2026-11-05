@@ -1,15 +1,30 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Trash2, ChevronDown, Check } from "lucide-react";
 import { api } from "@neoread/api";
 import type { DocumentChatSession } from "@neoread/core";
 import { Button } from "@neoread/ui/components/button";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@neoread/ui/components/select";
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@neoread/ui/components/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@neoread/ui/components/alert-dialog";
+import {
+  chatSessionBusy,
+  chatSessionRecordId,
+  forgetChatSession,
+  isDraftSession,
+} from "./session-registry";
 import {
   Dialog,
   DialogContent,
@@ -30,24 +45,26 @@ export function SessionPicker({
   documentId,
   sessions,
   current,
-  provider,
   continueAction,
   onChange,
   onRefresh,
   onCreate,
+  onDeleted,
 }: {
   documentId: string;
   sessions: DocumentChatSession[];
   current?: DocumentChatSession;
-  provider: string;
   continueAction?: ReactNode;
   onChange: (id: string) => void;
   onRefresh: () => Promise<void>;
-  onCreate?: () => Promise<void>;
+  onCreate: () => Promise<void>;
+  onDeleted: (id: string) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState<DocumentChatSession>();
   useEffect(() => {
     setRenaming(false);
     setSaving(false);
@@ -55,16 +72,30 @@ export function SessionPicker({
   const create = async () => {
     setSaving(true);
     try {
-      if (onCreate) {
-        await onCreate();
-        return;
+      await onCreate();
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = async (item: DocumentChatSession) => {
+    if (chatSessionBusy(documentId, item.id)) {
+      toast.error("请先停止此会话的回答，再删除会话");
+      return;
+    }
+    setSaving(true);
+    try {
+      const recordId = chatSessionRecordId(documentId, item.id);
+      if (recordId) await api.deleteChatSession(documentId, recordId);
+      forgetChatSession(documentId, item.id);
+      onDeleted(item.id);
+      if (current?.id === item.id) {
+        const next = sessions.find((s) => s.id !== item.id);
+        if (next) onChange(next.id);
       }
-      const session = await api.createChatSession(
-        documentId,
-        provider || "api",
-      );
+      setDeleting(undefined);
       await onRefresh();
-      onChange(session.id);
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -87,38 +118,73 @@ export function SessionPicker({
   return (
     <div className="pointer-events-none absolute inset-x-3 top-2 z-10 min-w-0">
       <div className="flex min-w-0 items-center gap-1 [&>button]:pointer-events-auto">
-        <Select
-          value={current?.id ?? null}
-          onValueChange={(id) => {
-            if (id) onChange(id);
-          }}
-        >
-          <SelectTrigger
-            className="h-8 min-w-0 flex-1 bg-background dark:bg-background dark:hover:bg-muted"
-            aria-label="选择会话"
+        <DropdownMenu open={open} onOpenChange={setOpen}>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="outline"
+                className="h-8 min-w-0 flex-1 justify-between bg-background text-sm dark:bg-background dark:hover:bg-muted"
+                aria-label="选择会话"
+              />
+            }
           >
-            <SelectValue className="truncate">
-              {current?.title ?? "加载会话…"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
+            <span className="min-w-0 truncate">
+              {current?.title ?? "新会话"}
+            </span>
+            <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="min-w-60" align="start">
             {sessions.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                <span className="max-w-44 truncate">{s.title}</span>
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {s.latestRun ? statusLabels[s.latestRun.status] : ""}
-                </span>
-              </SelectItem>
+              <div
+                key={s.id}
+                className="flex items-center gap-1"
+                role="group"
+                aria-label={s.title}
+              >
+                <DropdownMenuItem
+                  className="min-w-0 flex-1"
+                  aria-current={s.id === current?.id ? true : undefined}
+                  onClick={() => onChange(s.id)}
+                >
+                  <span className="flex size-4 shrink-0 items-center">
+                    {s.id === current?.id && <Check className="size-3.5" />}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                  <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                    {isDraftSession(s.id)
+                      ? "未发送"
+                      : s.latestRun
+                        ? statusLabels[s.latestRun.status]
+                        : ""}
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="size-7 shrink-0 justify-center p-1"
+                  variant="destructive"
+                  aria-label={`删除会话：${s.title}`}
+                  disabled={
+                    saving ||
+                    s.latestRun?.status === "running" ||
+                    chatSessionBusy(documentId, s.id)
+                  }
+                  onClick={() => {
+                    if (isDraftSession(s.id)) void remove(s);
+                    else setDeleting(s);
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                </DropdownMenuItem>
+              </div>
             ))}
-          </SelectContent>
-        </Select>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {continueAction}
         <Button
           variant="ghost"
           size="icon-xs"
           className="bg-background dark:hover:bg-muted disabled:text-muted-foreground disabled:opacity-100"
           aria-label="重命名会话"
-          disabled={!current || saving}
+          disabled={!current || isDraftSession(current.id) || saving}
           onClick={() => {
             setName(current?.title ?? "");
             setRenaming(true);
@@ -137,6 +203,33 @@ export function SessionPicker({
           <Plus />
         </Button>
       </div>
+      <AlertDialog
+        open={!!deleting}
+        onOpenChange={(value) => {
+          if (!value && !saving) setDeleting(undefined);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除此会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{deleting?.title}”的消息和草稿将被删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={saving}
+              onClick={() => {
+                if (deleting) void remove(deleting);
+              }}
+            >
+              {saving ? "正在删除…" : "删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Dialog open={renaming} onOpenChange={setRenaming}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

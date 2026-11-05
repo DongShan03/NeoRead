@@ -82,6 +82,7 @@ func (s *Server) registerLibraryChat(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/library/chat-sessions", s.listLibraryChatSessions)
 	mux.HandleFunc("POST /api/library/chat-sessions", s.createLibraryChatSession)
 	mux.HandleFunc("PATCH /api/library/chat-sessions/{session}", s.updateLibraryChatSession)
+	mux.HandleFunc("DELETE /api/library/chat-sessions/{session}", wrap(s.deleteChatSession))
 	mux.HandleFunc("GET /api/library/chat-sessions/{session}/messages", wrap(s.sessionMessages))
 	mux.HandleFunc("POST /api/library/chat-sessions/{session}/chat", s.startLibraryChat)
 	mux.HandleFunc("GET /api/library/chat-sessions/{session}/runs/{run}/events", wrap(s.sessionRunEvents))
@@ -129,10 +130,20 @@ func (s *Server) listLibraryChatSessions(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) createLibraryChatSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		ID       string           `json:"id"`
+		Title    string           `json:"title"`
 		Provider string           `json:"provider"`
 		Scope    libraryChatScope `json:"scope"`
 	}
 	if !decode(w, r, &req) {
+		return
+	}
+	if req.Title == "" {
+		req.Title = "新会话"
+	}
+	title, titleErr := metadataText(json.RawMessage(jsonText(req.Title)), 80, false)
+	if titleErr != nil || req.ID != "" && (!strings.HasPrefix(req.ID, "library-") || !syncID(strings.TrimPrefix(req.ID, "library-"))) {
+		fail(w, 400, "会话名称或标识无效")
 		return
 	}
 	if !validAgent(req.Provider) || strings.TrimSpace(req.Scope.Category) == "" || utf8.RuneCountInString(req.Scope.Category) > 256 || utf8.RuneCountInString(req.Scope.CategoryKey) > 1024 || strings.ContainsFunc(req.Scope.CategoryKey, unicode.IsControl) || len(req.Scope.DocumentIDs) == 0 {
@@ -147,11 +158,25 @@ func (s *Server) createLibraryChatSession(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	item := libraryChatSession{ChatSession: ChatSession{ID: "library-" + id(), DocumentID: libraryChatOwner, Title: "新会话", Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}, Scope: req.Scope}
-	if _, err := s.Store.DB.ExecContext(r.Context(), "INSERT INTO library_chat_sessions(id,document_id,title,provider,created_at,updated_at,scope) VALUES(?,?,?,?,?,?,?)", item.ID, item.DocumentID, item.Title, item.Provider, item.CreatedAt, item.UpdatedAt, jsonText(item.Scope)); err != nil {
+	if req.ID == "" {
+		req.ID = "library-" + id()
+	}
+	item := libraryChatSession{ChatSession: ChatSession{ID: req.ID, DocumentID: libraryChatOwner, Title: title, Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}, Scope: req.Scope}
+	if _, err := s.Store.DB.ExecContext(r.Context(), "INSERT INTO library_chat_sessions(id,document_id,title,provider,created_at,updated_at,scope) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", item.ID, item.DocumentID, item.Title, item.Provider, item.CreatedAt, item.UpdatedAt, jsonText(item.Scope)); err != nil {
 		fail(w, 500, "无法创建书库对话")
 		return
 	}
+	existing, e := s.Store.libraryScope(item.ID)
+	if e != nil || syncHash(existing) != syncHash(item.Scope) {
+		fail(w, 409, "会话标识已被其他分类使用")
+		return
+	}
+	saved, e := s.Store.chatSession(libraryChatOwner, item.ID)
+	if e != nil {
+		fail(w, 500, "无法读取书库会话")
+		return
+	}
+	item.ChatSession = saved
 	respond(w, 201, item)
 }
 

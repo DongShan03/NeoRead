@@ -6,9 +6,12 @@ import { api } from "@neoread/api";
 import { useReaderStore } from "../store";
 import { LibraryAgentPanel } from "./LibraryAgentPanel";
 
-const { chat, saved } = vi.hoisted(() => {
+const { chat, saved, localDrafts, stores, makeDraft } = vi.hoisted(() => {
   const summary = { busy: false, loaded: true };
   return {
+    localDrafts: new Map(),
+    stores: new Map(),
+    makeDraft: vi.fn(),
     chat: {
       subscribe: () => () => {},
       getSummary: () => summary,
@@ -46,7 +49,17 @@ vi.mock("@neoread/api", () => ({
     validateLibraryEvidence: vi.fn(),
   },
 }));
-vi.mock("../chat/session-registry", () => ({ getChatSession: () => chat }));
+vi.mock("../chat/session-registry", () => ({
+  getChatSession: (_owner: string, id: string) => {
+    if (!stores.has(id)) stores.set(id, { ...chat, sessionId: id, viewId: id });
+    return stores.get(id);
+  },
+  createLibraryChatDraft: makeDraft,
+  listChatDrafts: () => [...localDrafts.values()],
+  recoverCreatedChatDrafts: () => {},
+  isDraftSession: (id: string) => id.startsWith("draft-"),
+  chatCreatedEvent: "neoread:chat-session-created",
+}));
 vi.mock("../ModelSelector", () => ({
   ModelSelector: () => <span>Codex</span>,
 }));
@@ -93,6 +106,13 @@ let root: Root,
   serial = 0;
 beforeEach(() => {
   vi.clearAllMocks();
+  localDrafts.clear();
+  stores.clear();
+  makeDraft.mockImplementation((provider, scope) => {
+    const item = { ...saved, id: `draft-${++serial}`, provider, scope };
+    localDrafts.set(item.id, item);
+    return item;
+  });
   saved.id = `library-existing-${++serial}`;
   vi.mocked(api.libraryChatSessions).mockResolvedValue([saved]);
   vi.mocked(api.createLibraryChatSession).mockImplementation(
@@ -166,7 +186,7 @@ it("switches conversations and preserves drafts by category, with multiple conve
   expect(chat.load).toHaveBeenCalledTimes(1);
   await type("保留模型安全草稿");
   await render("视觉攻击", ["gamma"]);
-  expect(api.createLibraryChatSession).toHaveBeenCalledWith("codex", {
+  expect(makeDraft).toHaveBeenCalledWith("codex", {
     category: "视觉攻击",
     categoryKey: "folder:视觉攻击",
     documentIds: ["gamma"],
@@ -186,7 +206,8 @@ it("switches conversations and preserves drafts by category, with multiple conve
   expect(host.querySelector("textarea")?.value).toBe("保留模型安全草稿");
   await render("视觉攻击", ["gamma"]);
   expect(host.querySelector("textarea")?.value).toBe("视觉攻击的草稿");
-  expect(api.createLibraryChatSession).toHaveBeenCalledTimes(2);
+  expect(makeDraft).toHaveBeenCalledTimes(2);
+  expect(api.createLibraryChatSession).not.toHaveBeenCalled();
 });
 
 it("keeps the current conversation when synchronization adds a newer conversation", async () => {
@@ -212,56 +233,63 @@ it("keeps a conversation's paper scope fixed when the category membership change
   expect(api.createLibraryChatSession).not.toHaveBeenCalled();
   expect(host.textContent).toContain("2 篇");
   await click("使用当前分类新建");
-  expect(api.createLibraryChatSession).toHaveBeenCalledWith(
+  expect(makeDraft).toHaveBeenCalledWith(
     "codex",
     expect.objectContaining({ documentIds: ["alpha", "beta", "gamma"] }),
   );
   expect(host.textContent).toContain("3 篇");
 });
 
-it("separates categories with the same display name and never switches back after a delayed creation", async () => {
+it("separates same-named categories using local drafts without creating server conversations", async () => {
   await render();
-  let resolve!: (item: typeof saved) => void;
-  vi.mocked(api.createLibraryChatSession).mockImplementationOnce(
-    (_provider, scope) =>
-      new Promise((done) => {
-        resolve = done as typeof resolve;
-      }),
-  );
   await render("模型安全", ["gamma"], "tag:模型安全");
-  await click("新建会话");
-  expect(api.createLibraryChatSession).toHaveBeenCalledTimes(1);
+  const tagDraft = selected().value;
+  expect(tagDraft).toMatch(/^draft-/);
+  await type("标签分类草稿");
   await render("新分类", ["delta"]);
+  const current = selected().value;
+  expect(current).not.toBe(tagDraft);
+  await render("模型安全", ["gamma"], "tag:模型安全");
+  expect(selected().value).toBe(tagDraft);
+  expect(host.querySelector("textarea")?.value).toBe("标签分类草稿");
+  expect(api.createLibraryChatSession).not.toHaveBeenCalled();
+});
+it("does not switch back when a background draft becomes a saved conversation", async () => {
+  await render("背景分类", ["gamma"]);
+  const draftId = selected().value;
+  await type("首次发送期间输入的下一条草稿");
+  await click("引用所选聊天");
+  await render("其他分类", ["delta"]);
   const active = selected().value;
+  localDrafts.delete(draftId);
   await act(async () =>
-    resolve({
-      ...saved,
-      id: "library-delayed",
-      scope: {
-        category: "模型安全",
-        categoryKey: "tag:模型安全",
-        documentIds: ["gamma"],
-      },
-    }),
+    window.dispatchEvent(
+      new CustomEvent("neoread:chat-session-created", {
+        detail: {
+          documentId: "library",
+          draftId,
+          session: {
+            ...saved,
+            id: "library-created-background",
+            scope: {
+              category: "背景分类",
+              categoryKey: "folder:背景分类",
+              documentIds: ["gamma"],
+            },
+          },
+        },
+      }),
+    ),
   );
   expect(selected().value).toBe(active);
-  expect(host.textContent).toContain("新分类");
-  await render("模型安全", ["gamma"], "tag:模型安全");
-  expect(selected().value).toBe("library-delayed");
-  expect(api.createLibraryChatSession).toHaveBeenCalledTimes(2);
-});
-
-it("does not let a failed creation in one category block another category", async () => {
-  await render();
-  vi.mocked(api.createLibraryChatSession).mockRejectedValueOnce(
-    new Error("暂时无法创建"),
+  await render("背景分类", ["gamma"]);
+  expect(selected().value).toBe("library-created-background");
+  expect(host.querySelector("textarea")?.value).toBe(
+    "首次发送期间输入的下一条草稿",
   );
-  await render("失败分类", ["gamma"]);
-  expect(host.textContent).toContain("暂时无法创建");
-  await render("其他分类", ["delta"]);
-  expect(host.textContent).toContain("其他分类");
-  expect(host.querySelector("textarea")).not.toBeNull();
-  expect(host.textContent).not.toContain("暂时无法创建");
+  expect(host.querySelector(".quote-chips")?.textContent).toContain(
+    "比较它们的实验预算",
+  );
 });
 
 it("keeps Chinese composition and quotes separate from native draft text", async () => {

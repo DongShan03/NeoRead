@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,6 +46,13 @@ func (c *documentCodexCache) deleteDocument(doc string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entry != nil && c.entry.document == doc {
+		c.discardLocked()
+	}
+}
+func (c *documentCodexCache) deleteConversations(ids map[string]bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entry != nil && !c.entry.active && ids[strings.SplitN(c.entry.key, "\x00", 2)[0]] {
 		c.discardLocked()
 	}
 }

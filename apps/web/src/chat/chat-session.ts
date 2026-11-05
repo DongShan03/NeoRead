@@ -64,7 +64,8 @@ export interface ChatTransport {
     signal: AbortSignal,
     emit: (event: ChatStreamEvent) => void,
   ) => Promise<void>;
-  cancel?: () => Promise<unknown>;
+  // false means no remote run exists yet; abort the local first-send wait.
+  cancel?: () => Promise<void | false>;
   stream: (
     id: string,
     input: ChatInput,
@@ -133,11 +134,15 @@ export class ChatSession {
   private regeneration?: number;
   private alive = true;
   private frame = 0;
+  readonly viewId?: string;
+  deleted = false;
   constructor(
     readonly documentId: string,
     private io = transport,
-    readonly sessionId?: string,
-  ) {}
+    public sessionId?: string,
+  ) {
+    this.viewId = sessionId;
+  }
   getSnapshot = () => this.state;
   private summary?: Pick<ChatSnapshot, "messages" | "busy" | "loaded">;
   // Reader/composer controls need lifecycle and saved history, not each delta.
@@ -498,14 +503,20 @@ export class ChatSession {
     pending.phase = "cancelled";
     pending.notice = "已停止；正在核对保存状态";
     if (this.io.cancel) {
-      void this.io.cancel().catch((error: Error) => {
-        pending.tools = pending.tools?.map((t) =>
-          t.status === "running" ? { ...t, status: "failed" } : t,
-        );
-        pending.phase = "unconfirmed";
-        pending.notice = `停止状态未确认：${error.message}`;
-        this.flush();
-      });
+      void this.io
+        .cancel()
+        .then((remote) => {
+          if (remote === false && this.active === pending)
+            pending.controller.abort();
+        })
+        .catch((error: Error) => {
+          pending.tools = pending.tools?.map((t) =>
+            t.status === "running" ? { ...t, status: "failed" } : t,
+          );
+          pending.phase = "unconfirmed";
+          pending.notice = `停止状态未确认：${error.message}`;
+          this.flush();
+        });
     } else pending.controller.abort();
     this.flush();
   }

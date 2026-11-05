@@ -38,7 +38,15 @@ import {
 import { toast } from "sonner";
 import { ModelSelector } from "../ModelSelector";
 import { useReaderStore, openLibraryDocument } from "../store";
-import { getChatSession } from "../chat/session-registry";
+import {
+  getChatSession,
+  createLibraryChatDraft,
+  listChatDrafts,
+  recoverCreatedChatDrafts,
+  chatCreatedEvent,
+  isDraftSession,
+  type ChatSessionCreated,
+} from "../chat/session-registry";
 import { AssistantPanel } from "../chat/AssistantPanel";
 import { SessionPicker } from "../chat/SessionPicker";
 import { ComposerSendButton } from "../chat/ComposerSendButton";
@@ -118,7 +126,13 @@ export function LibraryAgentPanel({
     const serial = ++revision.current;
     const items = await api.libraryChatSessions(AbortSignal.timeout(15_000));
     if (live.current && serial === revision.current) {
-      setSessions(items);
+      recoverCreatedChatDrafts("library", items);
+      setSessions([
+        ...listChatDrafts("library").filter(
+          (item): item is LibraryChatSession => "scope" in item,
+        ),
+        ...items,
+      ]);
       setError("");
     }
   }, []);
@@ -131,8 +145,9 @@ export function LibraryAgentPanel({
         return Promise.reject(new Error("当前分类没有可供提问的论文"));
       setCreating((keys) => [...keys, scopeKey]);
       setCreateErrors((items) => ({ ...items, [scopeKey]: "" }));
-      const run = api
-        .createLibraryChatSession(latest.current.provider, target)
+      const run = Promise.resolve(
+        createLibraryChatDraft(latest.current.provider, target),
+      )
         .then((item) => {
           if (!live.current) return;
           revision.current++;
@@ -211,6 +226,43 @@ export function LibraryAgentPanel({
     window.addEventListener("neoread:sync-applied", applied);
     return () => window.removeEventListener("neoread:sync-applied", applied);
   }, [refresh]);
+  useEffect(() => {
+    const created = (event: Event) => {
+      const value = (event as CustomEvent<ChatSessionCreated>).detail;
+      if (value.documentId !== "library" || !("scope" in value.session)) return;
+      revision.current++;
+      const item = value.session;
+      setSessions((items) => [
+        item,
+        ...items.filter(
+          (old) => old.id !== value.draftId && old.id !== item.id,
+        ),
+      ]);
+      setSelected((items) =>
+        Object.fromEntries(
+          Object.entries(items).map(([category, id]) => [
+            category,
+            id === value.draftId ? item.id : id,
+          ]),
+        ),
+      );
+      const composer = drafts.get(value.draftId);
+      if (composer) drafts.set(item.id, composer);
+      drafts.delete(value.draftId);
+    };
+    window.addEventListener(chatCreatedEvent, created);
+    return () => window.removeEventListener(chatCreatedEvent, created);
+  }, []);
+  const sessionDeleted = (id: string) => {
+    revision.current++;
+    drafts.delete(id);
+    setSessions((items) => items.filter((item) => item.id !== id));
+    setSelected((items) =>
+      Object.fromEntries(
+        Object.entries(items).filter(([, value]) => value !== id),
+      ),
+    );
+  };
   const clamp = (value: number) =>
     Math.round(Math.min(780, Math.max(280, value)));
   return (
@@ -300,15 +352,15 @@ export function LibraryAgentPanel({
               documentId="library"
               sessions={visible}
               current={current}
-              provider={provider}
               onCreate={() => create()}
               onRefresh={refresh}
               onChange={(id) => select(key, id)}
+              onDeleted={sessionDeleted}
             />
           </div>
           {current ? (
             <LibraryConversation
-              key={current.id}
+              key={getChatSession("library", current.id).viewId ?? current.id}
               item={current}
               activeScope={scope}
               provider={provider}
@@ -376,7 +428,11 @@ function LibraryConversation({
     session.activate();
     if (!session.getSnapshot().loaded) void session.load();
     return () => {
-      if (prompt.current || quoteRef.current.length)
+      if (
+        !session.deleted &&
+        (!isDraftSession(item.id) || session.sessionId === item.id) &&
+        (prompt.current || quoteRef.current.length)
+      )
         drafts.set(item.id, { text: prompt.current, quotes: quoteRef.current });
       else drafts.delete(item.id);
     };

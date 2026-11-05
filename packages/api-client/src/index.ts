@@ -786,10 +786,14 @@ export const api = {
     request<Message[]>(`/api/documents/${id}/messages`, { signal }),
   libraryChatSessions: (signal?: AbortSignal) =>
     request<LibraryChatSession[]>("/api/library/chat-sessions", { signal }),
-  createLibraryChatSession: (provider: string, scope: LibraryChatScope) =>
+  createLibraryChatSession: (
+    provider: string,
+    scope: LibraryChatScope,
+    options?: { id?: string; title?: string },
+  ) =>
     request<LibraryChatSession>("/api/library/chat-sessions", {
       method: "POST",
-      body: JSON.stringify({ provider, scope }),
+      body: JSON.stringify({ provider, scope, ...options }),
     }),
   validateLibraryEvidence: (session: string, message: string, source: string) =>
     request<{ valid: boolean; documentId: string; location: DocumentLocation }>(
@@ -799,10 +803,19 @@ export const api = {
     request<DocumentChatSession[]>(chatSessionRoot(id), {
       signal,
     }),
-  createChatSession: (id: string, provider: string) =>
+  createChatSession: (
+    id: string,
+    provider: string,
+    options?: { id?: string; title?: string },
+  ) =>
     request<DocumentChatSession>(chatSessionRoot(id), {
       method: "POST",
-      body: JSON.stringify({ provider }),
+      body: JSON.stringify({ provider, ...options }),
+    }),
+  deleteChatSession: (id: string, sessionId: string) =>
+    request<void>(`${chatSessionRoot(id)}/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+      signal: AbortSignal.timeout(30_000),
     }),
   updateChatSession: (
     id: string,

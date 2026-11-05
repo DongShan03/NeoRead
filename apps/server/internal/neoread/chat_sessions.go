@@ -73,6 +73,19 @@ func (s *Server) ensureChatSession(documentID, provider string) (string, error) 
 	}
 	return session, err
 }
+
+// Listing an untouched document must not create a persisted conversation.
+// Existing legacy turns still migrate on first access.
+func (s *Server) migrateLegacyChatSessions(document, provider string) error {
+	var legacy bool
+	err := s.Store.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM messages WHERE document_id=? AND COALESCE(json_extract(body,'$.sessionId'),'')='') OR EXISTS(SELECT 1 FROM document_conversations WHERE document_id=? AND provider NOT LIKE 'session:%')`, document, document).Scan(&legacy)
+	if err != nil || !legacy {
+		return err
+	}
+	_, err = s.ensureChatSession(document, provider)
+	return err
+}
+
 func (s *Server) listChatSessions(w http.ResponseWriter, r *http.Request) {
 	doc, err := s.Store.Document(r.PathValue("id"))
 	if err != nil || doc.DeletedAt != "" {
@@ -83,7 +96,7 @@ func (s *Server) listChatSessions(w http.ResponseWriter, r *http.Request) {
 	if !validAgent(provider) {
 		provider = "api"
 	}
-	_, err = s.ensureChatSession(doc.ID, provider)
+	err = s.migrateLegacyChatSessions(doc.ID, provider)
 	if err != nil {
 		fail(w, 500, "无法迁移会话历史")
 		return
@@ -120,6 +133,7 @@ func (s *Server) listChatSessions(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) createChatSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		ID       string `json:"id"`
 		Title    string `json:"title"`
 		Provider string `json:"provider"`
 	}
@@ -130,7 +144,7 @@ func (s *Server) createChatSession(w http.ResponseWriter, r *http.Request) {
 		req.Title = "新会话"
 	}
 	title, err := metadataText(json.RawMessage(jsonText(req.Title)), 80, false)
-	if err != nil || !validAgent(req.Provider) {
+	if err != nil || !validAgent(req.Provider) || req.ID != "" && !syncID(req.ID) {
 		fail(w, 400, "会话名称或后端无效")
 		return
 	}
@@ -145,18 +159,26 @@ func (s *Server) createChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer finish()
-	_, err = s.ensureChatSession(doc.ID, req.Provider)
+	err = s.migrateLegacyChatSessions(doc.ID, req.Provider)
 	if err != nil {
 		fail(w, 500, "无法迁移会话历史")
 		return
 	}
-	v := ChatSession{ID: id(), DocumentID: doc.ID, Title: title, Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}
-	_, err = s.Store.DB.ExecContext(ctx, "INSERT INTO chat_sessions(id,document_id,title,provider,created_at,updated_at) VALUES(?,?,?,?,?,?)", v.ID, v.DocumentID, v.Title, v.Provider, v.CreatedAt, v.UpdatedAt)
+	if req.ID == "" {
+		req.ID = id()
+	}
+	v := ChatSession{ID: req.ID, DocumentID: doc.ID, Title: title, Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}
+	_, err = s.Store.DB.ExecContext(ctx, "INSERT INTO chat_sessions(id,document_id,title,provider,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", v.ID, v.DocumentID, v.Title, v.Provider, v.CreatedAt, v.UpdatedAt)
 	if err != nil {
 		fail(w, 500, "无法创建会话")
 		return
 	}
-	respond(w, 201, v)
+	saved, e := s.Store.chatSession(doc.ID, v.ID)
+	if e != nil {
+		fail(w, 409, "会话标识已被其他项目使用")
+		return
+	}
+	respond(w, 201, saved)
 }
 func (s *Server) updateChatSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {

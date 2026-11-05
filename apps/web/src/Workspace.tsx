@@ -116,7 +116,15 @@ import { ProcessingUsageDialog } from "./ProcessingUsage";
 import { ModelSelector } from "./ModelSelector";
 import { SourceReferences } from "./SourceReferences";
 import { ChatSession } from "./chat/chat-session";
-import { getChatSession } from "./chat/session-registry";
+import {
+  getChatSession,
+  createChatDraft,
+  listChatDrafts,
+  recoverCreatedChatDrafts,
+  chatCreatedEvent,
+  isDraftSession,
+  type ChatSessionCreated,
+} from "./chat/session-registry";
 import {
   restoreWithdrawnQuestion,
   type ComposerDraft,
@@ -463,15 +471,33 @@ export function Workspace({
       currentDocument.current === doc.id &&
       serial === sessionListSerial.current
     ) {
+      recoverCreatedChatDrafts(doc.id, items);
+      let available = [...items, ...listChatDrafts(doc.id)];
+      if (!available.length)
+        available = [
+          createChatDraft(
+            doc.id,
+            useReaderStore.getState().aiConfig?.primary || "api",
+          ),
+        ];
       setSessionCatalog((current) =>
         current.documentId === doc.id &&
-        JSON.stringify(current.items) === JSON.stringify(items)
+        JSON.stringify(current.items) === JSON.stringify(available)
           ? current
-          : { documentId: doc.id, items },
+          : { documentId: doc.id, items: available },
       );
       setSessionError("");
     }
   }, [doc.id]);
+  const createSessionDraft = async () => {
+    sessionListSerial.current++;
+    const item = createChatDraft(doc.id, provider || "api");
+    setSessionCatalog((current) => ({
+      documentId: doc.id,
+      items: [...(current.documentId === doc.id ? current.items : []), item],
+    }));
+    selectSession(item.id);
+  };
   const selectSession = (id: string) => {
     setSelectedSession({ documentId: doc.id, id });
     try {
@@ -574,6 +600,48 @@ export function Workspace({
   const composerKey = `${doc.id}:${currentSession?.id ?? ""}`;
   const currentComposerKey = useRef(composerKey);
   currentComposerKey.current = composerKey;
+  useEffect(() => {
+    const created = (event: Event) => {
+      const value = (event as CustomEvent<ChatSessionCreated>).detail;
+      if (value.documentId !== doc.id) return;
+      sessionListSerial.current++;
+      const before = doc.id + ":" + value.draftId,
+        after = doc.id + ":" + value.session.id;
+      const draft =
+        currentComposerKey.current === before
+          ? captureComposerDraft()
+          : composerDrafts.current.get(before);
+      if (draft) composerDrafts.current.set(after, draft);
+      composerDrafts.current.delete(before);
+      setSessionCatalog((current) => ({
+        documentId: doc.id,
+        items: [
+          ...(current.documentId === doc.id ? current.items : []).filter(
+            (item) => item.id !== value.draftId && item.id !== value.session.id,
+          ),
+          value.session,
+        ],
+      }));
+      if (currentComposerKey.current === before)
+        selectSession(value.session.id);
+    };
+    window.addEventListener(chatCreatedEvent, created);
+    return () => window.removeEventListener(chatCreatedEvent, created);
+  }, [doc.id]);
+  const sessionDeleted = (id: string) => {
+    const key = doc.id + ":" + id;
+    composerDrafts.current.delete(key);
+    if (currentComposerKey.current === key) {
+      setPrompt("");
+      setQuotes([]);
+      setImages([]);
+    }
+    sessionListSerial.current++;
+    setSessionCatalog((current) => ({
+      ...current,
+      items: current.items.filter((item) => item.id !== id),
+    }));
+  };
   const restoreQuestion = (message: Message) => {
     const visible = currentComposerKey.current === composerKey;
     const draft = restoreWithdrawnQuestion(
@@ -600,7 +668,13 @@ export function Workspace({
     setQuotes(saved?.quotes ?? []);
     setImages(saved?.images ?? []);
     return () => {
-      composerDrafts.current.set(composerKey, captureComposerDraft());
+      if (
+        !session.deleted &&
+        (!isDraftSession(currentSession?.id ?? "") ||
+          session.sessionId === currentSession?.id)
+      )
+        composerDrafts.current.set(composerKey, captureComposerDraft());
+      else composerDrafts.current.delete(composerKey);
     };
   }, [composerKey]);
   useEffect(() => {
@@ -1889,7 +1963,6 @@ export function Workspace({
                   documentId={doc.id}
                   sessions={sessions}
                   current={currentSession}
-                  provider={provider}
                   continueAction={
                     provider === "codex" && (
                       <CodexHandoffButton
@@ -1907,6 +1980,8 @@ export function Workspace({
                     )
                   }
                   onChange={selectSession}
+                  onCreate={createSessionDraft}
+                  onDeleted={sessionDeleted}
                   onRefresh={refreshSessions}
                 />
                 {sessionError && (
@@ -1929,7 +2004,7 @@ export function Workspace({
                   </div>
                 )}
                 <AssistantPanel
-                  key={currentSession?.id ?? doc.id}
+                  key={session.viewId ?? currentSession?.id ?? doc.id}
                   session={session}
                   onRegenerate={() => void regenerate()}
                   onWithdraw={restoreQuestion}
