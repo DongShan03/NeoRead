@@ -253,3 +253,18 @@ it.each(["[S84]另一句话[S109]", "[S84]\n\n[S109]", "[S84][S999][S109]"])(
     if (content.includes("S999")) expect(host.textContent).toContain("[S999]");
   },
 );
+
+it.each([false, true])(
+  "renders Chinese strong emphasis next to punctuation in static and streaming messages: %s",
+  async (generating) => {
+    const content =
+      "**你的解释：**视觉安全依赖多种场景特征。\n\n- **另一种解释：**视觉危害识别是高维的。\n\n`**代码：**原样` 与 \\*\\*转义符号\\*\\*";
+    await render(content, generating);
+    expect(
+      [...host.querySelectorAll("strong")].map((node) => node.textContent),
+    ).toEqual(["你的解释：", "另一种解释："]);
+    expect(host.querySelector("li strong")?.textContent).toBe("另一种解释：");
+    expect(host.querySelector("code")?.textContent).toBe("**代码：**原样");
+    expect(host.textContent).toContain("**转义符号**");
+  },
+);
