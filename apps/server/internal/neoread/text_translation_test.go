@@ -610,13 +610,13 @@ func TestTranslationDeadlineDoesNotChangeChatDeadline(t *testing.T) {
 }
 
 func TestTranslationJSONLRepairsUnescapedLatexBackslashes(t *testing.T) {
-	p := translationParagraph{"p1-b2", "h2", "Two."}
+	p := translationParagraph{"p1-b2", "h2", `The terms are $\pi$ and $\eta$.`}
 	var got TranslationBlock
 	d := newTranslationJSONL(translationBatch{Paragraphs: []translationParagraph{p}}, func(block TranslationBlock) error {
 		got = block
 		return nil
 	})
-	line := `{"blockId":"p1-b2","sourceHash":"h2","sentences":[{"source":"Two.","target":"$\pi$、$\eta$、$\ll$、$\log n$"}]}`
+	line := `{"blockId":"p1-b2","sourceHash":"h2","sentences":[{"sourceIndex":0,"target":"$\pi$、$\eta$、$\ll$、$\log n$"}]}`
 	if err := d.feed(line + "\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -1453,5 +1453,66 @@ func TestTranslationUsesSentenceIndicesAndRejectsIncompleteOrConflictingIndices(
 		if _, err := parseTranslation(raw, source); err == nil {
 			t.Fatal("invalid indexed output accepted", raw)
 		}
+	}
+}
+
+func TestTranslationMathNotationDistinguishesTauFromLatinT(t *testing.T) {
+	for _, pair := range [][2]string{
+		{`The threshold is 𝜏.`, `阈值为 $\tau$。`},
+		{`The threshold is $\tau$.`, `阈值为 τ。`},
+		{`The set is 𝒯.`, `集合为 $\mathcal{T}$。`},
+	} {
+		if !matchingMathDecorations(pair[0], pair[1]) {
+			t.Fatal("equivalent notation rejected", pair)
+		}
+	}
+	for _, pair := range [][2]string{
+		{`The threshold is 𝜏.`, `阈值为 $t$。`},
+		{`The threshold is $t$.`, `阈值为 $\tau$。`},
+		{`The set is 𝒯.`, `集合为 $T$。`},
+		{`The threshold is $\tau$.`, `阈值为 $\mathcal{T}$。`},
+	} {
+		if matchingMathDecorations(pair[0], pair[1]) {
+			t.Fatal("different math symbols conflated", pair)
+		}
+	}
+}
+
+func TestTranslationRepairsJSONMathEscapesWithoutChangingProse(t *testing.T) {
+	source := `Use $\tau$ and $\bar{x}=\frac{1}{n}$.`
+	// These are valid JSON escapes, so a JSON decoder alone cannot flag them.
+	raw := `{"sentences":[{"sourceIndex":0,"target":"采用 $\tau$ 和 $$\bar{x}=\frac{1}{n}$$。"}]}`
+	pairs, err := parseTranslation(raw, source)
+	if err != nil || len(pairs) != 1 || pairs[0].Target != `采用 $\tau$ 和 $\bar{x}=\frac{1}{n}$。` {
+		t.Fatal(pairs, err)
+	}
+	prose := "Prose\tcontains a tab and a newline.\n"
+	if got := repairTranslatedMath(prose); got != prose {
+		t.Fatal("changed prose whitespace", got)
+	}
+}
+
+func TestCachedTranslationRepairsMathEscapesWithoutRewritingSavedHistory(t *testing.T) {
+	s, _, m := translationFixture(t)
+	m.Blocks = m.Blocks[:1]
+	m.Blocks[0].Text = `The threshold is $\tau$.`
+	item := newTranslation(m.Blocks[0])
+	item.Status = "complete"
+	target := "阈值为 $\tau$。"
+	item.Sentences = []TranslationSentence{{Source: m.Blocks[0].Text, Target: target}}
+	if err := s.saveTranslation("doc", item, m); err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.translations("doc", m)
+	if err != nil || len(current) != 1 || current[0].Sentences[0].Target != `阈值为 $\tau$。` {
+		t.Fatal(current, err)
+	}
+	var body string
+	if err = s.Store.DB.QueryRow("SELECT body FROM translations WHERE document_id='doc' AND source_hash=?", item.SourceHash).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var stored TranslationBlock
+	if json.Unmarshal([]byte(body), &stored) != nil || stored.Sentences[0].Target != target {
+		t.Fatal("cache repair rewrote stored history", body)
 	}
 }

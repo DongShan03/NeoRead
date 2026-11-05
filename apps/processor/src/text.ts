@@ -45,6 +45,7 @@ export async function extractTextSpans(
         baseline: (transform[5] + (operator ? h * 0.75 : 0)) / height,
         fontSize: h / height,
         math:
+          /[\u{1D400}-\u{1D7FF}ℎ]/u.test(item.str) ||
           /^(?:CMMI|CMSY|MSBM|CMEX)\d+$/i.test(font) ||
           (/^CMBX\d+$/i.test(font) && item.str.length === 1) ||
           (/^CMR\d+$/i.test(font) && /^[\d˜ˆ¯˙¨=+()\[\],.\-]+$/.test(item.str)),

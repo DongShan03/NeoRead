@@ -15,6 +15,7 @@ var sentenceAbbreviation = regexp.MustCompile(`(?i)(?:\bet al\.|\be\.g\.|\bi\.e\
 var mathDecoration = regexp.MustCompile(`\\(bar|overline|hat|widehat|tilde|widetilde|dot|ddot|mathcal|mathbb|mathbf|bigsqcup|sqcup|sum|dagger|ddagger)`)
 
 func matchingMathDecorations(source, target string) bool {
+	source, target = canonicalMathSymbols(source), canonicalMathSymbols(target)
 	counts := func(text string) map[string]int {
 		result := map[string]int{}
 		text = strings.NewReplacer("⨆", `\sqcup`, "⊔", `\sqcup`, "∑", `\sum`, "†", `\dagger`, "‡", `\ddagger`).Replace(text)
@@ -36,11 +37,21 @@ func matchingMathDecorations(source, target string) bool {
 			}
 			result[name]++
 		}
+		for _, command := range mathControlWord.FindAllString(text, -1) {
+			if mathGreekName(command[1:]) {
+				result[command[1:]]++
+			}
+		}
 		return result
 	}
 	expected, actual := counts(source), counts(target)
 	for name, count := range expected {
 		if actual[name] != count {
+			return false
+		}
+	}
+	for name, count := range actual {
+		if mathGreekName(name) && expected[name] != count {
 			return false
 		}
 	}

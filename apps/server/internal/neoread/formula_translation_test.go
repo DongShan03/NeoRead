@@ -1,13 +1,17 @@
 package neoread
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -537,5 +541,184 @@ func TestReopenedReparseRecoversOnlyLegacyFormulaCapabilityFailures(t *testing.T
 				t.Fatalf("changed unrelated data: %+v", items)
 			}
 		})
+	}
+}
+
+func TestInlineFormulaAlwaysKeepsSingleDollarDelimiters(t *testing.T) {
+	for _, value := range []string{`\tau_i`, `$\tau_i$`, "$$\n\\tau_i\n$$"} {
+		got, err := inlineFormulaMarkdown(value)
+		if err != nil || got != `$\tau_i$` {
+			t.Fatal(got, err)
+		}
+	}
+	for _, value := range []string{"", "$$ $$", "$x$ and $y$", "```latex\nx\n```"} {
+		if _, err := inlineFormulaMarkdown(value); err == nil {
+			t.Fatal("accepted incomplete formula", value)
+		}
+	}
+}
+
+func fakeTranslationMathCrop(t *testing.T) {
+	t.Helper()
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 20, 20))); err != nil {
+		t.Fatal(err)
+	}
+	pngPath := filepath.Join(t.TempDir(), "crop.png")
+	if err := os.WriteFile(pngPath, data.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(t.TempDir(), "render-pages.mjs")
+	body := `while [ $# -gt 0 ]; do case "$1" in --output) out="$2"; shift;; --pages) page="$2"; shift;; esac; shift; done
+cp "$NEOREAD_TEST_MATH_CROP" "$out/page-$page.png"
+`
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NEOREAD_TEST_MATH_CROP", pngPath)
+	t.Setenv("NEOREAD_NODE", "/bin/sh")
+	t.Setenv("NEOREAD_PROCESSOR", filepath.Join(filepath.Dir(script), "main.mjs"))
+}
+
+func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *testing.T) {
+	for _, mode := range []string{"complete", "missing_token", "extra_formula", "truncated", "changed_source", "invalid_ocr", "unverified_image", "canceled"} {
+		t.Run(mode, func(t *testing.T) {
+			s, _, m := translationFixture(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			m.Blocks = m.Blocks[:1]
+			m.Blocks[0].Text = `The activation is $\hat{a}_n$. The threshold is 𝜏.`
+			if err := atomicFile(filepath.Join(s.analysisDir("doc"), "manifest.json"), []byte(jsonText(m))); err != nil {
+				t.Fatal(err)
+			}
+			fakeTranslationMathCrop(t)
+			var texts, images atomic.Int32
+			imageAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				images.Add(1)
+				var input map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Error(err)
+				}
+				if !strings.Contains(jsonText(input), "image_url") {
+					t.Error("no crop sent to recognition")
+				}
+				if mode == "changed_source" {
+					if err := os.WriteFile(s.Store.File(Document{ID: "doc", Type: "pdf", Library: "papers"}), []byte("changed PDF"), 0600); err != nil {
+						t.Error(err)
+					}
+				}
+				if mode == "canceled" {
+					cancel()
+				}
+				if mode == "invalid_ocr" {
+					writeAPIReply(w, `{"formulas":[{"index":0,"latex":"x"},{"index":0,"latex":"y"}]}`)
+					return
+				}
+				// Deliberately return display delimiters: recovery must insert inline math.
+				writeAPIReply(w, jsonText(map[string]any{"formulas": []any{map[string]any{"index": 0, "latex": `$$\hat{a}_n$$`}, map[string]any{"index": 1, "latex": `\tau`}}}))
+			}))
+			defer imageAPI.Close()
+			textAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				texts.Add(1)
+				batch := readTranslationInput(t, r).Batch
+				if len(batch.Paragraphs) != 1 {
+					t.Error("unexpected paragraphs")
+					return
+				}
+				para := batch.Paragraphs[0]
+				pairs := []TranslationSentence{}
+				for _, part := range translationSentenceParts(para.Source) {
+					target := `错误：$a_n$ 和 $t$。`
+					if strings.Contains(part, "NEOREAD_MATH_") {
+						token := regexp.MustCompile(`NEOREAD_MATH_[a-f0-9]+_[0-9]+`).FindString(part)
+						target = "译文 " + token + "。"
+						if mode == "missing_token" {
+							target = "公式已丢失。"
+						}
+						if mode == "extra_formula" {
+							target += `$z$`
+						}
+					}
+					pairs = append(pairs, TranslationSentence{Source: strings.TrimSpace(part), Target: target})
+				}
+				line := jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": para.SourceHash, "sentences": pairs}) + "\n"
+				if mode == "truncated" && strings.Contains(para.Source, "NEOREAD_MATH_") {
+					w.Header().Set("Content-Type", "text/event-stream")
+					sendTranslationDelta(w, line)
+					return
+				}
+				writeAPIReply(w, line)
+			}))
+			defer textAPI.Close()
+			configureFormulaTest(t, s, textAPI.URL, imageAPI.URL)
+			if mode == "unverified_image" {
+				config := s.aiConfig()
+				delete(config.Capabilities, "image-api")
+				if err := s.writeAIConfig(config); err != nil {
+					t.Fatal(err)
+				}
+			}
+			doc, err := s.Store.Document("doc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := s.taskGenerationService(s.aiConfig(), taskTranslation)
+			paragraph := m.translationParagraphs()[0]
+			err = s.translateBatch(ctx, doc, m, translationBatch{Paragraphs: []translationParagraph{paragraph}}, service, func() {})
+			if mode == "canceled" {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			items, err := s.translations("doc", m)
+			if err != nil || len(items) != 1 {
+				t.Fatal(items, err)
+			}
+			wantTexts, wantImages := int32(3), int32(1)
+			if mode == "invalid_ocr" || mode == "canceled" || mode == "unverified_image" {
+				wantTexts = 2
+			}
+			if mode == "unverified_image" {
+				wantImages = 0
+			}
+			if texts.Load() != wantTexts || images.Load() != wantImages {
+				t.Fatal("unexpected retry count", texts.Load(), images.Load())
+			}
+			if mode == "canceled" {
+				if items[0].Status != "pending" {
+					t.Fatal("canceled recovery did not stay retryable", items[0])
+				}
+				return
+			}
+			if mode != "complete" {
+				if items[0].Status != "failed" {
+					t.Fatal("promoted invalid recovery", items[0])
+				}
+				return
+			}
+			item := items[0]
+			if item.Status != "complete" || item.SourceHash != paragraph.SourceHash || len(item.Sentences) != 2 {
+				t.Fatal(item)
+			}
+			if !strings.Contains(item.Sentences[0].Target, `$\hat{a}_n$`) || !strings.Contains(item.Sentences[1].Target, `$\tau$`) || strings.Contains(jsonText(item.Sentences), "$$") {
+				t.Fatal("lost formula or displayed it as a block", item)
+			}
+			if item.Sentences[1].Anchor != `The threshold is 𝜏.` {
+				t.Fatal("lost native PDF anchor", item)
+			}
+			if repaired := repairCachedTranslationAnchors(item, paragraph.Source); jsonText(repaired) != jsonText(item) {
+				t.Fatal("reading cache changed recovered sentences", repaired)
+			}
+		})
+	}
+}
+
+func TestFormulaRecognitionSpansPreserveLegacyMathScriptsAndProse(t *testing.T) {
+	text := `Let 𝜏_i and ℝ represent the threshold and domain, with $\hat{x}$ unchanged.`
+	spans := inlineMathSpans(text)
+	if len(spans) != 3 || text[spans[0].Start:spans[0].End] != `𝜏_i` || text[spans[1].Start:spans[1].End] != "ℝ" || spans[2].Formula != `\hat{x}` {
+		t.Fatal(spans)
 	}
 }

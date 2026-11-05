@@ -11,6 +11,7 @@ const { values } = parseArgs({
     input: { type: "string" },
     output: { type: "string" },
     pages: { type: "string" },
+    crop: { type: "string" },
   },
 });
 if (!values.input || !values.output || !values.pages)
@@ -22,6 +23,15 @@ if (
   selected.some((p) => !Number.isInteger(p) || p < 1)
 )
   throw new Error("Invalid pages");
+const crop = values.crop?.split(",").map(Number);
+if (
+  crop &&
+  (selected.length !== 1 || crop.length !== 4 || !crop.every(Number.isFinite))
+)
+  throw new Error("Invalid crop");
+const bounds = crop
+  ? { x: crop[0], y: crop[1], width: crop[2], height: crop[3] }
+  : undefined;
 const require = createRequire(import.meta.url);
 const assets = dirname(require.resolve("pdfjs-dist/package.json"));
 const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -42,7 +52,7 @@ try {
   let bytes = 0;
   for (const number of selected) {
     const page = await pdf.getPage(number);
-    const { canvas } = await renderPage(page);
+    const { canvas } = await renderPage(page, bounds);
     const image = canvas.toBuffer("image/png");
     bytes += image.length;
     if (image.length > 8 * 1024 * 1024 || bytes > 32 * 1024 * 1024)

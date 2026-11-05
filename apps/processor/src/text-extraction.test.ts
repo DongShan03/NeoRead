@@ -9,6 +9,7 @@ import { type PDFPageProxy } from "pdfjs-dist";
 import { readFile } from "node:fs/promises";
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { graphicPanels } from "./graphic-panels";
+import { renderPage } from "./render-page";
 import { repairTextBlocks } from "./repair";
 import blocks from "./fixtures/oze-page7.json";
 
@@ -31,6 +32,20 @@ describe("inline-math", () => {
         span("‡", 58, 6, 7, 4),
       ]),
     ).toBe(String.raw`Author Name$^{1\ddagger \ddagger}$`);
+  });
+
+  it("keeps mathematical tau separate from Latin t and calligraphic T", () => {
+    expect(
+      joinInlineText([
+        span("The threshold", 0, 10, 10, 50, false),
+        span("𝜏", 52, 10, 10, 5),
+        span("differs from", 60, 10, 10, 45, false),
+        span("𝒯", 108, 10, 10, 6),
+      ]),
+    ).toBe(String.raw`The threshold $\tau $ differs from $\mathcal{T}$`);
+    expect(joinInlineText([span("𝝉", 0, 10, 10, 5)])).toBe(
+      String.raw`$\mathbf{\tau}$`,
+    );
   });
 
   it("keeps MIDAS lower limits beside their braces and resolves the CMEX operator origin", async () => {
@@ -339,4 +354,49 @@ describe("text-symbols", () => {
       await task.destroy();
     }
   });
+});
+
+it("renders a PDF paragraph crop with the same pixels as its full original page", async () => {
+  const { DOMMatrix, ImageData, Path2D } = await import("@napi-rs/canvas");
+  Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
+  const task = getDocument({
+    data: new Uint8Array(
+      await readFile(
+        new URL("../../web/public/samples/reading-notes.pdf", import.meta.url),
+      ),
+    ),
+    useSystemFonts: true,
+  });
+  try {
+    const page = await (await task.promise).getPage(1);
+    const bounds = { x: 0.1, y: 0.1, width: 0.6, height: 0.3 };
+    const full = await renderPage(page);
+    const cropped = await renderPage(page, bounds);
+    const actual = page.getViewport({ scale: full.scale });
+    const x = Math.floor(bounds.x * actual.width),
+      y = Math.floor(bounds.y * actual.height);
+    expect(cropped.canvas.width).toBe(
+      Math.ceil((bounds.x + bounds.width) * actual.width) - x,
+    );
+    expect(cropped.canvas.height).toBe(
+      Math.ceil((bounds.y + bounds.height) * actual.height) - y,
+    );
+    const expected = full.canvas
+      .getContext("2d")
+      .getImageData(x, y, cropped.canvas.width, cropped.canvas.height).data;
+    const pixels = cropped.canvas
+      .getContext("2d")
+      .getImageData(0, 0, cropped.canvas.width, cropped.canvas.height).data;
+    expect(pixels).toEqual(expected);
+    full.canvas.width =
+      full.canvas.height =
+      cropped.canvas.width =
+      cropped.canvas.height =
+        1;
+    await expect(
+      renderPage(page, { x: -0.1, y: 0, width: 0.2, height: 0.2 }),
+    ).rejects.toThrow("Invalid crop");
+  } finally {
+    await task.destroy();
+  }
 });

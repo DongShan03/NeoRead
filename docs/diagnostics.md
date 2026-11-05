@@ -178,3 +178,5 @@ Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history
 `pdf.render.failed` 记录阅读实例首次页面或局部高清渲染失败，`detail` 只包含固定的 `pipeline=object-colors/original` 和 `layer=page/detail`。不记录原始异常、文档文本或路径。每个实例最多一次，避免持续失败造成日志洪泛。对象级配色、画布替换与人工验收范围见 [PDF 对象级配色](pdf-object-colors.md)。
 
 书库对话沿用 `chat.finish` 和生成提供方的开始、终态与首段输出事件；`chat.library_scope_prepared` 仅记录会话 ID、可读论文数量和完整／部分覆盖阶段，不记录分类名称、论文标题、聊天或论文正文。
+
+正文公式修复通过 `translation.math_recovery.started / finished` 记录文档、段落标识、公式数量、耗时及结果。阶段为 rendering、recognizing、translating、saving；沿用提供方生成事件记录外部调用和终态。失败日志仅包含稳定错误类别，不记录截图、公式内容、模型输出或本机路径。

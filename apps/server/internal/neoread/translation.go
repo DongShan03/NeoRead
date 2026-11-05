@@ -161,6 +161,9 @@ ON previous.document_id=t.document_id AND previous.block_id=t.block_id AND previ
 	for _, t := range m.translationItems() {
 		if value, ok := saved[t.BlockID+":"+t.SourceHash]; ok {
 			t = value
+			for i := range t.Sentences {
+				t.Sentences[i].Target = repairTranslatedMath(t.Sentences[i].Target)
+			}
 			if source := sources[t.BlockID]; source != "" {
 				t = repairCachedTranslationAnchors(t, source)
 			}
@@ -398,6 +401,7 @@ func parseTranslationSource(raw, source string, repairPDF bool) ([]TranslationSe
 	var joined strings.Builder
 	for i, sentence := range input {
 		input[i].Anchor = ""
+		input[i].Target = repairTranslatedMath(sentence.Target)
 		if strings.TrimSpace(sentence.Source) == "" || strings.TrimSpace(sentence.Target) == "" {
 			return nil, errors.New("译文存在空句，请重试此段")
 		}
@@ -410,7 +414,7 @@ func parseTranslationSource(raw, source string, repairPDF bool) ([]TranslationSe
 	}
 	for _, sentence := range pairs {
 		if !matchingMathDecorations(sentence.Source, sentence.Target) {
-			return nil, errors.New("译文改变了公式符号、重音、字体或上下标，请重试此段")
+			return nil, errTranslationMath
 		}
 	}
 	normalize := func(v string) string { return strings.Join(strings.Fields(v), "") }

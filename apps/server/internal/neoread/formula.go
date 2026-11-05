@@ -39,7 +39,7 @@ const formulaTimeout = 3 * time.Minute
 // Formula output is buffered until completion, so retrying a timed-out attempt
 // cannot mix partial answers. Each Generate call has its own time limit.
 // A parent cancellation/deadline always wins, including during the backoff.
-func generateFormula(ctx context.Context, service *GenerationService, input AIInput) (string, error) {
+func generateFormula(ctx context.Context, service *GenerationService, input AIInput, inline ...bool) (string, error) {
 	if service.timeout <= 0 || service.timeout > formulaTimeout {
 		bounded := *service
 		bounded.timeout = formulaTimeout
@@ -54,6 +54,9 @@ func generateFormula(ctx context.Context, service *GenerationService, input AIIn
 			return "", ctx.Err()
 		}
 		if err == nil {
+			if len(inline) > 0 && inline[0] {
+				return inlineFormulaMarkdown(result.Text)
+			}
 			return formulaMarkdown(result.Text)
 		}
 		if errorKind(err) != ErrorTimeout {
@@ -114,7 +117,11 @@ func (s *Server) convertFormulas(ctx context.Context, documentID string, m layou
 			service := s.generationService(options.apply(s.aiConfig()))
 			service.usageSink = s.processingUsageSink(documentID, "translating", b.ID)
 			service.timeout = formulaTimeout
-			t.FormulaMarkdown, callErr = generateFormula(ctx, service, AIInput{Prompt: formulaPrompt + b.Text, Image: image})
+			prompt := formulaPrompt
+			if b.Label == "inline_formula" {
+				prompt = strings.ReplaceAll(formulaPrompt, "每个数学块用独立成行的 $$ 包围", "这是嵌入正文的公式，只用一对 $ 包围，不使用 $$ 或换行")
+			}
+			t.FormulaMarkdown, callErr = generateFormula(ctx, service, AIInput{Prompt: prompt + b.Text, Image: image}, b.Label == "inline_formula")
 		}
 		t.Status = "complete"
 		if callErr != nil {

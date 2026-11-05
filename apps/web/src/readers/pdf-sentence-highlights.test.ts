@@ -10,6 +10,7 @@ vi.mock("pdfjs-dist", () => ({
   Util: { transform: (_a: number[], b: number[]) => b },
 }));
 import { PDFReadingNavigation } from "./pdf-navigation";
+import { sentenceTextRanges } from "./pdf-sentence-matching";
 
 let host: HTMLDivElement, page: HTMLDivElement, nav: PDFReadingNavigation;
 let registry: Map<string, Set<Range>>;
@@ -342,4 +343,19 @@ it("returns text-node fragments so sentence hover never selects PDF line breaks"
     expect(range.startContainer.nodeType).toBe(Node.TEXT_NODE);
     expect(range.endContainer).toBe(range.startContainer);
   }
+});
+
+it("maps LaTeX tau to native mathematical tau without treating it as Latin t", () => {
+  const plain =
+    "weselectthreshold𝜏andkeepthelatentstateunchanged.thisisthesecondsentence.";
+  const first = String.raw`weselectthreshold$\tau$andkeepthelatentstateunchanged.`;
+  const second = "thisisthesecondsentence.";
+  const ranges = sentenceTextRanges(plain, first + second, [first, second]);
+  expect(ranges.map(({ start, end }) => plain.slice(start, end))).toEqual([
+    "weselectthreshold𝜏andkeepthelatentstateunchanged.",
+    second,
+  ]);
+  expect(
+    sentenceTextRanges(plain.replace("𝜏", "t"), first + second, [first]),
+  ).toEqual([]);
 });

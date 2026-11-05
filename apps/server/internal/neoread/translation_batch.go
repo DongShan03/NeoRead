@@ -96,7 +96,7 @@ sentences 数组的每一项只能包含一句原文及该句译文；禁止把�
 原文已经提供的 LaTeX 公式须保持结构：不丢失均值横线、帽号、波浪号或数学字体，不增添上下标，不将一个变量的上下标转移到其他变量。
 保留原文运算符的含义，例如 \bigsqcup 不能改写为 \sum。作者脚注中的数字和 *、\dagger、\ddagger 合并到同一个上标片段，例如 $^{1*}$、$^{1\dagger}$；不要拆成相邻的多个 $...$ 片段，不要把一个 \ddagger 改为两个 \dagger。
 ` + sourceRule + `
-译文 target 中的行内数学（变量、下标、上标、集合、运算符等）一律写成 KaTeX 可解析的 LaTeX，用 $...$ 包裹，例如 $T_i$、$MVSG(s, \ll)$、$O(n\log n)$。原文中被提取打散的下标（如 "𝑇 … 𝑖"）在能确定时还原为 $T_i$；不确定时照抄原文符号，不要猜。保留数学字母的字体语义，例如 𝒯、ℝ 分别写成 $\mathcal{T}$、$\mathbb{R}$，不能简化为普通 T、R。不要使用 Unicode 数学斜体或上下标字符代替 LaTeX。普通文本中的美元符号写成 \$。不要输出 $$ 独立公式：独立公式块已由公式图片单独转换。字符串在 JSON 中，反斜杠必须转义：\ll 写作 \\ll，\$ 写作 \\$。sourceIndex 只表示原句编号，服务按原文保留 source。
+译文 target 中的行内数学（变量、下标、上标、集合、运算符等）一律写成 KaTeX 可解析的 LaTeX，用 $...$ 包裹，例如 $T_i$、$MVSG(s, \ll)$、$O(n\log n)$。原文中被提取打散的下标（如 "𝑇 … 𝑖"）在能确定时还原为 $T_i$；不确定时照抄原文符号，不要猜。保留数学字母的字体语义，例如 𝜏、τ 必须识别为 $\tau$（不是拉丁 t 或书法 T），𝒯、ℝ 分别写成 $\mathcal{T}$、$\mathbb{R}$，不能简化为普通 T、R。不要使用 Unicode 数学斜体或上下标字符代替 LaTeX。普通文本中的美元符号写成 \$。不要输出 $$ 独立公式：独立公式块已由公式图片单独转换。字符串在 JSON 中，反斜杠必须转义：\ll 写作 \\ll，\$ 写作 \\$。sourceIndex 只表示原句编号，服务按原文保留 source。
 字符串内部的换行必须写为 JSON 转义，物理换行仅用于分隔完整 JSON 对象。标题、作者、frontMatter、contextBefore、contextAfter 仅为参考上下文，不为它们额外输出行。只翻译 paragraphs 列出的段落。
 ` + translationStyle(instructions) + `输入资料：
 ` + string(data)
@@ -121,6 +121,7 @@ type translationJSONL struct {
 	expected       map[string]translationParagraph
 	completed      map[string]bool
 	invalid        map[string]string
+	mathInvalid    map[string]bool
 	emit           func(TranslationBlock) error
 }
 
@@ -168,7 +169,7 @@ func repairInvalidJSONEscapes(line string) (string, bool) {
 }
 
 func newTranslationJSONL(batch translationBatch, emit func(TranslationBlock) error) *translationJSONL {
-	d := &translationJSONL{expected: map[string]translationParagraph{}, completed: map[string]bool{}, invalid: map[string]string{}, emit: emit}
+	d := &translationJSONL{expected: map[string]translationParagraph{}, completed: map[string]bool{}, invalid: map[string]string{}, mathInvalid: map[string]bool{}, emit: emit}
 	for _, p := range batch.Paragraphs {
 		d.expected[p.BlockID] = p
 	}
@@ -236,6 +237,7 @@ func (d *translationJSONL) line(line string) error {
 	sentences, err := parseTranslationSource(parsedLine, source.Source, !d.strictSource)
 	if err != nil {
 		d.invalid[row.BlockID] = err.Error()
+		d.mathInvalid[row.BlockID] = errors.Is(err, errTranslationMath)
 		return nil
 	}
 	t := TranslationBlock{BlockID: row.BlockID, SourceHash: source.SourceHash, Status: "complete", Sentences: sentences}
@@ -244,6 +246,7 @@ func (d *translationJSONL) line(line string) error {
 	}
 	d.completed[row.BlockID] = true
 	delete(d.invalid, row.BlockID)
+	delete(d.mathInvalid, row.BlockID)
 	return nil
 }
 
@@ -365,6 +368,24 @@ func (s *Server) translateBatch(ctx context.Context, doc Document, m translation
 		attempts = append(attempts, retry)
 	}
 	last := attempts[len(attempts)-1]
+	if layout, ok := m.(layoutManifest); ok && last.err == nil && len(attempts) > 1 && ctx.Err() == nil {
+		for _, paragraph := range unfinished() {
+			if !last.decoder.mathInvalid[paragraph.BlockID] {
+				continue
+			}
+			if _, recoveryErr := s.recoverTranslationMath(ctx, doc, layout, paragraph, service); recoveryErr == nil {
+				last.decoder.completed[paragraph.BlockID] = true
+				delete(last.decoder.invalid, paragraph.BlockID)
+				progress()
+			} else if errorKind(recoveryErr) == ErrorSave {
+				return recoveryErr
+			} else if errorKind(recoveryErr) == ErrorCapability {
+				last.decoder.invalid[paragraph.BlockID] += "；请在设置中验证图像能力后重试公式识别"
+			} else if !errors.Is(recoveryErr, errTranslationMath) && ctx.Err() == nil {
+				last.decoder.invalid[paragraph.BlockID] = "公式图像修复未完成：" + recoveryErr.Error()
+			}
+		}
+	}
 	failed := []TranslationBlock{}
 	for _, paragraph := range unfinished() {
 		t := TranslationBlock{BlockID: paragraph.BlockID, SourceHash: paragraph.SourceHash, Status: "failed", Sentences: []TranslationSentence{}, Error: last.reason(paragraph.BlockID)}

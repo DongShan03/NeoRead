@@ -1,3 +1,4 @@
+import { latexGreekText } from "../../../../packages/neoread-core/src/math-symbols";
 // Inputs use the same whitespace-free, lower-case text as PDF selection offsets.
 // OCR sometimes moves mathematical subscripts to the end of a line. Match the
 // complete prose in that case, retaining the original PDF offsets for painting.
@@ -110,7 +111,7 @@ function inlineMathProjection(text: string, block: string) {
   if (pattern.exec(text)) return;
   const variables = (value: string) =>
     Array.from(
-      value
+      latexGreekText(value)
         .replace(/[˜ˆ¯˙¨]/g, "")
         .replace(/\\[a-z]+/gi, "")
         .normalize("NFKD")
@@ -175,7 +176,7 @@ function reorderedMathProjection(
     if (legacy && math.operatorGlyphs?.has("f"))
       value = value.replace(/f(?=(?:[a-z]=\d+|[_^]))/gi, "⨆");
     return Array.from(
-      value
+      latexGreekText(value)
         .replace(/\\(?:bigsqcup|sqcup)(?![a-z])/gi, "⨆")
         .replace(/\\sum(?![a-z])/gi, "∑")
         .replace(/\\[a-z]+/gi, "")

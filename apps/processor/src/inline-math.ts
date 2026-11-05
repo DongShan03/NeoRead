@@ -1,4 +1,5 @@
 import type { TextSpan } from "./layout";
+import { mathGlyphLatex } from "../../../packages/neoread-core/src/math-symbols";
 
 const accents: Record<string, string> = {
   "˜": "tilde",
@@ -12,12 +13,7 @@ const tex = (text: string) =>
     if (letter === "{") return String.raw`\{`;
     if (letter === "}") return String.raw`\}`;
     if (letter === "⨆") return String.raw`\bigsqcup `;
-    if (/[𝐀-𝐳]/u.test(letter)) return `\\mathbf{${letter.normalize("NFKD")}}`;
-    if (/[𝒜-𝒵ℬℰℱℋℐℒℳℛ]/u.test(letter))
-      return `\\mathcal{${letter.normalize("NFKD")}}`;
-    if (/[𝔸-𝕑ℂℍℕℙℚℝℤ]/u.test(letter))
-      return `\\mathbb{${letter.normalize("NFKD")}}`;
-    return letter;
+    return mathGlyphLatex(letter);
   }).join("");
 
 function mathText(spans: TextSpan[]) {
@@ -95,9 +91,7 @@ function mathText(spans: TextSpan[]) {
       )
       .join("");
   const text = render(nodes.filter((n) => !n.parent));
-  return /\\(?:mathcal|mathbb|mathbf|tilde|hat|bar|dot|ddot)|[_^]\{/.test(text)
-    ? `$${text}$`
-    : text;
+  return /\\[a-zA-Z]+|[_^]\{/.test(text) ? `$${text}$` : text;
 }
 
 /** Prose baselines define lines; small scripts and overlapping accents belong
