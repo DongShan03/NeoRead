@@ -201,7 +201,7 @@ func (s *Server) corpusWorker(ctx context.Context) {
 		// running. Paused/failed layout and manual books can index without it.
 		err := s.Store.DB.QueryRowContext(ctx, `SELECT j.document_id FROM document_corpus_jobs j
  JOIN documents d ON d.id=j.document_id LEFT JOIN document_processing p ON p.document_id=d.id
- WHERE j.status='queued' AND d.deleted_at='' AND NOT
+ WHERE j.status='queued' AND d.deleted_at='' AND NOT EXISTS (SELECT 1 FROM sync_receiving WHERE key='document/' || d.id) AND NOT
  (d.type='pdf' AND COALESCE(p.phase,'')='learning' AND p.status IN ('queued','running'))
  ORDER BY j.rowid LIMIT 1`).Scan(&documentID)
 		if err != nil {

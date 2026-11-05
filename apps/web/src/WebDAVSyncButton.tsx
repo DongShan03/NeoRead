@@ -7,9 +7,14 @@ import {
 } from "@neoread/ui/components/tooltip";
 import { webdavBusy } from "@neoread/core";
 import { startWebDAVSync, useWebDAVSync } from "./webdav-sync";
+import { useReaderStore } from "./store";
 
 export function WebDAVSyncButton() {
   const { config, status, starting } = useWebDAVSync();
+  const paperTitle = useReaderStore(
+    (state) =>
+      state.documents.find((doc) => doc.id === status.documentId)?.title,
+  );
   if (!config?.account || !config.passwordSet) return null;
   const enabled = config.enabled;
   const SyncIcon = enabled ? RefreshCw : RefreshCwOff;
@@ -37,6 +42,16 @@ export function WebDAVSyncButton() {
       ? "总量统计中"
       : `共 ${(totalBytes / 1_000_000).toFixed(1)} MB`
   }`;
+  const part =
+    status.documentPhase &&
+    {
+      original: "原文件",
+      translation: "译文与排版",
+      other: "批注、笔记和其他内容",
+    }[status.documentPhase];
+  const detail = part
+    ? `${status.phase === "uploading" ? "正在上传" : "正在接收"}${part}${paperTitle ? ` · ${paperTitle}` : ""}`
+    : "";
   return (
     <Tooltip>
       <TooltipTrigger
@@ -45,7 +60,7 @@ export function WebDAVSyncButton() {
             size="icon-sm"
             variant="ghost"
             className="shrink-0"
-            aria-label={busy ? `${label}；${progress}` : label}
+            aria-label={busy ? `${label}；${detail}；${progress}` : label}
             aria-busy={busy}
             disabled={busy}
             focusableWhenDisabled
@@ -104,6 +119,9 @@ export function WebDAVSyncButton() {
       </TooltipTrigger>
       <TooltipContent side="bottom" className="flex-col items-start gap-1">
         <span>{title}</span>
+        {busy && detail && (
+          <span className="max-w-72 break-words">{detail}</span>
+        )}
         {busy && <span className="tabular-nums">{progress}</span>}
       </TooltipContent>
     </Tooltip>

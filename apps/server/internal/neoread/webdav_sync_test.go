@@ -316,7 +316,28 @@ func TestWebDAVWaitsForRendererSaveBeforeApplyingIncomingContent(t *testing.T) {
 	b.webdav.mu.Lock()
 	done := b.webdav.done
 	b.webdav.mu.Unlock()
-	<-done
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-done:
+			return
+		case <-deadline:
+			t.Fatal("remaining per-document stages did not finish")
+		default:
+		}
+		status := b.syncStatus()
+		if status.Phase == "ready" && status.ApplyToken != "" {
+			body := strings.NewReader(jsonText(map[string]string{"token": status.ApplyToken}))
+			req := httptest.NewRequest("POST", "http://127.0.0.1/api/sync/webdav/apply", body)
+			req.Header.Set("Authorization", "Bearer "+b.Token)
+			out := httptest.NewRecorder()
+			b.Handler().ServeHTTP(out, req)
+			if out.Code != 200 {
+				t.Fatal(out.Code, out.Body.String())
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 func TestWebDAVFailedRendererSaveDoesNotApplyAndCanRetry(t *testing.T) {
 	remote, _ := testDAV(t)
@@ -1322,9 +1343,14 @@ func TestWebDAVTrashRestoreAndPermanentDeletionReachTheCloudAndOtherDevices(t *t
 	runSync(t, a)
 	runSync(t, b)
 	assertSyncDocumentDeleted(t, b, names)
-	var manifest syncManifest
 	body, err := os.ReadFile(filepath.Join(directory, "NeoRead", "论文库", "devices", state.Device+".json"))
-	if err != nil || json.Unmarshal(body, &manifest) != nil || !manifest.Entries["document/paper"].Deleted {
+	var catalog *syncDeviceCatalog
+	if err == nil {
+		catalog, err = decodeSyncDeviceIndex(body, state.Device, func(name, hash string) ([]byte, error) {
+			return os.ReadFile(filepath.Join(directory, "NeoRead", "论文库", filepath.FromSlash(name)))
+		})
+	}
+	if err != nil || catalog.Versions["document/paper"] == nil || !catalog.Versions["document/paper"].Deleted {
 		t.Fatal("cloud did not receive deletion", string(body), err)
 	}
 	c := syncFixture(t, remote, "New device")
@@ -1687,5 +1713,215 @@ func TestWebDAVCacheFailureDoesNotFailCompletedSync(t *testing.T) {
 	runSync(t, s)
 	if _, err := s.Store.Document("paper"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWebDAVV2ShowsEachOriginalBeforeTranslationAndKeepsReadingEdits(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	for _, owner := range []string{"alpha", "beta"} {
+		syncDocumentFixture(t, a.Store, owner, "研究")
+	}
+	runSync(t, a)
+	stages := []string{}
+	b.webdav.beforeApply = func(ctx context.Context) error {
+		status := b.syncStatus()
+		if status.DocumentID == "" {
+			return nil
+		}
+		stages = append(stages, status.DocumentID+":"+status.DocumentPhase)
+		if status.DocumentID == "alpha" && status.DocumentPhase == "translation" {
+			doc, err := b.Store.Document("alpha")
+			if err != nil {
+				t.Fatal("original not visible before translation", err)
+			}
+			body, err := os.ReadFile(b.Store.File(doc))
+			if err != nil || string(body) != "PDF alpha" {
+				t.Fatal("visible original not readable", string(body), err)
+			}
+			if _, err = b.Store.Document("beta"); err == nil {
+				t.Fatal("second paper appeared as an empty placeholder")
+			}
+			var notes int
+			if err = b.Store.DB.QueryRow("SELECT count(*) FROM document_notes WHERE document_id='alpha'").Scan(&notes); err != nil || notes != 0 {
+				t.Fatal("notes arrived before translation", notes, err)
+			}
+			if _, err = b.Store.DB.Exec(`UPDATE documents SET percentage=0.45,progress='{"type":"pdf","page":1}' WHERE id='alpha'`); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return nil
+	}
+	runSync(t, b)
+	if strings.Join(stages, ",") != "alpha:original,alpha:translation,alpha:other,beta:original,beta:translation,beta:other" {
+		t.Fatal("unexpected receive order", stages)
+	}
+	alpha, err := b.Store.Document("alpha")
+	if err != nil || alpha.Percentage != 0.45 {
+		t.Fatal("later stages overwrote reading progress", alpha, err)
+	}
+	processing, err := b.Store.processing("alpha")
+	if err != nil || processing.Receiving {
+		t.Fatal("completed paper kept its receiving status", processing, err)
+	}
+	runSync(t, a)
+	alpha, err = a.Store.Document("alpha")
+	if err != nil || alpha.Percentage != 0.45 {
+		t.Fatal("reading edit did not upload", alpha, err)
+	}
+}
+
+func TestWebDAVV2InterruptedReceiveSurvivesRestartAndPreservesOfflineNoteConflict(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	syncDocumentFixture(t, a.Store, "paper", "研究")
+	runSync(t, a)
+	config, _ := a.readSyncConfig()
+	state, err := a.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := state.Own["document/paper"].Body.Files["cache/paper/analysis/manifest.json"]
+	blocked := manifest.Chunks[0].Hash
+	b.webdav.factory = func(c webdavConfig) *davClient {
+		client := testDAVClient(c, remote)
+		client.http.Transport = davTestTransport(func(r *http.Request) (*http.Response, error) {
+			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/"+blocked) {
+				return nil, errors.New("simulated offline")
+			}
+			return http.DefaultTransport.RoundTrip(r)
+		})
+		return client
+	}
+	config, _ = b.readSyncConfig()
+	if err = b.runWebDAV(t.Context(), config); err == nil {
+		t.Fatal("download interruption was hidden")
+	}
+	doc, err := b.Store.Document("paper")
+	if err != nil {
+		t.Fatal("received original was rolled back", err)
+	}
+	if body, e := os.ReadFile(b.Store.File(doc)); e != nil || string(body) != "PDF paper" {
+		t.Fatal("received original was unreadable", e)
+	}
+	root := b.Store.Root
+	if err = b.Store.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Store = store
+	if _, err = store.DB.Exec("INSERT INTO document_notes VALUES('paper','offline local note','2026-11-04T12:00:00Z')"); err != nil {
+		t.Fatal(err)
+	}
+	b.webdav.factory = func(c webdavConfig) *davClient { return testDAVClient(c, remote) }
+	runSync(t, b)
+	status := b.syncStatus()
+	if len(status.Conflicts) != 1 || !status.Conflicts[0].CanKeepBoth {
+		t.Fatal("offline note was lost or treated as deletion", status)
+	}
+	config, _ = b.readSyncConfig()
+	state, err = b.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflict := status.Conflicts[0]
+	state.Choices[conflict.Key] = syncChoice{Conflict: conflict.ID, KeepBoth: true}
+	if err = b.saveSyncState(config, state); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, b)
+	var note string
+	if err = store.DB.QueryRow("SELECT body FROM document_notes WHERE document_id='paper'").Scan(&note); err != nil || !strings.Contains(note, "offline local note") || !strings.Contains(note, "原样保存") {
+		t.Fatal("note resolution lost a version", note, err)
+	}
+	if len(b.syncStatus().Conflicts) != 0 {
+		t.Fatal("resolved receive kept prompting", b.syncStatus())
+	}
+	runSync(t, a)
+	if err = a.Store.DB.QueryRow("SELECT body FROM document_notes WHERE document_id='paper'").Scan(&note); err != nil || !strings.Contains(note, "offline local note") {
+		t.Fatal("resolved note did not push", note, err)
+	}
+}
+
+func TestWebDAVV2MigratesLegacyStorageAndOnlyPublishesChangedPaperMetadata(t *testing.T) {
+	remote, directory := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	for _, owner := range []string{"alpha", "beta"} {
+		syncDocumentFixture(t, a.Store, owner, "研究")
+	}
+	runSync(t, a)
+	config, _ := a.readSyncConfig()
+	state, err := a.loadSyncState(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte(jsonText(syncManifest{Format: "neoread-webdav", Version: 1, Device: state.Device, Entries: state.Own}))
+	remoteRoot := filepath.Join(directory, "NeoRead", "论文库")
+	remoteIndex := filepath.Join(remoteRoot, "devices", state.Device+".json")
+	if err = os.WriteFile(remoteIndex, legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, b)
+	body, err := os.ReadFile(remoteIndex)
+	var converted syncDeviceIndex
+	if err != nil || json.Unmarshal(body, &converted) != nil || converted.Version != 2 || converted.Legacy != "" || len(converted.Entries) != 3 {
+		t.Fatal("cloud migration not committed", string(body), err)
+	}
+	backup := filepath.Join(remoteRoot, filepath.FromSlash(legacySyncMetadataPath(state.Device, syncBytesHash(legacy))))
+	if saved, e := os.ReadFile(backup); e != nil || !bytes.Equal(saved, legacy) {
+		t.Fatal("cloud migration lost its legacy backup", e)
+	}
+	localLegacy := []byte(jsonText(state))
+	if err = atomicFile(a.syncStatePath(config), localLegacy); err != nil {
+		t.Fatal(err)
+	}
+	migrateLocalSyncStorage(a.Store.Root)
+	if saved, e := os.ReadFile(filepath.Join(filepath.Dir(a.syncStatePath(config)), "state-v1.backup.json")); e != nil || !bytes.Equal(saved, localLegacy) {
+		t.Fatal("local migration lost its legacy backup", e)
+	}
+	state, err = a.loadSyncState(config)
+	if err != nil || state.LegacyStorage || len(state.StoredRecords) != 3 {
+		t.Fatal("local migration did not load", state, err)
+	}
+	betaFile, err := syncStoredRecordPath(a.syncStatePath(config), "document/beta", state.StoredRecords["document/beta"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.Stat(betaFile)
+	var objectPuts int
+	a.webdav.factory = func(c webdavConfig) *davClient {
+		client := testDAVClient(c, remote)
+		client.http.Transport = davTestTransport(func(r *http.Request) (*http.Response, error) {
+			if r.Method == "PUT" && strings.Contains(r.URL.Path, "/objects/") {
+				objectPuts++
+			}
+			return http.DefaultTransport.RoundTrip(r)
+		})
+		return client
+	}
+	if _, err = a.Store.DB.Exec("UPDATE document_notes SET body='updated alpha' WHERE document_id='alpha'"); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	after, err := os.Stat(betaFile)
+	if err != nil || !after.ModTime().Equal(before.ModTime()) || objectPuts != 0 {
+		t.Fatal("unrelated file or local state was rewritten", objectPuts, err)
+	}
+	body, _ = os.ReadFile(remoteIndex)
+	var updated syncDeviceIndex
+	if err = json.Unmarshal(body, &updated); err != nil || updated.Entries["document/beta"] != converted.Entries["document/beta"] || updated.Entries["document/alpha"] == converted.Entries["document/alpha"] {
+		t.Fatal("changed-paper index was incorrect", updated, err)
+	}
+	config.DeviceName = "Research Mac"
+	if err = a.writeSyncConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	body, _ = os.ReadFile(remoteIndex)
+	if err = json.Unmarshal(body, &updated); err != nil || updated.Name != "Research Mac" || updated.Device != state.Device || objectPuts != 0 {
+		t.Fatal("device rename did not reach cloud metadata", updated, err)
 	}
 }

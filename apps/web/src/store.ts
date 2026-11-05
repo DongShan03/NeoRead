@@ -345,7 +345,7 @@ export async function openLibraryDocument(
     const jobs = await api.processing();
     if (revision !== openRevision) return false;
     const job = jobs.find((job) => job.documentId === doc.id);
-    if (!job || job.phase === "learning" || job.incomplete)
+    if (!job || (job.phase === "learning" && !job.receiving) || job.incomplete)
       throw new Error("论文飞速解析中，请稍等");
   }
   const state = useReaderStore.getState();

@@ -33,6 +33,7 @@ vi.mock("./paper-note-state", () => ({
   hasPendingPaperNotes: () => false,
 }));
 vi.mock("./store", () => ({
+  useReaderStore: (select: (state: { documents: never[] }) => unknown) => select({ documents: [] }),
   flushLibraryPreferences: vi.fn(async () => {}),
   loadLibraryPreferences: vi.fn(),
   refreshLibrary: vi.fn(),

@@ -6570,11 +6570,14 @@
                     {
                       "type": "integer",
                       "minimum": 0,
-                      "description": "Planned upload and download file bytes in this run, excluding reused chunks and metadata; absent until scanning finishes",
+                      "description": "File bytes planned across upload and download; omitted while document metadata is still being discovered, updated as the remaining transfer plan becomes known",
                     },
                   "changed": { "type": "array", "items": { "type": "string" } },
                   "revision": { "type": "integer", "minimum": 0 },
                   "applyToken": { "type": "string" },
+                  "documentId": { "type": "string" },
+                  "documentPhase":
+                    { "enum": ["original", "translation", "other"] },
                 },
               "required":
                 [
@@ -7763,6 +7766,11 @@
                           "pagesDone": { "type": "integer" },
                           "pagesTotal": { "type": "integer" },
                         },
+                    },
+                  "receiving":
+                    {
+                      "type": "boolean",
+                      "description": "Original is readable while synchronized translations and user records continue arriving",
                     },
                 },
               "required":

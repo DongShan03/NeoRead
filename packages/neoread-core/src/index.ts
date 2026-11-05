@@ -697,6 +697,8 @@ export interface ProcessingStage {
   warning?: string;
 }
 export interface Processing {
+  /** Original is readable while the remaining synced content arrives. */
+  receiving?: boolean;
   retranslating?: boolean;
   layoutRevision?: string;
   autoTranslateMaxPages?: number;

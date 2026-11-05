@@ -145,16 +145,19 @@ func keepSyncNotes(base *syncDocument, versions []*syncVersion) (*syncDocument, 
 }
 
 type syncLocalState struct {
-	Device     string                     `json:"device"`
-	Clock      syncClock                  `json:"clock"`
-	Own        map[string]*syncVersion    `json:"own"`
-	Base       map[string]*syncDocument   `json:"base"`
-	BaseClocks map[string]syncClock       `json:"baseClocks"`
-	Files      map[string]syncFingerprint `json:"files"`
-	Uploaded   map[string]bool            `json:"uploaded"`
-	Remotes    map[string]syncRemoteCache `json:"remotes"`
-	Choices    map[string]syncChoice      `json:"choices"`
-	LastSync   string                     `json:"lastSync,omitempty"`
+	Connection    string                     `json:"-"`
+	LegacyStorage bool                       `json:"-"`
+	StoredRecords map[string]string          `json:"-"`
+	Device        string                     `json:"device"`
+	Clock         syncClock                  `json:"clock"`
+	Own           map[string]*syncVersion    `json:"own"`
+	Base          map[string]*syncDocument   `json:"base"`
+	BaseClocks    map[string]syncClock       `json:"baseClocks"`
+	Files         map[string]syncFingerprint `json:"files"`
+	Uploaded      map[string]bool            `json:"uploaded"`
+	Remotes       map[string]syncRemoteCache `json:"remotes"`
+	Choices       map[string]syncChoice      `json:"choices"`
+	LastSync      string                     `json:"lastSync,omitempty"`
 }
 
 func newSyncState() *syncLocalState {

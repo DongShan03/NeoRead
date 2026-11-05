@@ -138,12 +138,13 @@ func OpenStore(root string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS chat_runs(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,body TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS chat_runs_session ON chat_runs(session_id);
  CREATE TABLE IF NOT EXISTS codex_history_threads(thread_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,hidden INTEGER NOT NULL DEFAULT 0);
- CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);`)
+ CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);` + syncStorageSchema)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 	store := &Store{DB: db, Root: root}
+	migrateLocalSyncStorage(root)
 	if err = store.migrateOrganization(); err != nil {
 		db.Close()
 		return nil, err

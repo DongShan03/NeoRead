@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,6 +32,12 @@ type syncQuery interface {
 }
 type syncSnapshot struct {
 	Documents      map[string]*syncDocument
+	Observed       map[string]*syncDocument
+	Receiving      map[string]*syncReceiving
+	ReceivePlans   map[string]*syncReceiving
+	Receipts       map[string]*syncCommitReceipt
+	State          *syncLocalState
+	DeviceName     string
 	Files          map[string]syncFingerprint
 	Busy           map[string]bool
 	Revision       int64
@@ -75,13 +82,50 @@ func syncSchema(ctx context.Context, q syncQuery) (map[string]syncTable, error) 
 	return result, nil
 }
 
-func syncRows(ctx context.Context, q syncQuery, name string, table syncTable) ([]syncRow, error) {
+func syncRows(ctx context.Context, q syncQuery, name string, table syncTable, owners ...string) ([]syncRow, error) {
 	query := "SELECT " + strings.Join(table.columns, ",") + " FROM " + name
+	var args []any
 	if name == "settings" {
 		query += " WHERE key='preferences:library'"
 	}
+	if len(owners) > 0 {
+		documents := []string{}
+		library := false
+		for _, owner := range owners {
+			if owner == "library" {
+				library = true
+			} else {
+				documents = append(documents, strings.TrimPrefix(owner, "document/"))
+			}
+		}
+		if name == "settings" || name == "tag_boards" {
+			if !library {
+				return []syncRow{}, nil
+			}
+		} else {
+			if len(documents) == 0 {
+				return []syncRow{}, nil
+			}
+			column := "document_id"
+			switch name {
+			case "documents":
+				column = "id"
+			case "document_relations":
+				column = "a"
+			}
+			values := strings.TrimSuffix(strings.Repeat("?,", len(documents)), ",")
+			if name == "chat_runs" {
+				query += " WHERE session_id IN (SELECT id FROM chat_sessions WHERE document_id IN (" + values + "))"
+			} else {
+				query += " WHERE " + column + " IN (" + values + ")"
+			}
+			for _, id := range documents {
+				args = append(args, id)
+			}
+		}
+	}
 	query += " ORDER BY rowid"
-	rows, err := q.QueryContext(ctx, query)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +163,7 @@ func emptySyncDocument() *syncDocument {
 	return &syncDocument{Records: map[string]syncRecord{}, Files: map[string]syncFile{}}
 }
 
-func snapshotSyncRows(ctx context.Context, q syncQuery) (map[string]*syncDocument, error) {
+func snapshotSyncRows(ctx context.Context, q syncQuery, owners ...string) (map[string]*syncDocument, error) {
 	shared, err := sharedPreferenceScope(ctx, q)
 	if err != nil {
 		return nil, err
@@ -132,7 +176,7 @@ func snapshotSyncRows(ctx context.Context, q syncQuery) (map[string]*syncDocumen
 	sessionOwners := map[string]string{}
 	chats := map[string]syncRecord{}
 	for _, table := range syncTables {
-		rows, err := syncRows(ctx, q, table, schema[table])
+		rows, err := syncRows(ctx, q, table, schema[table], owners...)
 		if err != nil {
 			return nil, err
 		}
@@ -322,6 +366,14 @@ func (s *Server) snapshotSync(ctx context.Context, state *syncLocalState) (*sync
 		return nil, err
 	}
 	documents, err := snapshotSyncRows(ctx, tx)
+	var receiving map[string]*syncReceiving
+	var receipts map[string]*syncCommitReceipt
+	if err == nil {
+		receiving, err = readSyncReceiving(ctx, tx)
+	}
+	if err == nil {
+		receipts, err = readSyncReceipts(ctx, tx)
+	}
 	var revision int64
 	if err == nil {
 		revision, err = syncLocalRevision(ctx, tx)
@@ -330,7 +382,7 @@ func (s *Server) snapshotSync(ctx context.Context, state *syncLocalState) (*sync
 	if err != nil {
 		return nil, err
 	}
-	result := &syncSnapshot{Documents: documents, Files: map[string]syncFingerprint{}, Busy: s.syncBusy(), Revision: revision}
+	result := &syncSnapshot{Documents: documents, Observed: maps.Clone(documents), Receiving: receiving, Files: map[string]syncFingerprint{}, Busy: s.syncBusy(), Revision: revision}
 	for key, doc := range documents {
 		if key == "library" {
 			continue
@@ -410,6 +462,12 @@ func (s *Server) snapshotSync(ctx context.Context, state *syncLocalState) (*sync
 				}
 			}
 		}
+	}
+	if err = result.restoreReceiving(state); err != nil {
+		return nil, err
+	}
+	for key, receipt := range receipts {
+		applySyncReceipt(state, key, receipt)
 	}
 	return result, nil
 }

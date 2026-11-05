@@ -125,6 +125,11 @@ func exportLibraryArchive(ctx context.Context, source, destination string, optio
 	if _, err = snapshot.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		return err
 	}
+	// An unopened library may still have the previous schema. Upgrade only
+	// the disposable copy before exporting new device-local state.
+	if _, err = snapshot.Exec(syncStorageSchema); err != nil {
+		return err
+	}
 	store := &Store{DB: snapshot, Root: source}
 	if err = store.migrateOrganization(); err != nil {
 		return err
@@ -203,6 +208,28 @@ func exportLibraryArchive(ctx context.Context, source, destination string, optio
 	// Reading preferences travel with the library. Provider keys, connection
 	// credentials and machine-specific integration state do not.
 	if _, err = tx.Exec("DROP TABLE IF EXISTS codex_history_threads"); err != nil {
+		return err
+	}
+	// An archive contains the received files, not the source device's pending
+	// DAV connection. Reconstruct local processing before dropping its marker.
+	receiving, err := readSyncReceiving(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for key := range receiving {
+		owner := strings.TrimPrefix(key, "document/")
+		if _, keep := selected[owner]; !keep {
+			continue
+		}
+		visible, e := snapshotSyncRows(ctx, tx, key)
+		if e != nil {
+			return e
+		}
+		if err = (&Server{Store: store}).applySyncProcessing(ctx, tx, key, nil, visible[key]); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec("DELETE FROM sync_receipts; DELETE FROM sync_receiving"); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`DELETE FROM settings WHERE key NOT IN ('neoread','preferences:library','preferences:guide','preferences:shortcuts') AND key<>?`, epubMetadataMigration); err != nil {
@@ -717,6 +744,9 @@ func mergeArchiveLibrary(destination, incoming string, documents []Document) err
 			}
 		}
 		if _, err = tx.Exec("DELETE FROM documents WHERE id=?", doc.ID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("DELETE FROM sync_receiving WHERE key=?; DELETE FROM sync_receipts WHERE key=?", "document/"+doc.ID, "document/"+doc.ID); err != nil {
 			return err
 		}
 	}

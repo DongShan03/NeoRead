@@ -81,7 +81,8 @@ func (s *Server) recoverSyncInstall() error {
 }
 
 func (s *Server) stageSyncDocument(ctx context.Context, dav *davClient, run string, before, doc *syncDocument) error {
-	for name, file := range doc.Files {
+	for _, name := range syncFileOrder(doc.Files) {
+		file := doc.Files[name]
 		if before != nil {
 			if old, ok := before.Files[name]; ok && syncHash(old) == syncHash(file) {
 				continue
@@ -390,7 +391,13 @@ func (s *Server) applySyncProcessing(ctx context.Context, tx *sql.Tx, key string
 	old, _ := before.FileSafe(manifest)
 	current, _ := after.FileSafe(manifest)
 	if existing > 0 && syncHash(old) == syncHash(current) {
-		return nil
+		var receiving int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM sync_receiving WHERE key=?", key).Scan(&receiving); err != nil {
+			return err
+		}
+		if receiving == 0 {
+			return nil
+		}
 	}
 	var d Document
 	if err := tx.QueryRowContext(ctx, "SELECT id,type,library FROM documents WHERE id=?", owner).Scan(&d.ID, &d.Type, &d.Library); err != nil {
@@ -458,7 +465,7 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 	if err != nil {
 		return nil, err
 	}
-	current, err := snapshotSyncRows(ctx, tx)
+	current, err := snapshotSyncRows(ctx, tx, slices.Collect(maps.Keys(updates))...)
 	if err != nil {
 		return nil, err
 	}
@@ -479,11 +486,33 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 		if key != "library" && (len(s.documentTasks[owner]) > 0 || s.reparsingDocuments[owner] || s.deletingDocuments[owner]) {
 			continue
 		}
-		if syncHash(current[key].RecordsSafe()) != syncHash(initial.Documents[key].RecordsSafe()) {
-			continue
+		if syncHash(current[key].RecordsSafe()) != syncHash(initial.observed(key).RecordsSafe()) {
+			before := initial.observed(key)
+			if before == nil || current[key] == nil || after == nil || initial.Receiving[key] == nil && initial.ReceivePlans[key] == nil {
+				continue
+			}
+			local := &syncDocument{Records: current[key].Records, Files: before.Files}
+			newFiles := false
+			for _, record := range current[key].Records {
+				for _, attachment := range record["paper_attachments"] {
+					if attachment["kind"] == "file" {
+						if _, exists := before.Files["attachments/"+fmtSyncString(attachment["sha256"])]; !exists {
+							newFiles = true
+						}
+					}
+				}
+			}
+			if newFiles {
+				continue
+			}
+			merged, ok := mergeSyncDocument(before, local, after)
+			if !ok {
+				continue
+			}
+			after, updates[key] = merged, merged
 		}
 		unchanged := true
-		if before := initial.Documents[key]; before != nil {
+		if before := initial.observed(key); before != nil {
 			for name := range before.Files {
 				info, e := root.Lstat(name)
 				fingerprint := initial.Files[name]
@@ -496,18 +525,34 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 		if !unchanged {
 			continue
 		}
+		if after != nil {
+			for name := range after.Files {
+				if _, had := initial.observed(key).FileSafe(name); had || strings.HasPrefix(name, "attachments/") {
+					continue
+				}
+				if _, e := root.Lstat(name); e == nil {
+					unchanged = false
+					break
+				} else if !os.IsNotExist(e) {
+					return nil, e
+				}
+			}
+		}
+		if !unchanged {
+			continue
+		}
 		accepted[key] = true
 		names := map[string]bool{}
 		if after != nil {
 			for name, file := range after.Files {
-				old, ok := initial.Documents[key].FileSafe(name)
+				old, ok := initial.observed(key).FileSafe(name)
 				if !ok || syncHash(old) != syncHash(file) {
 					names[name] = false
 				}
 			}
 		}
-		if initial.Documents[key] != nil {
-			for name := range initial.Documents[key].Files {
+		if initial.observed(key) != nil {
+			for name := range initial.observed(key).Files {
 				if _, ok := after.FileSafe(name); !ok {
 					names[name] = true
 				}
@@ -537,11 +582,27 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 	// Attachment blobs are shared by content hash. Resolve their references
 	// against the accepted updates before deleting any physical file.
 	shared := map[string]bool{}
-	surviving := maps.Clone(current)
-	for key := range accepted {
-		surviving[key] = updates[key]
+	rows, err := tx.QueryContext(ctx, "SELECT document_id,sha256 FROM paper_attachments WHERE kind='file'")
+	if err != nil {
+		return nil, err
 	}
-	for _, document := range surviving {
+	for rows.Next() {
+		var owner, hash string
+		if err = rows.Scan(&owner, &hash); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if !accepted["document/"+owner] {
+			shared["attachments/"+hash] = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for key := range accepted {
+		document := updates[key]
 		if document == nil {
 			continue
 		}
@@ -603,6 +664,53 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 		}
 	}
 	if err == nil {
+		for key := range accepted {
+			if plan := initial.ReceivePlans[key]; plan != nil {
+				owner := strings.TrimPrefix(key, "document/")
+				if _, err = tx.ExecContext(ctx, "UPDATE document_processing SET status='paused',body=json_set(body,'$.enabled',json('false'),'$.receiving',json('true'),'$.status','paused','$.detail','正在接收译文和其他内容') WHERE document_id=?", owner); err != nil {
+					break
+				}
+			}
+		}
+	}
+	if err == nil {
+		for key := range accepted {
+			if receipt := initial.Receipts[key]; receipt != nil && initial.ReceivePlans[key] == nil {
+				base := updates[key]
+				if base != nil {
+					visible, e := snapshotSyncRows(ctx, tx, key)
+					if e != nil {
+						err = e
+						break
+					}
+					base = &syncDocument{Records: visible[key].RecordsSafe(), Files: base.Files}
+					updates[key] = base
+				}
+				if initial.State != nil && base != nil && syncHash(base) != syncHash(receipt.Base) {
+					receipt.Own = newSyncVersion(initial.State, base, receipt.Base, initial.DeviceName, receipt.Clock)
+				}
+				receipt.Base = base
+				if receipt.Own != nil {
+					receipt.Clock.include(receipt.Own.Clock)
+				}
+				_, err = tx.ExecContext(ctx, "INSERT INTO sync_receipts(key,body) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET body=excluded.body", key, jsonText(receipt))
+				if err != nil {
+					break
+				}
+			}
+			if plan, exists := initial.ReceivePlans[key]; exists {
+				if plan == nil {
+					_, err = tx.ExecContext(ctx, "DELETE FROM sync_receiving WHERE key=?", key)
+				} else {
+					_, err = tx.ExecContext(ctx, "INSERT INTO sync_receiving(key,body) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET body=excluded.body", key, jsonText(plan))
+				}
+				if err != nil {
+					break
+				}
+			}
+		}
+	}
+	if err == nil {
 		_, err = tx.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES('sync:apply',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", run)
 	}
 	var afterRevision int64
@@ -619,7 +727,7 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 		}
 		return nil, err
 	}
-	initial.AppliedChanges = afterRevision - beforeRevision
+	initial.AppliedChanges += afterRevision - beforeRevision
 	return accepted, nil
 }
 

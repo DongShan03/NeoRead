@@ -1357,3 +1357,65 @@ func TestLibraryArchivePreservesPeakAndCurrentReadingPosition(t *testing.T) {
 		t.Fatalf("restored peak or location changed: %+v %v", doc, err)
 	}
 }
+
+func TestLibraryArchiveDetachesInterruptedSyncOnlyInExportedCopy(t *testing.T) {
+	store := archiveFixture(t, filepath.Join(t.TempDir(), "source"))
+	archiveDocument(t, store, "paper", "研究")
+	if err := os.RemoveAll(filepath.Join(store.Root, "cache", "paper")); err != nil {
+		t.Fatal(err)
+	}
+	pending := syncReceiving{Connection: strings.Repeat("a", 64), Remote: emptySyncDocument(), Baseline: emptySyncDocument(), Clock: syncClock{}, Parents: syncClock{}}
+	if _, err := store.DB.Exec("INSERT INTO sync_receiving VALUES(?,?)", "document/paper", jsonText(pending)); err != nil {
+		t.Fatal(err)
+	}
+	processing := initialDocumentProcessing(Document{ID: "paper", Type: "pdf", Library: "papers"}, `{"autoTranslateMaxPages":0}`)
+	processing.Receiving, processing.Enabled, processing.Status = true, false, "paused"
+	if _, err := store.DB.Exec("INSERT INTO document_processing VALUES(?,?,?,?)", "paper", processing.Phase, processing.Status, jsonText(processing)); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "library.zip")
+	if err := ExportLibraryArchive(store.Root, archive, LibraryArchiveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := readSyncReceiving(t.Context(), store.DB); err != nil || len(pending) != 1 {
+		t.Fatal("export changed the source receive state", pending, err)
+	}
+	destination := filepath.Join(t.TempDir(), "imported")
+	if err := ImportLibraryArchive(archive, destination, ""); err != nil {
+		t.Fatal(err)
+	}
+	restored := archiveFixture(t, destination)
+	if pending, err := readSyncReceiving(t.Context(), restored.DB); err != nil || len(pending) != 0 {
+		t.Fatal("import kept a source-device receive marker", pending, err)
+	}
+	processing, err := restored.processing("paper")
+	if err != nil || processing.Receiving || processing.Status == "paused" || processing.AutoTranslateMaxPages == nil || *processing.AutoTranslateMaxPages != 0 {
+		t.Fatal("imported paper stayed blocked or enabled paid translation", processing, err)
+	}
+}
+
+func TestLibraryArchiveExportsUnopenedLegacyLibraryWithoutChangingItsSchema(t *testing.T) {
+	store := archiveFixture(t, filepath.Join(t.TempDir(), "source"))
+	archiveDocument(t, store, "paper", "研究")
+	for _, table := range []string{"sync_receiving", "sync_receipts"} {
+		if _, err := store.DB.Exec("DROP TABLE " + table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive := filepath.Join(t.TempDir(), "library.zip")
+	if err := ExportLibraryArchive(store.Root, archive, LibraryArchiveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var tables int
+	if err := store.DB.QueryRow("SELECT count(*) FROM sqlite_schema WHERE name='sync_receiving'").Scan(&tables); err != nil || tables != 0 {
+		t.Fatal("export migrated the original library", tables, err)
+	}
+	destination := filepath.Join(t.TempDir(), "imported")
+	if err := ImportLibraryArchive(archive, destination, ""); err != nil {
+		t.Fatal(err)
+	}
+	restored := archiveFixture(t, destination)
+	if _, err := restored.Document("paper"); err != nil {
+		t.Fatal(err)
+	}
+}

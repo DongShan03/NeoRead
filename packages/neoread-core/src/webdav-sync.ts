@@ -52,6 +52,8 @@ export interface WebDAVStatus {
   changed: string[];
   revision: number;
   applyToken?: string;
+  documentId?: string;
+  documentPhase?: "original" | "translation" | "other";
 }
 export const webdavIntervals = [5, 10, 15, 30, 60] as const;
 export const webdavBusy = (phase: WebDAVStatus["phase"]) =>

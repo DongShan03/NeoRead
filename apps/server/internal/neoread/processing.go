@@ -21,6 +21,7 @@ type ProcessingStage struct {
 	Warning string `json:"warning,omitempty"`
 }
 type Processing struct {
+	Receiving             bool   `json:"receiving,omitempty"`
 	AutoTranslateMaxPages *int   `json:"autoTranslateMaxPages,omitempty"`
 	ManualTranslation     bool   `json:"manualTranslation,omitempty"`
 	Enabled               bool   `json:"enabled"`

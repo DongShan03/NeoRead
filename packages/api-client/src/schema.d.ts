@@ -5743,11 +5743,14 @@ export interface components {
             deferred: number;
             /** @description File bytes transferred over WebDAV during this run */
             transferred: number;
-            /** @description Planned upload and download file bytes in this run, excluding reused chunks and metadata; absent until scanning finishes */
+            /** @description File bytes planned across upload and download; omitted while document metadata is still being discovered, updated as the remaining transfer plan becomes known */
             totalBytes?: number;
             changed: string[];
             revision: number;
             applyToken?: string;
+            documentId?: string;
+            /** @enum {unknown} */
+            documentPhase?: "original" | "translation" | "other";
         };
         WebDAVConflict: {
             key: string;
@@ -6197,6 +6200,8 @@ export interface components {
                 pagesDone: number;
                 pagesTotal: number;
             };
+            /** @description Original is readable while synchronized translations and user records continue arriving */
+            receiving?: boolean;
         };
         PDFBlock: {
             id: string;

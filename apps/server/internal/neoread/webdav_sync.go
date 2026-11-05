@@ -31,20 +31,22 @@ type webdavConflict struct {
 	CanKeepBoth bool            `json:"canKeepBoth"`
 }
 type webdavStatus struct {
-	RunID       string           `json:"runId,omitempty"`
-	Manual      bool             `json:"manual"`
-	Dirty       bool             `json:"dirty"`
-	Failed      bool             `json:"failed"`
-	Phase       string           `json:"phase"`
-	LastSync    string           `json:"lastSync,omitempty"`
-	Error       string           `json:"error,omitempty"`
-	Conflicts   []webdavConflict `json:"conflicts"`
-	Deferred    int              `json:"deferred"`
-	Transferred int              `json:"transferred"`
-	TotalBytes  *int64           `json:"totalBytes,omitempty"`
-	Changed     []string         `json:"changed"`
-	Revision    uint64           `json:"revision"`
-	ApplyToken  string           `json:"applyToken,omitempty"`
+	RunID         string           `json:"runId,omitempty"`
+	Manual        bool             `json:"manual"`
+	Dirty         bool             `json:"dirty"`
+	Failed        bool             `json:"failed"`
+	Phase         string           `json:"phase"`
+	LastSync      string           `json:"lastSync,omitempty"`
+	Error         string           `json:"error,omitempty"`
+	Conflicts     []webdavConflict `json:"conflicts"`
+	Deferred      int              `json:"deferred"`
+	Transferred   int              `json:"transferred"`
+	TotalBytes    *int64           `json:"totalBytes,omitempty"`
+	Changed       []string         `json:"changed"`
+	Revision      uint64           `json:"revision"`
+	ApplyToken    string           `json:"applyToken,omitempty"`
+	DocumentID    string           `json:"documentId,omitempty"`
+	DocumentPhase string           `json:"documentPhase,omitempty"`
 }
 type webdavState struct {
 	accountPath string
@@ -93,14 +95,27 @@ func (s *Server) syncStatePath(config webdavConfig) string {
 }
 func (s *Server) loadSyncState(config webdavConfig) (*syncLocalState, error) {
 	state := newSyncState()
-	body, err := os.ReadFile(s.syncStatePath(config))
+	state.Connection = filepath.Base(filepath.Dir(s.syncStatePath(config)))
+	root, err := os.OpenRoot(s.Store.Root)
+	if err != nil {
+		return nil, err
+	}
+	name, err := filepath.Rel(s.Store.Root, s.syncStatePath(config))
+	if err != nil {
+		root.Close()
+		return nil, err
+	}
+	stored, err := readSyncStoredState(root, name)
+	root.Close()
 	if os.IsNotExist(err) {
 		return state, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if decodeSyncJSON(body, state) != nil || !syncID(state.Device) || state.Clock == nil || state.Own == nil || state.Base == nil || state.BaseClocks == nil || state.Files == nil || state.Uploaded == nil || state.Remotes == nil || state.Choices == nil {
+	state = stored
+	state.Connection = filepath.Base(filepath.Dir(s.syncStatePath(config)))
+	if !syncID(state.Device) || state.Clock == nil || state.Own == nil || state.Base == nil || state.BaseClocks == nil || state.Files == nil || state.Uploaded == nil || state.Remotes == nil || state.Choices == nil {
 		return nil, errors.New("本地同步记录无法读取，已保留书库数据")
 	}
 	if file, e := os.Open(s.syncUploadPath(config)); e == nil {
@@ -140,11 +155,7 @@ func (s *Server) recordSyncUpload(config webdavConfig, hash string) error {
 	return closeErr
 }
 func (s *Server) saveSyncState(config webdavConfig, state *syncLocalState) error {
-	body, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-	return atomicFile(s.syncStatePath(config), body)
+	return s.writeSyncStoredState(config, state)
 }
 func (s *Server) dav(config webdavConfig) *davClient {
 	if s.webdav.factory != nil {
@@ -185,9 +196,7 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 	if err := s.recoverSyncInstall(); err != nil {
 		return err
 	}
-	var dav *davClient
-	var err error
-	config, dav, err = s.prepareSyncLocation(ctx, config)
+	config, dav, err := s.prepareSyncLocation(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -200,6 +209,55 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 	if err != nil {
 		return err
 	}
+	snapshot.State, snapshot.DeviceName = state, config.DeviceName
+	snapshot.Receipts = map[string]*syncCommitReceipt{}
+	state.Files = snapshot.Files
+	if err = s.saveSyncState(config, state); err != nil {
+		return err
+	}
+
+	s.setSyncPhase("downloading")
+	devices, err := dav.devices(ctx)
+	if err != nil {
+		return err
+	}
+	catalogs := []*syncDeviceCatalog{}
+	ownCatalog := newSyncDeviceCatalog(state.Device, config.DeviceName)
+	incoming := map[string]bool{}
+	deviceNames := map[string]string{}
+	for _, device := range devices {
+		cache := filepath.Join(filepath.Dir(s.syncStatePath(config)), "remotes", device.Name)
+		previous, readErr := os.ReadFile(cache)
+		body := previous
+		if readErr != nil || device.ETag == "" || state.Remotes[device.Name].ETag != device.ETag {
+			body, err = dav.get(ctx, "devices/"+device.Name, syncManifestLimit)
+			if err != nil {
+				return err
+			}
+		}
+		deviceID := strings.TrimSuffix(device.Name, ".json")
+		catalog, err := s.readSyncDevice(ctx, dav, config, deviceID, body, previous)
+		if err != nil {
+			return err
+		}
+		if deviceID == state.Device {
+			if catalog.Index.Clock > state.Clock[state.Device] {
+				return errors.New("同步身份已被其他设备使用，请断开后重新连接；书库数据已保留")
+			}
+			ownCatalog = catalog
+		}
+		deviceNames[deviceID] = catalog.Index.Name
+		for _, key := range catalog.keys() {
+			incoming[key] = true
+		}
+		catalogs = append(catalogs, catalog)
+		if err = atomicFile(cache, []byte(jsonText(catalog.Index))); err != nil {
+			return err
+		}
+		state.Remotes[device.Name] = syncRemoteCache{ETag: device.ETag}
+	}
+	ownCatalog.Index.Name = config.DeviceName
+	priorOwn := maps.Clone(state.Own)
 	keys := map[string]bool{}
 	for key := range state.Base {
 		keys[key] = true
@@ -210,11 +268,26 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 	for key := range snapshot.Documents {
 		keys[key] = true
 	}
-	for key := range keys {
+	for key := range incoming {
+		keys[key] = true
+	}
+	for _, receiving := range snapshot.Receiving {
+		if receiving.Connection == state.Connection {
+			for _, file := range receiving.Remote.Files {
+				for _, chunk := range file.Chunks {
+					state.Uploaded[chunk.Hash] = true
+				}
+			}
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
 		if snapshot.Busy[strings.TrimPrefix(key, "document/")] {
 			continue
 		}
 		local, base := snapshot.Documents[key], state.Base[key]
+		if receiving := snapshot.Receiving[key]; receiving != nil && syncHash(snapshot.observed(key)) == syncHash(receiving.Baseline) {
+			continue
+		}
 		own := state.Own[key]
 		pending := own != nil && !state.BaseClocks[key].covers(own.Clock)
 		if syncHash(local) == syncHash(base) && !pending {
@@ -223,312 +296,305 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 		if base == nil && own != nil {
 			base = own.Body
 		}
-		if own := state.Own[key]; own != nil && (local == nil && own.Deleted || local != nil && !own.Deleted && syncHash(own.Body) == syncHash(local)) {
+		if own != nil && (local == nil && own.Deleted || local != nil && !own.Deleted && syncHash(own.Body) == syncHash(local)) {
 			continue
 		}
 		parents := syncClock{}
 		parents.include(state.BaseClocks[key])
-		if own := state.Own[key]; own != nil {
+		if own != nil {
 			parents.include(own.Clock)
 		}
 		state.Own[key] = newSyncVersion(state, local, base, config.DeviceName, parents)
 	}
-	// Fingerprints are a read cache, not deletion history. Keep only files in
-	// this snapshot; Own/Base still retain chunks needed by deferred work.
-	state.Files = snapshot.Files
-	// Persist unpublished local changes before any network access. A retry
-	// retains their original causal order instead of hiding an offline edit.
 	if err = s.saveSyncState(config, state); err != nil {
 		return err
-	}
-	s.setSyncPhase("downloading")
-	devices, err := dav.devices(ctx)
-	if err != nil {
-		return err
-	}
-	candidates := map[string][]*syncVersion{}
-	for key, entry := range state.Own {
-		candidates[key] = syncCandidates(candidates[key], entry)
-	}
-	ownRemoteHash := ""
-	for _, device := range devices {
-		cache := filepath.Join(filepath.Dir(s.syncStatePath(config)), "remotes", device.Name)
-		body, readErr := os.ReadFile(cache)
-		if readErr != nil || device.ETag == "" || state.Remotes[device.Name].ETag != device.ETag {
-			body, err = dav.get(ctx, "devices/"+device.Name, syncManifestLimit)
-			if err != nil {
-				return err
-			}
-		}
-		var manifest syncManifest
-		deviceID := strings.TrimSuffix(device.Name, ".json")
-		if err = decodeSyncJSON(body, &manifest); err != nil {
-			return err
-		}
-		if err = validateSyncManifest(&manifest, deviceID); err != nil {
-			return err
-		}
-		if deviceID == state.Device {
-			ownRemoteHash = syncHash(manifest)
-			for key, entry := range manifest.Entries {
-				if own := state.Own[key]; entry.Clock[state.Device] > state.Clock[state.Device] || own != nil && entry.Clock[state.Device] == own.Clock[state.Device] && !sameSyncValue(entry, own) {
-					return errors.New("同步身份已被其他设备使用，请断开后重新连接；书库数据已保留")
-				}
-			}
-		}
-		for key, entry := range manifest.Entries {
-			candidates[key] = syncCandidates(candidates[key], entry)
-			state.Clock.include(entry.Clock)
-			if entry.Deleted {
-				continue
-			}
-			for _, file := range entry.Body.Files {
-				for _, chunk := range file.Chunks {
-					state.Uploaded[chunk.Hash] = true
-				}
-			}
-		}
-		if err = atomicFile(cache, body); err != nil {
-			return err
-		}
-		state.Remotes[device.Name] = syncRemoteCache{ETag: device.ETag}
 	}
 	schema, err := syncSchema(ctx, s.Store.DB)
 	if err != nil {
 		return err
 	}
-	for key, versions := range candidates {
-		for _, entry := range versions {
-			if err = validateSyncDocument(key, entry.Body, schema); err != nil {
+	ordered := slices.Sorted(maps.Keys(keys))
+	slices.SortFunc(ordered, func(a, b string) int {
+		if a == "library" {
+			return -1
+		}
+		if b == "library" {
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+	desired := map[string]*syncDocument{}
+	accepted := map[string]bool{}
+	required := map[string]bool{}
+	ordinary := map[string]*syncDocument{}
+	finishes := map[string]syncPDFReceiveFinish{}
+	conflicts := []webdavConflict{}
+	for position, key := range ordered {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		versions := []*syncVersion{}
+		if own := state.Own[key]; own != nil {
+			versions = syncCandidates(versions, own)
+		}
+		for _, catalog := range catalogs {
+			version, e := catalog.version(key, s.metadataReader(ctx, dav, config))
+			if e != nil {
+				return e
+			}
+			if version == nil {
+				continue
+			}
+			if version.Device == state.Device {
+				if previous := priorOwn[key]; previous != nil && version.Clock[state.Device] == previous.Clock[state.Device] && !sameSyncValue(version, previous) {
+					return errors.New("同步身份存在不同内容，请断开后重新连接；书库数据已保留")
+				}
+			}
+			if e = validateSyncDocument(key, version.Body, schema); e != nil {
+				return e
+			}
+			versions = syncCandidates(versions, version)
+			state.Clock.include(version.Clock)
+			if !version.Deleted {
+				for _, file := range version.Body.Files {
+					for _, chunk := range file.Chunks {
+						state.Uploaded[chunk.Hash] = true
+					}
+				}
+			}
+			if catalog.Index.Legacy != "" {
+				if e = s.publishSyncVersion(ctx, dav, config, catalog, key, version); e != nil {
+					return e
+				}
+			}
+		}
+		if len(versions) == 0 {
+			continue
+		}
+		for _, version := range versions {
+			if err = validateSyncDocument(key, version.Body, schema); err != nil {
 				return err
 			}
 		}
-	}
-	desired := map[string]*syncDocument{}
-	resolutions := map[string]*syncVersion{}
-	ackClocks := map[string]syncClock{}
-	conflicts := []webdavConflict{}
-	for key, versions := range candidates {
-		selected := versions[0]
-		merged := false
-		for _, entry := range versions[1:] {
-			if sameSyncValue(selected, entry) {
-				continue
-			}
-			if !selected.Deleted && !entry.Deleted {
-				if body, ok := mergeSyncDocument(state.Base[key], selected.Body, entry.Body); ok {
-					selected = &syncVersion{Body: body, Clock: syncClock{}}
-					merged = true
-					continue
+		selected, merged, conflict := resolveSyncVersions(state, key, versions, config.DeviceName)
+		if conflict != nil {
+			for i, version := range versions {
+				if name := deviceNames[version.Device]; name != "" {
+					conflict.Versions[i].Device = name
 				}
 			}
-			selected = nil
-			break
-		}
-		conflictID := syncHash(versions)
-		if selected == nil {
-			choice := state.Choices[key]
-			if choice.Conflict == conflictID {
-				if choice.KeepBoth {
-					if body, ok := keepSyncNotes(state.Base[key], versions); ok {
-						selected = &syncVersion{Body: body}
-						merged = true
-					}
-				}
-				for _, version := range versions {
-					if !choice.KeepBoth && syncHash(version) == choice.Version {
-						selected = version
-						// Resolve just the note when all other records can merge;
-						// choosing its text must not discard independent annotations.
-						if body, ok := keepSyncNotes(state.Base[key], versions); ok {
-							for recordKey, record := range body.Records {
-								if len(record["document_notes"]) == 1 {
-									if note, exists := version.Body.Records[recordKey]; exists {
-										body.Records[recordKey] = note
-									} else {
-										delete(body.Records, recordKey)
-									}
-								}
-							}
-							selected = &syncVersion{Body: body}
-						}
-						merged = true
-						break
+			conflicts = append(conflicts, *conflict)
+			if snapshot.observed(key) == nil && !snapshot.Busy[strings.TrimPrefix(key, "document/")] {
+				if original := originalSyncVersion(versions); original != nil {
+					if _, err = s.receiveSyncPDF(ctx, dav, config, snapshot, state, key, original.Body, original.Body, original.Clock, 0); err != nil {
+						return err
 					}
 				}
 			}
-			if selected == nil {
-				conflict := syncConflict(key, conflictID, versions)
-				_, conflict.CanKeepBoth = keepSyncNotes(state.Base[key], versions)
-				conflicts = append(conflicts, conflict)
-				continue
-			}
-		}
-		if merged {
-			body := selected.Body
-			if selected.Deleted {
-				body = nil
-			}
-			selected = newSyncVersion(state, body, selected.Body, config.DeviceName)
-			resolutions[key] = selected
+			continue
 		}
 		clock := syncClock{}
 		for _, version := range versions {
 			clock.include(version.Clock)
 		}
 		clock.include(selected.Clock)
-		ackClocks[key] = clock
+		body := selected.Body
 		if selected.Deleted {
-			desired[key] = nil
+			body = nil
+		}
+		desired[key] = body
+		if snapshot.Busy[strings.TrimPrefix(key, "document/")] {
+			continue
+		}
+		if syncHash(body) == syncHash(snapshot.observed(key)) && snapshot.Receiving[key] == nil {
+			state.Base[key], state.BaseClocks[key] = body, clock
+			if merged {
+				state.Own[key] = selected
+			}
+			delete(state.Choices, key)
+			continue
+		}
+		required[key] = true
+		receipt := &syncCommitReceipt{Connection: state.Connection, Base: body, Clock: maps.Clone(clock)}
+		if merged {
+			receipt.Own = selected
+		}
+		snapshot.Receipts[key] = receipt
+		if position == len(ordered)-1 {
+			remaining := maps.Clone(ordinary)
+			remaining[key] = body
+			bytes, e := s.syncDownloadBytes(ctx, snapshot.Observed, remaining)
+			if e != nil {
+				return e
+			}
+			s.webdav.mu.Lock()
+			transferred := s.webdav.status.Transferred
+			s.webdav.mu.Unlock()
+			s.setSyncTotal(int64(transferred) + bytes + syncUploadBytes(state.Own, state.Uploaded))
+		}
+		if body != nil && syncPDF(body) && (snapshot.observed(key) == nil || snapshot.Receiving[key] != nil) {
+			finish := syncPDFReceiveFinish{Starting: copySyncDocument(snapshot.observed(key)), Desired: body}
+			if previous := snapshot.Receiving[key]; previous != nil {
+				finish.Known = previous.Baseline
+			}
+			source, sourceClock := receivingSource(snapshot, key, versions, state.Device, body)
+			complete, e := s.receiveSyncPDF(ctx, dav, config, snapshot, state, key, body, source, sourceClock, 2)
+			if e != nil {
+				return e
+			}
+			if complete {
+				accepted[key] = true
+			} else {
+				finishes[key] = finish
+			}
 		} else {
-			desired[key] = selected.Body
+			ordinary[key] = body
 		}
 	}
 	slices.SortFunc(conflicts, func(a, b webdavConflict) int { return strings.Compare(a.Key, b.Key) })
 	s.webdav.mu.Lock()
-	s.syncStatusLocked().Conflicts = conflicts
-	s.syncStatusLocked().Deferred = len(snapshot.Busy)
+	s.webdav.status.Conflicts = conflicts
+	s.webdav.status.Deferred = len(snapshot.Busy)
 	s.webdav.mu.Unlock()
 	if err = s.saveSyncState(config, state); err != nil {
 		return err
 	}
-	updates := map[string]*syncDocument{}
-	run := id()
-	defer func() {
-		if _, err := os.Stat(filepath.Join(s.syncDirectory(), "apply.json")); os.IsNotExist(err) {
-			_ = os.RemoveAll(filepath.Join(s.syncDirectory(), "apply", run))
+	// Existing documents and deletions commit after new originals, preserving
+	// shared attachments and references to documents received in this run.
+	for _, key := range slices.Sorted(maps.Keys(ordinary)) {
+		s.setSyncPhase("downloading")
+		if key != "library" {
+			s.setSyncDocumentPhase(key, "other")
 		}
-	}()
-	for key, body := range desired {
-		if snapshot.Busy[strings.TrimPrefix(key, "document/")] {
-			continue
+		ok, e := s.applySyncTarget(ctx, dav, snapshot, key, copySyncDocument(ordinary[key]), nil)
+		if e != nil {
+			return e
 		}
-		if syncHash(body) == syncHash(snapshot.Documents[key]) {
-			continue
+		if ok {
+			accepted[key] = true
 		}
-		updates[key] = body
-	}
-	downloadBytes, err := s.syncDownloadBytes(ctx, snapshot.Documents, updates)
-	if err != nil {
-		return err
-	}
-	uploads := maps.Clone(state.Own)
-	for key, version := range resolutions {
-		if !snapshot.Busy[strings.TrimPrefix(key, "document/")] {
-			uploads[key] = version
+		state.Files = snapshot.Files
+		if e = s.saveSyncDocumentState(config, state, key); e != nil {
+			return e
 		}
 	}
-	s.setSyncTotal(downloadBytes + syncUploadBytes(uploads, state.Uploaded))
-	for key, body := range updates {
-		if body != nil {
-			if err = s.stageSyncDocument(ctx, dav, run, snapshot.Documents[key], body); err != nil {
-				return err
-			}
+	for _, key := range slices.Sorted(maps.Keys(finishes)) {
+		ok, e := s.finishReceivedPDF(ctx, dav, snapshot, key, finishes[key], desired, incoming)
+		if e != nil {
+			return e
+		}
+		if ok {
+			accepted[key] = true
+		}
+		state.Files = snapshot.Files
+		if e = s.saveSyncDocumentState(config, state, key); e != nil {
+			return e
 		}
 	}
-	s.setSyncPhase("applying")
-	finishApply, err := s.waitSyncApply(ctx, run, len(updates) > 0)
-	if err != nil {
-		return err
-	}
-	defer finishApply()
-	accepted, err := s.installSync(ctx, run, snapshot, updates)
-	if err != nil {
-		return err
-	}
-	if err = s.recoverSyncInstall(); err != nil {
-		return err
-	}
-	s.notifySyncChanges(accepted)
-	finishApply()
-	for key, version := range resolutions {
-		_, updating := updates[key]
-		if !snapshot.Busy[strings.TrimPrefix(key, "document/")] && (!updating || accepted[key]) {
-			state.Own[key] = version
+	for _, catalog := range catalogs {
+		if err = s.finishSyncStorageMigration(ctx, dav, config, catalog); err != nil {
+			return err
 		}
 	}
-	if err = s.saveSyncState(config, state); err != nil {
-		return err
-	}
-	// Edits made while downloading may prevent applying a resolution. Use
-	// only the versions actually accepted when counting remaining uploads.
 	s.webdav.mu.Lock()
 	transferred := s.webdav.status.Transferred
 	s.webdav.mu.Unlock()
 	s.setSyncTotal(int64(transferred) + syncUploadBytes(state.Own, state.Uploaded))
 	s.setSyncPhase("uploading")
-	for _, entry := range state.Own {
-		if entry.Deleted {
+	uploadKeys := slices.Collect(maps.Keys(state.Own))
+	slices.SortFunc(uploadKeys, func(a, b string) int {
+		x, y := state.Own[a].Clock[state.Device], state.Own[b].Clock[state.Device]
+		if x < y {
+			return -1
+		}
+		if x > y {
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+	for _, key := range uploadKeys {
+		if snapshot.Receiving[key] != nil {
 			continue
 		}
-		for _, file := range entry.Body.Files {
-			for _, chunk := range file.Chunks {
-				if state.Uploaded[chunk.Hash] {
-					continue
+		entry := state.Own[key]
+		if key != "library" {
+			s.setSyncDocumentPhase(key, "original")
+		}
+		if !entry.Deleted {
+			for _, name := range syncFileOrder(entry.Body.Files) {
+				if key != "library" {
+					s.setSyncDocumentPhase(key, syncPartNames[syncFilePhase(name)])
 				}
-				body, err := os.ReadFile(s.syncBlob(chunk.Hash))
-				if err != nil {
-					return errors.New("本地同步文件缺失，请重新扫描书库")
+				for _, chunk := range entry.Body.Files[name].Chunks {
+					if state.Uploaded[chunk.Hash] {
+						continue
+					}
+					body, e := os.ReadFile(s.syncBlob(chunk.Hash))
+					if e != nil {
+						return errors.New("本地同步文件缺失，请重新扫描书库")
+					}
+					if len(body) != chunk.Size || syncBytesHash(body) != chunk.Hash {
+						return errors.New("本地同步文件校验失败")
+					}
+					if e = dav.mkdir(ctx, "objects/"+chunk.Hash[:2]); e != nil {
+						return e
+					}
+					if e = dav.put(ctx, "objects/"+chunk.Hash[:2]+"/"+chunk.Hash, body); e != nil {
+						return e
+					}
+					state.Uploaded[chunk.Hash] = true
+					if e = s.recordSyncUpload(config, chunk.Hash); e != nil {
+						return e
+					}
+					s.webdav.mu.Lock()
+					s.webdav.status.Transferred += len(body)
+					s.webdav.mu.Unlock()
 				}
-				if len(body) != chunk.Size || syncBytesHash(body) != chunk.Hash {
-					return errors.New("本地同步文件校验失败")
-				}
-				if err = dav.mkdir(ctx, "objects/"+chunk.Hash[:2]); err != nil {
-					return err
-				}
-				if err = dav.put(ctx, "objects/"+chunk.Hash[:2]+"/"+chunk.Hash, body); err != nil {
-					return err
-				}
-				state.Uploaded[chunk.Hash] = true
-				if err = s.recordSyncUpload(config, chunk.Hash); err != nil {
-					return err
-				}
-				s.webdav.mu.Lock()
-				s.syncStatusLocked().Transferred += len(body)
-				s.webdav.mu.Unlock()
 			}
 		}
-	}
-	manifest := syncManifest{Format: "neoread-webdav", Version: 1, Device: state.Device, Entries: state.Own}
-	if syncHash(manifest) != ownRemoteHash {
-		body, _ := json.Marshal(manifest)
-		if len(body) > syncManifestLimit {
-			return errors.New("同步元数据超过当前格式上限，请拆分为多个书库")
-		}
-		if err = dav.put(ctx, "devices/"+state.Device+".json", body); err != nil {
+		if err = s.publishSyncVersion(ctx, dav, config, ownCatalog, key, entry); err != nil {
 			return err
 		}
 	}
-	for key, body := range desired {
-		_, updating := updates[key]
-		if updating && !accepted[key] {
-			continue
-		}
-		if snapshot.Busy[strings.TrimPrefix(key, "document/")] {
-			continue
-		}
-		if body == nil {
-			delete(state.Base, key)
-		} else {
-			state.Base[key] = body
-		}
-		state.BaseClocks[key] = ackClocks[key]
-		delete(state.Choices, key)
+	if err = s.publishSyncIndex(ctx, dav, config, ownCatalog); err != nil {
+		return err
 	}
 	state.LastSync = now()
 	if err = s.saveSyncState(config, state); err != nil {
 		return err
 	}
 	_ = os.Remove(s.syncUploadPath(config))
-	if len(conflicts) == 0 && len(snapshot.Busy) == 0 && len(accepted) == len(updates) {
-		if err = s.confirmSyncRevision(ctx, snapshot.Revision+snapshot.AppliedChanges); err != nil {
-			return err
+	if len(conflicts) == 0 && len(snapshot.Busy) == 0 && len(snapshot.Receiving) == 0 && len(accepted) == len(required) {
+		final, e := s.snapshotSync(ctx, state)
+		if e != nil {
+			return e
+		}
+		same := true
+		all := map[string]bool{}
+		for key := range final.Documents {
+			all[key] = true
+		}
+		for key := range state.Base {
+			all[key] = true
+		}
+		for key := range all {
+			if syncHash(final.Documents[key]) != syncHash(state.Base[key]) {
+				same = false
+				break
+			}
+		}
+		if same && len(final.Busy) == 0 {
+			if e = s.confirmSyncRevision(ctx, final.Revision); e != nil {
+				return e
+			}
 		}
 	}
 	s.webdav.mu.Lock()
-	s.syncStatusLocked().LastSync = state.LastSync
+	s.webdav.status.LastSync = state.LastSync
+	s.webdav.status.DocumentID, s.webdav.status.DocumentPhase = "", ""
+	s.webdav.status.Deferred += len(snapshot.Receiving)
 	s.webdav.mu.Unlock()
-	if count, bytes, err := s.pruneSyncCache(ctx, config, state); err != nil {
+	if count, bytes, e := s.pruneSyncCache(ctx, config, state); e != nil {
 		if ctx.Err() == nil {
 			s.diagnosticEvent(slog.LevelWarn, "sync.cache_prune_failed", "taskId", s.webdav.taskID, "errorCode", "cache")
 		}
@@ -621,7 +687,7 @@ func (s *Server) notifySyncChanges(changed map[string]bool) {
 	}
 	slices.Sort(keys)
 	s.webdav.mu.Lock()
-	s.webdav.status.Changed = keys
+	s.webdav.status.Changed = slices.Compact(slices.Sorted(slices.Values(append(s.webdav.status.Changed, keys...))))
 	s.webdav.status.Revision++
 	s.webdav.mu.Unlock()
 }
@@ -744,6 +810,9 @@ func (s *Server) beginWebDAVSync(ctx context.Context, manual ...bool) error {
 	s.syncStatusLocked().Error = ""
 	s.syncStatusLocked().Transferred = 0
 	s.syncStatusLocked().TotalBytes = nil
+	s.syncStatusLocked().Changed = nil
+	s.syncStatusLocked().DocumentID = ""
+	s.syncStatusLocked().DocumentPhase = ""
 	taskID := id()
 	s.webdav.taskID = taskID
 	s.webdav.status.RunID = taskID

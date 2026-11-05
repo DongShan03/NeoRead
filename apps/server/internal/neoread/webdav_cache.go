@@ -67,6 +67,7 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 		return 0, 0, err
 	}
 	live := map[string]struct{}{}
+	storedStates := map[string]*syncLocalState{}
 	currentIdentity := filepath.Base(filepath.Dir(s.syncStatePath(config)))
 	keep := func(doc *syncDocument) {
 		if doc == nil {
@@ -78,6 +79,14 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 			}
 		}
 	}
+	receiving, err := readSyncReceiving(ctx, s.Store.DB)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, pending := range receiving {
+		keep(pending.Remote)
+		keep(pending.Baseline)
+	}
 	for _, identity := range identities {
 		if !syncCacheHash(identity.Name()) {
 			continue
@@ -88,12 +97,12 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 		folder := filepath.Join(directory, identity.Name())
 		state := current
 		if identity.Name() != currentIdentity {
-			state = &syncLocalState{}
-			err = readSyncCacheJSON(root, filepath.Join(folder, "state.json"), state)
+			state, err = readSyncStoredState(root, filepath.Join(folder, "state.json"))
 		} else {
 			err = nil // Reuse the state just saved by this run rather than decoding it twice.
 		}
 		if err == nil {
+			storedStates[filepath.Join(folder, "state.json")] = state
 			if state.Own == nil || state.Base == nil || state.Files == nil {
 				return 0, 0, errors.New("同步缓存状态不完整")
 			}
@@ -129,11 +138,8 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 			if err = ctx.Err(); err != nil {
 				return 0, 0, err
 			}
-			var manifest syncManifest
-			if err = readSyncCacheJSON(root, filepath.Join(folder, "remotes", remote.Name()), &manifest); err != nil {
-				return 0, 0, err
-			}
-			if err = validateSyncManifest(&manifest, device); err != nil {
+			manifest, err := readSyncCachedManifest(root, filepath.Join(folder, "remotes", remote.Name()), device)
+			if err != nil {
 				return 0, 0, err
 			}
 			for _, version := range manifest.Entries {
@@ -141,9 +147,17 @@ func (s *Server) pruneSyncCache(ctx context.Context, config webdavConfig, curren
 			}
 		}
 	}
+	for name, state := range storedStates {
+		pruned, removedBytes, err := pruneStoredSyncRecords(root, name, state)
+		if err != nil {
+			return count, bytes, err
+		}
+		count += pruned
+		bytes += removedBytes
+	}
 	objects, err := root.Open(filepath.Join(directory, "objects"))
 	if os.IsNotExist(err) {
-		return 0, 0, nil
+		return count, bytes, nil
 	}
 	if err != nil {
 		return 0, 0, err
