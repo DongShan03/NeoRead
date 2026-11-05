@@ -1,12 +1,14 @@
 package neoread
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"image"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +20,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"neoread.local/server/internal/diagnostics"
 )
 
 func TestFormulaMarkdownRequiresFormulaOnlyResponse(t *testing.T) {
@@ -581,7 +585,7 @@ cp "$NEOREAD_TEST_MATH_CROP" "$out/page-$page.png"
 }
 
 func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *testing.T) {
-	for _, mode := range []string{"complete", "missing_token", "extra_formula", "truncated", "changed_source", "invalid_ocr", "unverified_image", "canceled"} {
+	for _, mode := range []string{"complete", "missing_token", "extra_formula", "invalid_math", "invalid_source_hash", "truncated", "changed_source", "invalid_ocr", "unverified_image", "canceled"} {
 		t.Run(mode, func(t *testing.T) {
 			s, _, m := translationFixture(t)
 			ctx, cancel := context.WithCancel(t.Context())
@@ -638,10 +642,17 @@ func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *t
 						if mode == "extra_formula" {
 							target += `$z$`
 						}
+						if mode == "invalid_math" {
+							target += `$\Gamma$`
+						}
 					}
 					pairs = append(pairs, TranslationSentence{Source: strings.TrimSpace(part), Target: target})
 				}
-				line := jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": para.SourceHash, "sentences": pairs}) + "\n"
+				hash := para.SourceHash
+				if mode == "invalid_source_hash" {
+					hash = "wrong-version"
+				}
+				line := jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": hash, "sentences": pairs}) + "\n"
 				if mode == "truncated" && strings.Contains(para.Source, "NEOREAD_MATH_") {
 					w.Header().Set("Content-Type", "text/event-stream")
 					sendTranslationDelta(w, line)
@@ -664,6 +675,33 @@ func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *t
 			}
 			service := s.taskGenerationService(s.aiConfig(), taskTranslation)
 			paragraph := m.translationParagraphs()[0]
+			if mode == "invalid_math" || mode == "invalid_source_hash" {
+				logs, e := diagnostics.New(t.TempDir(), "math-recovery-test")
+				if e != nil {
+					t.Fatal(e)
+				}
+				s.SetDiagnostics(logs)
+				_, err := s.recoverTranslationMath(ctx, doc, m, paragraph, service)
+				reason := errTranslationMath.Error()
+				if mode == "invalid_source_hash" {
+					reason = "译文原文版本不匹配"
+				}
+				if err == nil || errorKind(err) != ErrorProtocol || err.Error() != "公式修复后的译文未完整逐句对应："+reason {
+					t.Fatal("lost decoder failure reason or protocol classification", err)
+				}
+				files, e := filepath.Glob(filepath.Join(logs.Dir, "*.jsonl"))
+				if e != nil || len(files) != 1 {
+					t.Fatal(files, e)
+				}
+				data, e := os.ReadFile(files[0])
+				if e != nil || !bytes.Contains(data, []byte(`"event":"translation.math_recovery.finished"`)) || !bytes.Contains(data, []byte(`"errorCode":"protocol"`)) || !bytes.Contains(data, []byte(`"phase":"translating"`)) || bytes.Contains(data, []byte(reason)) {
+					t.Fatal("recovery lost diagnostic classification or logged raw failure", string(data), e)
+				}
+				if texts.Load() != 1 || images.Load() != 1 {
+					t.Fatal("unexpected recovery calls", texts.Load(), images.Load())
+				}
+				return
+			}
 			err = s.translateBatch(ctx, doc, m, translationBatch{Paragraphs: []translationParagraph{paragraph}}, service, func() {})
 			if mode == "canceled" {
 				if !errors.Is(err, context.Canceled) {
@@ -836,6 +874,72 @@ func TestTranslationMathRecoveryRestoresDroppedCompatibilityGlyphs(t *testing.T)
 			stored, err := s.readLayout("doc")
 			if err != nil || stored.Blocks[0].Text != tt.source || paragraph.Source != tt.source {
 				t.Fatal("rewrote original source", stored, err)
+			}
+		})
+	}
+}
+
+func TestTranslationMathRecoverySkipsAreDiagnosed(t *testing.T) {
+	const privateText = "PRIVATE_MATH_SOURCE_AND_MODEL_OUTPUT"
+	for _, reason := range []string{"block_not_found", "image_asset", "source_mismatch", "no_formulas"} {
+		t.Run(reason, func(t *testing.T) {
+			s, _, m := translationFixture(t)
+			m.Blocks = m.Blocks[:1]
+			m.Blocks[0].Text = privateText
+			paragraph := m.translationParagraphs()[0]
+			switch reason {
+			case "block_not_found":
+				m.Blocks = nil
+			case "image_asset":
+				m.Blocks[0].Image = "private-image.png"
+			case "source_mismatch":
+				m.Blocks[0].Text += " changed"
+			}
+			logs, err := diagnostics.New(t.TempDir(), "math-recovery-test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.SetDiagnostics(logs)
+			// A skipped recovery returns before rendering or calling a provider.
+			if _, err := s.recoverTranslationMath(t.Context(), Document{ID: "doc"}, m, paragraph, nil); !errors.Is(err, errTranslationMath) {
+				t.Fatal("changed skipped recovery behavior", err)
+			}
+			files, err := filepath.Glob(filepath.Join(logs.Dir, "*.jsonl"))
+			if err != nil || len(files) != 1 {
+				t.Fatal(files, err)
+			}
+			data, err := os.ReadFile(files[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var event map[string]any
+			if err := json.Unmarshal(data, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event["event"] != "translation.math_recovery.skipped" || event["level"] != "warn" || event["documentId"] != "doc" || event["target"] != paragraph.BlockID || event["reasonCode"] != reason {
+				t.Fatal("skipped recovery lost identifiers or stable reason", event)
+			}
+			if bytes.Contains(data, []byte(privateText)) || bytes.Contains(data, []byte("private-image")) {
+				t.Fatal("source or image path entered persistent diagnostics")
+			}
+			var bundle bytes.Buffer
+			if err := logs.Export(&bundle, s.Store.Root, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			archive, err := zip.NewReader(bytes.NewReader(bundle.Bytes()), int64(bundle.Len()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range archive.File {
+				reader, err := file.Open()
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err := io.ReadAll(reader)
+				reader.Close()
+				if err != nil || bytes.Contains(data, []byte(privateText)) || bytes.Contains(data, []byte("private-image")) {
+					t.Fatal("source or image path entered exported diagnostics", file.Name, err)
+				}
 			}
 		})
 	}

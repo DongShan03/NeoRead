@@ -183,4 +183,6 @@ Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history
 
 正文公式修复通过 `translation.math_recovery.started / finished` 记录文档、段落标识、公式数量、耗时及结果。阶段为 rendering、recognizing、translating、saving；沿用提供方生成事件记录外部调用和终态。失败日志仅包含稳定错误类别，不记录截图、公式内容、模型输出或本机路径。
 
+进入截图流程前因找不到段落、段落为图片、原文不匹配或没有可识别公式而返回时，记录 warn 级别的 `translation.math_recovery.skipped`，携带 `documentId`、`target`（段落标识）及固定 `reasonCode=block_not_found / image_asset / source_mismatch / no_formulas`，不记录正文。修复译文未通过逐句校验时，用户错误信息保留解码器给出的原因；错误类别仍为 `protocol`，结构化终态事件仍只记录类别，不写入解码错误原文。
+
 原 PDF 原生链接读取失败记录 `pdf.native_links.failed`，沿用共享异常脱敏器记录错误类型和栈帧，不记录链接文字、目标、论文正文或原始错误消息。每页仅解析一次；失败时译文保留普通文本，关闭文档后释放该缓存。
