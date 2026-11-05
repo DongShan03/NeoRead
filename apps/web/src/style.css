@@ -3018,6 +3018,57 @@ kbd {
   overflow-y: auto;
   padding: 8px 20px 24px;
 }
+.library-agent-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 clamp(310px, 38%, 520px);
+  min-width: 0;
+  min-height: 0;
+  background: var(--background);
+  border-left: 1px solid var(--border);
+  box-shadow: -3px 0 10px color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+.library-agent-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.library-agent-session {
+  position: relative;
+  min-height: 36px;
+}
+.library-agent-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.library-agent-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px 16px;
+}
+.library-agent-pane .chat-messages {
+  padding-top: 16px;
+}
+@media (max-width: 800px) {
+  .paper-library-body:has(.library-agent-pane) {
+    position: relative;
+  }
+  .library-agent-pane {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: min(440px, 100%);
+    z-index: 12;
+  }
+}
 .paper-batch-bar {
   position: sticky;
   top: -8px;

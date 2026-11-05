@@ -153,13 +153,27 @@ func resultPageImages(raw json.RawMessage) []documentPageImage {
 // Uses the same attempt lock, cancellation, trace, coverage and budget as text tools.
 func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var q struct {
-		Pages []int `json:"pages"`
+		DocumentID string `json:"documentId"`
+		Pages      []int  `json:"pages"`
 	}
 	if strictToolArguments(args, &q) != nil || len(q.Pages) == 0 || len(q.Pages) > 8 {
 		return map[string]any{"error": "invalid_arguments"}, nil
 	}
 	if !a.canViewPages {
 		return map[string]any{"error": "vision_unavailable", "message": "The current model has no verified image input capability. Do not infer unseen figures."}, nil
+	}
+	collection := a.corpus
+	pageOffset := 0
+	if collection.Library != nil {
+		if source := collection.Library.Sources[q.DocumentID]; source != nil {
+			a.corpus = source
+			defer func() { a.corpus = collection }()
+			pageOffset = len(collection.Passages) + collection.Library.PageOffsets[q.DocumentID]
+		} else {
+			return map[string]any{"error": "invalid_document", "message": "Choose documentId from get_outline before reading pages."}, nil
+		}
+	} else if q.DocumentID != "" && q.DocumentID != collection.DocumentID {
+		return map[string]any{"error": "invalid_document"}, nil
 	}
 	d, err := a.server.Store.Document(a.corpus.DocumentID)
 	if err != nil {
@@ -200,6 +214,9 @@ func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) 
 		return nil, err
 	}
 	offset := len(a.corpus.Passages)
+	if collection.Library != nil {
+		offset = pageOffset
+	}
 	if a.conversation != nil {
 		offset += a.conversation.SourceOffset
 	}
@@ -213,7 +230,14 @@ func (a *documentAgent) readPDFPages(ctx context.Context, args json.RawMessage) 
 			}
 		}
 		if !found {
-			a.Evidence = append(a.Evidence, pageEvidence(images[i]))
+			evidence := pageEvidence(images[i])
+			if collection.Library != nil {
+				evidence.DocumentID = q.DocumentID
+				evidence.DocumentRevision = a.corpus.Revision
+				evidence.DocumentTitle = d.Title
+				evidence.Revision = collection.Revision
+			}
+			a.Evidence = append(a.Evidence, evidence)
 		}
 		if a.turnRead != nil {
 			a.turnRead[images[i].SourceID] = true

@@ -614,6 +614,9 @@ export interface ChatQuote {
 }
 export type SourceReference = DocumentSourceReference | ChatQuote;
 export interface DocumentSourceReference {
+  documentId?: string;
+  documentTitle?: string;
+  documentRevision?: string;
   /** Rendered page evidence, separate from extracted text. */
   pageImage?: {
     page: number;
@@ -985,4 +988,11 @@ export interface DocumentChatSession {
   createdAt: string;
   updatedAt: string;
   latestRun?: ChatRun;
+}
+export interface LibraryChatScope {
+  category: string;
+  documentIds: string[];
+}
+export interface LibraryChatSession extends DocumentChatSession {
+  scope: LibraryChatScope;
 }

@@ -95,6 +95,8 @@ func (s *Server) applyCodexHistoryVisibility(ctx context.Context) error {
 	hide := s.hideCodexHistory()
 	if _, err := s.Store.DB.ExecContext(ctx, `INSERT OR IGNORE INTO codex_history_threads(thread_id,document_id,hidden)
  SELECT json_extract(body,'$.nativeThread'),document_id,0 FROM document_conversations
+ WHERE COALESCE(json_extract(body,'$.nativeThread'),'')<>''
+ UNION ALL SELECT json_extract(body,'$.nativeThread'),document_id,0 FROM library_document_conversations
  WHERE COALESCE(json_extract(body,'$.nativeThread'),'')<>''`); err != nil {
 		return err
 	}

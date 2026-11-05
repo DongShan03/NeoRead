@@ -36,7 +36,7 @@ type documentConversation struct {
 func (s *Store) documentConversation(ctx context.Context, documentID, provider, key string) (documentConversation, error) {
 	var c documentConversation
 	var raw string
-	err := s.DB.QueryRowContext(ctx, "SELECT body FROM document_conversations WHERE document_id=? AND provider=?", documentID, provider).Scan(&raw)
+	err := s.DB.QueryRowContext(ctx, "SELECT body FROM "+chatTable(documentID, "document_conversations")+" WHERE document_id=? AND provider=?", documentID, provider).Scan(&raw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return c, err
 	}
@@ -57,7 +57,7 @@ func saveDocumentConversation(ctx context.Context, db interface {
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "INSERT INTO document_conversations(document_id,provider,body) VALUES(?,?,?) ON CONFLICT(document_id,provider) DO UPDATE SET body=excluded.body", documentID, provider, string(raw))
+	_, err = db.ExecContext(ctx, "INSERT INTO "+chatTable(documentID, "document_conversations")+"(document_id,provider,body) VALUES(?,?,?) ON CONFLICT(document_id,provider) DO UPDATE SET body=excluded.body", documentID, provider, string(raw))
 	return err
 }
 func (a *documentAgent) beginConversation(ctx context.Context, in AIInput, key string) ([]toolCompletionMessage, error) {
@@ -94,7 +94,7 @@ func (a *documentAgent) beginConversation(ctx context.Context, in AIInput, key s
 	}
 	a.turnRead = map[string]bool{}
 	a.continuous = true
-	a.reservedTokens = estimateDocumentTokens(in.Chat.Question+in.Chat.CurrentText) + estimateDocumentTokens(jsonText(a.overviewContext())) + 2048
+	a.reservedTokens = estimateDocumentTokens(in.Chat.Question+in.Chat.CurrentText+a.libraryInput()) + estimateDocumentTokens(jsonText(a.overviewContext())) + 2048
 	a.sourceTokens = max(0, documentSourceBudget(a.contextTokens)-a.reservedTokens)
 	// Reconcile mirror messages not yet present in this provider's conversation,
 	// including intervening exchanges with another provider. No fixed tail cut.
@@ -139,6 +139,7 @@ func conversationHistory(messages []Message) []toolCompletionMessage {
 func (a *documentAgent) conversationInput(in AIInput, initial bool) string {
 	c := a.conversation
 	var b strings.Builder
+	b.WriteString(a.libraryInput())
 	if initial {
 		b.WriteString("文档：" + in.Chat.Title + "\n")
 	}
@@ -185,7 +186,7 @@ func (a *documentAgent) passageEvidence(index int) documentEvidence {
 	if a.conversation != nil {
 		offset = a.conversation.SourceOffset
 	}
-	return documentEvidence{SourceID: fmt.Sprintf("S%d", offset+index+1), BlockID: p.ID, Text: p.Text, Location: p.Location, Revision: a.corpus.Revision, Hash: sourceKey(p.Text), Precision: p.Precision}
+	return documentEvidence{DocumentID: p.DocumentID, DocumentTitle: p.DocumentTitle, DocumentRevision: p.DocumentRevision, SourceID: fmt.Sprintf("S%d", offset+index+1), BlockID: p.ID, Text: p.Text, Location: p.Location, Revision: a.corpus.Revision, Hash: sourceKey(p.Text), Precision: p.Precision}
 }
 func (a *documentAgent) commitConversation(ctx context.Context, tx *sql.Tx, messageID string) error {
 	if a.conversation == nil {
@@ -199,9 +200,9 @@ func (a *documentAgent) commitConversation(ctx context.Context, tx *sql.Tx, mess
 	c.ReadPages = nil
 	for _, e := range a.Evidence {
 		if e.Revision == a.corpus.Revision {
-			if e.PageImage != nil {
+			if e.PageImage != nil && a.corpus.Library == nil {
 				c.ReadPages = append(c.ReadPages, *e.PageImage)
-			} else {
+			} else if e.PageImage == nil {
 				c.ReadBlocks = append(c.ReadBlocks, e.BlockID)
 			}
 		}

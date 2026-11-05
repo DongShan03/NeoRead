@@ -23,6 +23,7 @@ var syncTables = []string{
 	"document_notes", "translations", "translation_previous", "document_overviews",
 	"paper_attachments", "document_relations", "processing_usage", "chat_usage_coverage",
 	"chat_sessions", "messages", "chat_runs",
+	"library_chat_sessions", "library_messages", "library_chat_runs", "library_processing_usage", "library_chat_usage_coverage",
 	"search_index",
 }
 
@@ -98,7 +99,7 @@ func syncRows(ctx context.Context, q syncQuery, name string, table syncTable, ow
 				documents = append(documents, strings.TrimPrefix(owner, "document/"))
 			}
 		}
-		if name == "settings" || name == "tag_boards" {
+		if name == "settings" || name == "tag_boards" || strings.HasPrefix(name, "library_") {
 			if !library {
 				return []syncRow{}, nil
 			}
@@ -220,6 +221,9 @@ func snapshotSyncRows(ctx context.Context, q syncQuery, owners ...string) (map[s
 			if table == "document_relations" {
 				owner = fmtSyncString(row["a"])
 			}
+			if strings.HasPrefix(table, "library_") {
+				owner = ""
+			}
 			key := "library"
 			if owner != "" {
 				key = "document/" + owner
@@ -234,13 +238,14 @@ func snapshotSyncRows(ctx context.Context, q syncQuery, owners ...string) (map[s
 			if result[key] == nil {
 				result[key] = emptySyncDocument()
 			}
-			if table == "chat_sessions" || table == "messages" || table == "chat_runs" {
+			chatName := strings.TrimPrefix(table, "library_")
+			if chatName == "chat_sessions" || chatName == "messages" || chatName == "chat_runs" {
 				session := fmtSyncString(row["session_id"])
-				if table == "chat_sessions" {
+				if chatName == "chat_sessions" {
 					session = fmtSyncString(row["id"])
 					sessionOwners[session] = owner
 				}
-				if table == "messages" {
+				if chatName == "messages" {
 					var message struct {
 						Session string `json:"sessionId"`
 					}
@@ -280,7 +285,11 @@ func (s *Server) syncBusy() map[string]bool {
 	busy := map[string]bool{}
 	for key, tasks := range s.documentTasks {
 		if len(tasks) > 0 {
-			busy[key] = true
+			if strings.HasPrefix(key, "library-chat/") {
+				busy["library"] = true
+			} else {
+				busy[key] = true
+			}
 		}
 	}
 	for key, value := range s.reparsingDocuments {
@@ -385,6 +394,13 @@ func (s *Server) snapshotSync(ctx context.Context, state *syncLocalState) (*sync
 	result := &syncSnapshot{Documents: documents, Observed: maps.Clone(documents), Receiving: receiving, Files: map[string]syncFingerprint{}, Busy: s.syncBusy(), Revision: revision}
 	for key, doc := range documents {
 		if key == "library" {
+			if result.Busy["library"] {
+				if old := state.Base[key]; old != nil {
+					result.Documents[key] = old
+				} else {
+					delete(result.Documents, key)
+				}
+			}
 			continue
 		}
 		owner := strings.TrimPrefix(key, "document/")
@@ -526,10 +542,13 @@ func validateSyncDocument(key string, doc *syncDocument, schema map[string]syncT
 				switch name {
 				case "documents":
 					jsonColumns = []string{"metadata", "tags", "folders", "progress", "body_end"}
-				case "annotations", "messages", "chat_runs", "translations", "translation_previous", "document_navigation", "document_overviews", "processing_usage":
+				case "annotations", "messages", "chat_runs", "translations", "translation_previous", "document_navigation", "document_overviews", "processing_usage", "library_messages", "library_chat_runs", "library_processing_usage":
 					jsonColumns = []string{"body"}
 				case "settings":
 					jsonColumns = []string{"value"}
+				}
+				if name == "library_chat_sessions" {
+					jsonColumns = append(jsonColumns, "scope")
 				}
 				for _, column := range jsonColumns {
 					if row[column] != nil && fmtSyncString(row[column]) != "" && !json.Valid([]byte(fmtSyncString(row[column]))) {
@@ -537,8 +556,13 @@ func validateSyncDocument(key string, doc *syncDocument, schema map[string]syncT
 					}
 				}
 				if key == "library" {
-					if name != "settings" && name != "tag_boards" {
+					if name != "settings" && name != "tag_boards" && !slices.Contains([]string{"library_chat_sessions", "library_messages", "library_chat_runs", "library_processing_usage", "library_chat_usage_coverage"}, name) {
 						return errors.New("云端书库配置包含无效内容")
+					}
+					if strings.HasPrefix(name, "library_") {
+						if err := validateLibrarySyncRow(name, recordKey, row); err != nil {
+							return err
+						}
 					}
 					if name == "settings" && row["key"] != "preferences:library" {
 						return errors.New("云端同步包含机器配置")
@@ -594,7 +618,7 @@ func validateSyncDocument(key string, doc *syncDocument, schema map[string]syncT
 			if !strings.HasPrefix(recordKey, "chat/") && (len(record) != 1 || len(rows) != 1 || syncRowKey(name, rows[0], table) != recordKey) {
 				return errors.New("云端同步记录标识不一致")
 			}
-			if strings.HasPrefix(recordKey, "chat/") && !slices.Contains([]string{"chat_sessions", "messages", "chat_runs"}, name) {
+			if strings.HasPrefix(recordKey, "chat/") && !slices.Contains([]string{"chat_sessions", "messages", "chat_runs", "library_chat_sessions", "library_messages", "library_chat_runs"}, name) {
 				return errors.New("云端对话包含无效记录")
 			}
 		}

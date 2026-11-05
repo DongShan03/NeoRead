@@ -1925,3 +1925,44 @@ func TestWebDAVV2MigratesLegacyStorageAndOnlyPublishesChangedPaperMetadata(t *te
 		t.Fatal("device rename did not reach cloud metadata", updated, err)
 	}
 }
+
+func TestWebDAVV2SyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+	a.Token = "test-secret"
+	for _, owner := range []string{"alpha", "beta"} {
+		syncDocumentFixture(t, a.Store, owner, "研究")
+	}
+	item := createLibrarySessionTest(t, a, "alpha", "beta")
+	for _, message := range []Message{{ID: id(), DocumentID: libraryChatOwner, SessionID: item.ID, Role: "user", Content: "compare"}, {ID: id(), DocumentID: libraryChatOwner, SessionID: item.ID, Role: "assistant", Content: "saved review"}} {
+		if err := a.Store.saveMessage(message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runSync(t, a)
+	runSync(t, b)
+	items, err := b.Store.chatHistory(libraryChatOwner, item.ID)
+	if err != nil || len(items) != 2 || items[1].Content != "saved review" {
+		t.Fatal("library transcript did not arrive", items, err)
+	}
+	scope, err := b.Store.libraryScope(item.ID)
+	if err != nil || len(scope.DocumentIDs) != 2 {
+		t.Fatal("paper scope did not arrive", scope, err)
+	}
+	if err = saveDocumentConversation(t.Context(), b.Store.DB, libraryChatOwner, conversationProvider(item.ID, "codex"), documentConversation{ID: id(), NativeThread: "local-only"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Store.saveMessage(Message{ID: id(), DocumentID: libraryChatOwner, SessionID: item.ID, Role: "user", Content: "follow-up"}); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	runSync(t, b)
+	var continuations int
+	if err = b.Store.DB.QueryRow("SELECT count(*) FROM library_document_conversations").Scan(&continuations); err != nil || continuations != 0 {
+		t.Fatal("remote history retained a stale native context", continuations, err)
+	}
+	items, err = b.Store.chatHistory(libraryChatOwner, item.ID)
+	if err != nil || len(items) != 3 || items[2].Content != "follow-up" {
+		t.Fatal(items, err)
+	}
+}

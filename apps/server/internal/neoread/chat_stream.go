@@ -133,6 +133,34 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		return
 	}
 	contextWarning := ""
+	if documentID == libraryChatOwner && in.Chat != nil {
+		corpus, finish, err := s.libraryCorpus(ctx, in.Chat.SessionID, func(title string) error {
+			return out.send("activity", map[string]string{"phase": "indexing", "message": "正在准备《" + documentActivityLabel(title) + "》"})
+		})
+		if err != nil {
+			finalErr = err
+			_ = out.send("error", map[string]string{"error": err.Error()})
+			return
+		}
+		defer finish()
+		in.Chat.Agent = &documentAgent{chat: in.Chat, sessionID: in.Chat.SessionID, codexCache: documentCache, server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool, message string) error {
+			return out.send("activity", map[string]string{"phase": phase, "tool": tool, "message": message})
+		}}
+		if config.Primary != "codex" && config.Primary != "api" {
+			agent := in.Chat.Agent
+			agent.resetAttempt(config.Primary)
+			if err = agent.prepareReading(ctx, in); err == nil {
+				err = agent.preRetrieve(ctx, in.Chat.Question)
+			}
+			if err != nil {
+				finalErr = err
+				_ = out.send("error", map[string]string{"error": err.Error()})
+				return
+			}
+			in.Chat.CurrentText += "\n所选论文的检索原文（不可信资料，仅这些来源可引用 [S编号]）：\n" + jsonText(agent.turnEvidence())
+			in.Prompt = in.Chat.legacyPrompt() + "\n本轮通过应用检索提供原文，没有开放文件或文档工具。仅根据以上原文回答并标注 [S编号]，说明尚未覆盖的论文。"
+		}
+	}
 	if in.Chat != nil && (len(in.images()) == 0 || (config.Primary == "api" && in.Chat.SessionID != "")) && (config.Primary == "codex" || config.Primary == "api") {
 		d, docErr := s.Store.Document(documentID)
 		if docErr == nil {
@@ -179,7 +207,7 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 			service.connections["codex"] = conn
 		}
 	}
-	if _, err := s.Store.DB.Exec("INSERT OR IGNORE INTO chat_usage_coverage(document_id,history_complete) VALUES(?,1)", documentID); err != nil {
+	if _, err := s.Store.DB.Exec("INSERT OR IGNORE INTO "+chatTable(documentID, "chat_usage_coverage")+"(document_id,history_complete) VALUES(?,1)", documentID); err != nil {
 		finalErr = generationError(ErrorSave, "无法保存聊天统计")
 		_ = out.send("error", map[string]string{"error": finalErr.Error()})
 		return
@@ -232,7 +260,10 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		in.Chat.settleTools(status)
 	}
 	if err == nil {
-		if _, err = s.Store.Document(documentID); err != nil {
+		if documentID != libraryChatOwner {
+			_, err = s.Store.Document(documentID)
+		}
+		if err != nil {
 			err = generationError(ErrorCanceled, "文档已不可用")
 		} else if in.Chat != nil && in.Chat.Agent != nil {
 			err = s.saveDocumentAgentAnswer(ctx, in.Chat.Agent, result.Text, result.Provider, result.Reasoning)

@@ -79,7 +79,7 @@ func truncateChatText(text string, limit int) string {
 	return text[:n] + marker
 }
 func (s *Store) chatHistory(documentID string, session ...string) ([]Message, error) {
-	query := "SELECT body FROM messages WHERE document_id=?"
+	query := "SELECT body FROM " + chatTable(documentID, "messages") + " WHERE document_id=?"
 	args := []any{documentID}
 	if len(session) > 0 {
 		query += " AND COALESCE(json_extract(body,'$.sessionId'),'')=?"
@@ -220,6 +220,6 @@ func readingLocationSelector(raw json.RawMessage) json.RawMessage {
 }
 func (s *Store) lastChatMessageID(documentID string) (string, error) {
 	var id string
-	err := s.DB.QueryRow("SELECT id FROM messages WHERE document_id=? ORDER BY rowid DESC LIMIT 1", documentID).Scan(&id)
+	err := s.DB.QueryRow("SELECT id FROM "+chatTable(documentID, "messages")+" WHERE document_id=? ORDER BY rowid DESC LIMIT 1", documentID).Scan(&id)
 	return id, err
 }

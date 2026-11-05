@@ -127,7 +127,7 @@ func exportLibraryArchive(ctx context.Context, source, destination string, optio
 	}
 	// An unopened library may still have the previous schema. Upgrade only
 	// the disposable copy before exporting new device-local state.
-	if _, err = snapshot.Exec(syncStorageSchema); err != nil {
+	if _, err = snapshot.Exec(syncStorageSchema + libraryChatSchema); err != nil {
 		return err
 	}
 	store := &Store{DB: snapshot, Root: source}
@@ -229,8 +229,14 @@ func exportLibraryArchive(ctx context.Context, source, destination string, optio
 			return err
 		}
 	}
-	if _, err = tx.Exec("DELETE FROM sync_receipts; DELETE FROM sync_receiving"); err != nil {
+	if _, err = tx.Exec("DELETE FROM library_document_conversations; DELETE FROM sync_receipts; DELETE FROM sync_receiving"); err != nil {
 		return err
+	}
+	if options.Library != "" || options.Folder != "" || options.SmartCategory != "" {
+		// A scoped export must not leak quotations from papers outside it.
+		if _, err = tx.Exec(`DELETE FROM library_chat_sessions WHERE EXISTS (SELECT 1 FROM json_each(scope,'$.documentIds') member WHERE NOT EXISTS (SELECT 1 FROM documents WHERE id=member.value)); DELETE FROM library_messages WHERE json_extract(body,'$.sessionId') NOT IN (SELECT id FROM library_chat_sessions); DELETE FROM library_chat_agent_runs WHERE COALESCE(json_extract(body,'$.messageId'),'') NOT IN (SELECT id FROM library_messages); DELETE FROM library_processing_usage; DELETE FROM library_chat_usage_coverage`); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.Exec(`DELETE FROM settings WHERE key NOT IN ('neoread','preferences:library','preferences:guide','preferences:shortcuts') AND key<>?`, epubMetadataMigration); err != nil {
 		return err
@@ -516,7 +522,7 @@ func importLibraryArchive(ctx context.Context, archivePath, destination, mergeSo
 		// Codex native threads live outside the library on the source machine.
 		// Rebuild them from the preserved transcript on the next question rather
 		// than resuming a missing thread or sharing the original library's writer.
-		_, err = incomingStore.DB.Exec("DELETE FROM codex_history_threads; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'")
+		_, err = incomingStore.DB.Exec("DELETE FROM codex_history_threads; DELETE FROM library_document_conversations; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'")
 	}
 	incomingStore.DB.Close()
 	if err != nil {
@@ -778,6 +784,17 @@ func mergeArchiveLibrary(destination, incoming string, documents []Document) err
 	}
 	if _, err = tx.Exec("INSERT OR REPLACE INTO tag_boards SELECT * FROM incoming.tag_boards"); err != nil {
 		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM library_document_conversations WHERE substr(provider,1,instr(substr(provider,9),':')+8) IN (SELECT 'session:' || id || ':' FROM incoming.library_chat_sessions)`); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM library_chat_agent_runs WHERE json_extract(body,'$.messageId') IN (SELECT id FROM library_messages WHERE json_extract(body,'$.sessionId') IN (SELECT id FROM incoming.library_chat_sessions)); DELETE FROM library_messages WHERE json_extract(body,'$.sessionId') IN (SELECT id FROM incoming.library_chat_sessions)`); err != nil {
+		return err
+	}
+	for _, table := range []string{"library_chat_sessions", "library_messages", "library_chat_runs", "library_chat_agent_runs", "library_processing_usage", "library_chat_usage_coverage"} {
+		if _, err = tx.Exec("INSERT OR REPLACE INTO " + table + " SELECT * FROM incoming." + table); err != nil {
+			return err
+		}
 	}
 	if err = mergeArchivePreferences(tx); err != nil {
 		return err

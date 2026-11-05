@@ -6,17 +6,28 @@ import (
 )
 
 type documentReadRequest struct {
-	Block    string `json:"blockId"`
-	Before   int    `json:"before"`
-	After    int    `json:"after"`
-	Section  string `json:"sectionId"`
-	FromPage int    `json:"fromPage"`
-	ToPage   int    `json:"toPage"`
-	Full     bool   `json:"full"`
-	Cursor   string `json:"cursor"`
+	DocumentID string `json:"documentId"`
+	Block      string `json:"blockId"`
+	Before     int    `json:"before"`
+	After      int    `json:"after"`
+	Section    string `json:"sectionId"`
+	FromPage   int    `json:"fromPage"`
+	ToPage     int    `json:"toPage"`
+	Full       bool   `json:"full"`
+	Cursor     string `json:"cursor"`
 }
 
 func documentReadIndices(c *documentCorpus, q documentReadRequest) ([]int, bool) {
+	if c.Library != nil {
+		if q.DocumentID != "" && c.Library.Sources[q.DocumentID] == nil {
+			return nil, false
+		}
+		if (q.FromPage != 0 || q.ToPage != 0) && q.DocumentID == "" {
+			return nil, false
+		}
+	} else if q.DocumentID != "" && q.DocumentID != c.DocumentID {
+		return nil, false
+	}
 	selectors := 0
 	if q.Block != "" {
 		selectors++
@@ -41,7 +52,9 @@ func documentReadIndices(c *documentCorpus, q documentReadRequest) ([]int, bool)
 			if p.ID == q.Block {
 				result := []int{}
 				for index := max(0, i-q.Before); index <= min(len(c.Passages)-1, i+q.After); index++ {
-					result = append(result, index)
+					if c.Library == nil || c.Passages[index].DocumentID == p.DocumentID {
+						result = append(result, index)
+					}
 				}
 				return result, true
 			}
@@ -59,6 +72,9 @@ func documentReadIndices(c *documentCorpus, q documentReadRequest) ([]int, bool)
 	indices := []int{}
 	foundCursor := q.Cursor == ""
 	for i, p := range c.Passages {
+		if c.Library != nil && q.DocumentID != "" && p.DocumentID != q.DocumentID {
+			continue
+		}
 		match := q.Full || q.Section != "" && p.Section == q.Section
 		if q.FromPage > 0 {
 			var location struct {

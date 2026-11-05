@@ -50,7 +50,7 @@ func (s *Store) ensureDefaultChatSession(documentID, provider string) (string, e
 }
 func (s *Store) chatSession(documentID, sessionID string) (ChatSession, error) {
 	var session ChatSession
-	err := s.DB.QueryRow("SELECT id,document_id,title,provider,created_at,updated_at FROM chat_sessions WHERE id=? AND document_id=?", sessionID, documentID).Scan(&session.ID, &session.DocumentID, &session.Title, &session.Provider, &session.CreatedAt, &session.UpdatedAt)
+	err := s.DB.QueryRow("SELECT id,document_id,title,provider,created_at,updated_at FROM "+chatTable(documentID, "chat_sessions")+" WHERE id=? AND document_id=?", sessionID, documentID).Scan(&session.ID, &session.DocumentID, &session.Title, &session.Provider, &session.CreatedAt, &session.UpdatedAt)
 	return session, err
 }
 
@@ -239,7 +239,7 @@ func (s *Store) saveChatAnswer(ctx context.Context, chat *chatInput, text, reaso
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "INSERT INTO messages VALUES(?,?,?,?)", message.ID, message.DocumentID, jsonText(message), message.CreatedAt); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO "+chatTable(chat.DocumentID, "messages")+" VALUES(?,?,?,?)", message.ID, message.DocumentID, jsonText(message), message.CreatedAt); err != nil {
 		return err
 	}
 	if chat.piConversation != nil {

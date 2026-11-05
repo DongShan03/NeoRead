@@ -127,7 +127,11 @@ func (a *documentAgent) finishDocumentAnswer(ctx context.Context, result Generat
 }
 
 func (a *documentAgent) prepareReading(ctx context.Context, in AIInput) error {
-	overview, err := a.server.currentOverview(ctx, a.corpus)
+	var overview *documentOverview
+	var err error
+	if a.corpus.Library == nil {
+		overview, err = a.server.currentOverview(ctx, a.corpus)
+	}
 	if err != nil {
 		return err
 	}
@@ -137,7 +141,7 @@ func (a *documentAgent) prepareReading(ctx context.Context, in AIInput) error {
 	a.providedSources = in.Chat != nil && in.Chat.CurrentText != ""
 	a.contextOverride = a.server.documentContextOverride()
 	a.contextTokens, a.contextSource = resolveDocumentContext(0, a.contextOverride, "")
-	a.reservedTokens = estimateDocumentTokens(in.Prompt) + estimateDocumentTokens(jsonText(a.overviewContext())) + 2048
+	a.reservedTokens = estimateDocumentTokens(in.Prompt+a.libraryInput()) + estimateDocumentTokens(jsonText(a.overviewContext())) + 2048
 	a.sourceTokens = max(0, documentSourceBudget(a.contextTokens)-a.reservedTokens)
 	a.prepared = true
 	return nil

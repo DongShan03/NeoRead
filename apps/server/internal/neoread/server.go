@@ -138,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/library/archive/export", s.exportLibraryHTTP)
 	mux.HandleFunc("POST /api/library/archive/import", s.importLibraryHTTP)
 	s.registerWebDAV(mux)
+	s.registerLibraryChat(mux)
 	mux.HandleFunc("GET /api/documents", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.Store.Documents()
 		if e != nil {
@@ -1069,6 +1070,6 @@ func (s *Store) saveMessage(m Message) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.Exec("INSERT INTO messages VALUES(?,?,?,?)", m.ID, m.DocumentID, string(b), m.CreatedAt)
+	_, err = s.DB.Exec("INSERT INTO "+chatTable(m.DocumentID, "messages")+" VALUES(?,?,?,?)", m.ID, m.DocumentID, string(b), m.CreatedAt)
 	return err
 }

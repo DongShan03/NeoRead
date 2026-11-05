@@ -77,7 +77,7 @@ func (r *chatRun) send(event string, value any) error {
 }
 func (s *Store) latestChatRun(sessionID string) (ChatRun, error) {
 	var raw string
-	err := s.DB.QueryRow("SELECT body FROM chat_runs WHERE session_id=? ORDER BY rowid DESC LIMIT 1", sessionID).Scan(&raw)
+	err := s.DB.QueryRow("SELECT body FROM "+chatRunTable(sessionID)+" WHERE session_id=? ORDER BY rowid DESC LIMIT 1", sessionID).Scan(&raw)
 	var run ChatRun
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &run)
@@ -86,7 +86,7 @@ func (s *Store) latestChatRun(sessionID string) (ChatRun, error) {
 }
 func (s *Store) readChatRun(sessionID, runID string) (chatRunRecord, error) {
 	var raw string
-	err := s.DB.QueryRow("SELECT body FROM chat_runs WHERE id=? AND session_id=?", runID, sessionID).Scan(&raw)
+	err := s.DB.QueryRow("SELECT body FROM "+chatRunTable(sessionID)+" WHERE id=? AND session_id=?", runID, sessionID).Scan(&raw)
 	var run chatRunRecord
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &run)
@@ -113,7 +113,7 @@ func (s *Server) startSessionChat(w http.ResponseWriter, r *http.Request, docume
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
-	ctx, finish, err := s.beginDocumentTask(ctx, document.ID)
+	ctx, finish, err := s.beginChatTask(ctx, document.ID, sessionID)
 	if err != nil {
 		cancel()
 		s.chatMu.Unlock()
@@ -148,9 +148,9 @@ func (s *Server) startSessionChat(w http.ResponseWriter, r *http.Request, docume
 	if session.Title == "新会话" {
 		session.Title = sessionTitle(user.Content)
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE chat_sessions SET title=?,provider=?,updated_at=? WHERE id=?", session.Title, config.Primary, stamp, sessionID)
+	_, err = tx.ExecContext(ctx, "UPDATE "+chatTable(document.ID, "chat_sessions")+" SET title=?,provider=?,updated_at=? WHERE id=?", session.Title, config.Primary, stamp, sessionID)
 	if err == nil {
-		_, err = tx.ExecContext(ctx, "INSERT INTO chat_runs(id,session_id,body) VALUES(?,?,?)", record.ID, sessionID, jsonText(record))
+		_, err = tx.ExecContext(ctx, "INSERT INTO "+chatTable(document.ID, "chat_runs")+"(id,session_id,body) VALUES(?,?,?)", record.ID, sessionID, jsonText(record))
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -210,7 +210,7 @@ func (s *Server) finishChatRun(ctx context.Context, run *chatRun) {
 	run.record.FinishedAt = now()
 	run.record.Events = append(append([]chatRunEvent{}, run.events...), *terminal)
 	// Publish the terminal frame after the transcript save and worker cleanup.
-	_, err := s.Store.DB.Exec("UPDATE chat_runs SET body=? WHERE id=?", jsonText(run.record), run.record.ID)
+	_, err := s.Store.DB.Exec("UPDATE "+chatRunTable(run.record.SessionID)+" SET body=? WHERE id=?", jsonText(run.record), run.record.ID)
 	if err != nil && terminal.Event != "done" {
 		terminal = &chatRunEvent{"error", json.RawMessage(`{"error":"运行已结束，但无法保存运行状态；请同步会话历史"}`)}
 	}

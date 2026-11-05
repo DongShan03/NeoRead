@@ -690,6 +690,7 @@ export function App() {
             {nav && <LibrarySidebarResizer />}
             {papers ? (
               <PaperLibrary
+                onSettings={() => setSettings(true)}
                 openDocuments={theme.documentTabs ? openDocuments : undefined}
                 documents={documents}
                 trash={trash}

@@ -138,7 +138,7 @@ func OpenStore(root string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS chat_runs(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,body TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS chat_runs_session ON chat_runs(session_id);
  CREATE TABLE IF NOT EXISTS codex_history_threads(thread_id TEXT PRIMARY KEY,document_id TEXT NOT NULL,hidden INTEGER NOT NULL DEFAULT 0);
- CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);` + syncStorageSchema)
+ CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);` + syncStorageSchema + libraryChatSchema)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -160,6 +160,10 @@ func OpenStore(root string) (*Store, error) {
 	// A process restart cannot resume an in-flight provider call. Preserve the
 	// transcript; the UI may explicitly retry the unanswered question.
 	if _, err = db.Exec(`UPDATE chat_runs SET body=json_set(body,'$.status',CASE WHEN EXISTS(SELECT 1 FROM messages m WHERE m.document_id=json_extract(chat_runs.body,'$.documentId') AND json_extract(m.body,'$.sessionId')=chat_runs.session_id AND m.rowid>(SELECT rowid FROM messages WHERE id=json_extract(chat_runs.body,'$.userMessageId')) AND json_extract(m.body,'$.role')='assistant') THEN 'completed' ELSE 'interrupted' END,'$.error','应用已重启，请同步会话记录') WHERE json_extract(body,'$.status')='running'`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec(`UPDATE library_chat_runs SET body=json_set(body,'$.status','interrupted','$.error','应用已重启，请同步会话记录') WHERE json_extract(body,'$.status')='running'`); err != nil {
 		db.Close()
 		return nil, err
 	}

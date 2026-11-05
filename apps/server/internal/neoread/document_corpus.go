@@ -28,14 +28,18 @@ type corpusCoverage struct {
 	Warnings        []string `json:"warnings"`
 }
 type documentPassage struct {
-	ID        string          `json:"blockId"`
-	Section   string          `json:"sectionId"`
-	Label     string          `json:"label"`
-	Text      string          `json:"text"`
-	Location  json.RawMessage `json:"location"`
-	Precision string          `json:"precision"`
+	DocumentID       string          `json:"documentId,omitempty"`
+	DocumentTitle    string          `json:"documentTitle,omitempty"`
+	DocumentRevision string          `json:"documentRevision,omitempty"`
+	ID               string          `json:"blockId"`
+	Section          string          `json:"sectionId"`
+	Label            string          `json:"label"`
+	Text             string          `json:"text"`
+	Location         json.RawMessage `json:"location"`
+	Precision        string          `json:"precision"`
 }
 type documentCorpus struct {
+	Library     *libraryCorpus    `json:"-"`
 	DocumentID  string            `json:"-"`
 	Fingerprint string            `json:"-"`
 	Revision    string            `json:"corpusRevision"`

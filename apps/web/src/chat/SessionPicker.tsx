@@ -34,6 +34,7 @@ export function SessionPicker({
   continueAction,
   onChange,
   onRefresh,
+  onCreate,
 }: {
   documentId: string;
   sessions: DocumentChatSession[];
@@ -42,6 +43,7 @@ export function SessionPicker({
   continueAction?: ReactNode;
   onChange: (id: string) => void;
   onRefresh: () => Promise<void>;
+  onCreate?: () => Promise<void>;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
@@ -53,6 +55,10 @@ export function SessionPicker({
   const create = async () => {
     setSaving(true);
     try {
+      if (onCreate) {
+        await onCreate();
+        return;
+      }
       const session = await api.createChatSession(
         documentId,
         provider || "api",

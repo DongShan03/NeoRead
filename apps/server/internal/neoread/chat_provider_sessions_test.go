@@ -790,3 +790,128 @@ func TestManagedCodexSessionsKeepSeparateNativeThreads(t *testing.T) {
 		t.Fatal("native resume lost accepted history", aHistory)
 	}
 }
+
+func createLibrarySessionTest(t *testing.T, s *Server, ids ...string) libraryChatSession {
+	t.Helper()
+	body := jsonText(map[string]any{"provider": "codex", "scope": libraryChatScope{Category: "研究", DocumentIDs: ids}})
+	out := request(t, s, "POST", "/api/library/chat-sessions", strings.NewReader(body))
+	if out.Code != 201 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	var item libraryChatSession
+	if err := json.Unmarshal(out.Body.Bytes(), &item); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func TestLibraryChatScopesSearchAndCitationsToSelectedPapers(t *testing.T) {
+	s := testServer(t)
+	for _, id := range []string{"alpha", "beta", "excluded"} {
+		archiveDocument(t, s.Store, id, "研究")
+		doc, _ := s.Store.Document(id)
+		fingerprint, err := s.corpusFingerprint(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := id + " studies the cobalt protocol with a different threat model."
+		corpus := documentCorpus{Revision: "rev-" + id, Coverage: corpusCoverage{Status: "complete", TotalUnits: 1, SearchableUnits: 1}, Passages: []documentPassage{{ID: "p1-b1", Section: "page-1", Label: id, Text: text, Location: json.RawMessage(`{"type":"pdf","page":1}`), Precision: "block"}}}
+		if _, err = s.Store.DB.Exec("UPDATE document_corpora SET fingerprint=?,revision=?,body=? WHERE document_id=?", fingerprint, corpus.Revision, jsonText(corpus), id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.Store.DB.Exec("DELETE FROM document_passages_fts WHERE document_id=?", id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.Store.DB.Exec("INSERT INTO document_passages_fts VALUES(?,?,?,?)", id, corpus.Revision, "p1-b1", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	item := createLibrarySessionTest(t, s, "alpha", "beta")
+	corpus, finish, err := s.libraryCorpus(t.Context(), item.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finish()
+	if len(corpus.Library.Sources) != 2 || len(corpus.Passages) != 2 {
+		t.Fatal("paper scope was not preserved", corpus)
+	}
+	a := &documentAgent{server: s, corpus: corpus, ctx: t.Context(), sessionID: item.ID, ID: id(), chat: &chatInput{SessionID: item.ID}}
+	if err = a.prepareReading(t.Context(), AIInput{Prompt: "compare"}); err != nil {
+		t.Fatal(err)
+	}
+	if blocked, e := a.call(t.Context(), "read_passage", json.RawMessage(`{"documentId":"excluded","full":true}`)); e != nil || !strings.Contains(string(blocked), "invalid_arguments") || len(a.Evidence) != 0 {
+		t.Fatal("reading escaped the selected scope", string(blocked), e)
+	}
+	found, err := a.call(t.Context(), "search_document", json.RawMessage(`{"query":"cobalt","limit":12}`))
+	if err != nil || strings.Contains(string(found), "excluded") || !strings.Contains(string(found), "alpha:p1-b1") || !strings.Contains(string(found), "beta:p1-b1") {
+		t.Fatal("search escaped or missed the selected scope", string(found), err)
+	}
+	if _, err = a.call(t.Context(), "read_passage", json.RawMessage(`{"documentId":"beta","full":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Evidence) != 1 || a.Evidence[0].DocumentID != "beta" {
+		t.Fatal("read mixed documents", a.Evidence)
+	}
+	if err = s.saveDocumentAgentAnswer(t.Context(), a, "Beta supplies this evidence [S2].", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	history, err := s.Store.chatHistory(libraryChatOwner, item.ID)
+	if err != nil || len(history) != 1 {
+		t.Fatal(history, err)
+	}
+	out := request(t, s, "GET", "/api/library/chat-sessions/"+item.ID+"/messages/"+history[0].ID+"/sources/S2", nil)
+	if out.Code != 200 || !strings.Contains(out.Body.String(), `"documentId":"beta"`) {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	if _, err = s.Store.DB.Exec("UPDATE document_corpora SET revision='new' WHERE document_id='beta'"); err != nil {
+		t.Fatal(err)
+	}
+	out = request(t, s, "GET", "/api/library/chat-sessions/"+item.ID+"/messages/"+history[0].ID+"/sources/S2", nil)
+	if out.Code != 409 {
+		t.Fatal("stale source remained navigable", out.Code, out.Body.String())
+	}
+}
+
+func TestLibraryChatManagedCodexStreamsAndContinuesWithoutCreatingPaperRows(t *testing.T) {
+	s, a := prepareConversationFixture(t)
+	if _, err := s.Store.DB.Exec("UPDATE documents SET library='papers' WHERE id='doc'"); err != nil {
+		t.Fatal(err)
+	}
+	fakeAgent(t, "codex", "document-conversation")
+	t.Setenv("NEOREAD_CONVERSATION_CAPTURE", filepath.Join(t.TempDir(), "capture.jsonl"))
+	t.Setenv("NEOREAD_DOCUMENT_TEST_BLOCK", "doc:"+a.corpus.Passages[1].ID)
+	item := createLibrarySessionTest(t, s, "doc")
+	for _, prompt := range []string{"记住 CIVET-42，分析分类中的论文", "请继续解释"} {
+		out := request(t, s, "POST", "/api/library/chat-sessions/"+item.ID+"/chat", strings.NewReader(jsonText(map[string]any{"provider": "codex", "prompt": prompt, "context": "", "userMessageId": id()})))
+		if out.Code != 202 {
+			t.Fatal(out.Code, out.Body.String())
+		}
+		var run ChatRun
+		if err := json.Unmarshal(out.Body.Bytes(), &run); err != nil {
+			t.Fatal(err)
+		}
+		result := awaitRunTest(t, s, run)
+		if result.Status != "completed" {
+			t.Fatal(result.Error)
+		}
+		if len(result.Events) < 2 || result.Events[len(result.Events)-1].Event != "done" {
+			t.Fatal("stream never reached a saved terminal event", result)
+		}
+	}
+	history, err := s.Store.chatHistory(libraryChatOwner, item.ID)
+	if err != nil || len(history) != 4 || !strings.Contains(history[3].Content, "CIVET-42") {
+		t.Fatal("library history was not continued", history, err)
+	}
+	var count int
+	if err = s.Store.DB.QueryRow("SELECT count(*) FROM documents").Scan(&count); err != nil || count != 1 {
+		t.Fatal("chat created a synthetic library paper", count, err)
+	}
+	out := request(t, s, "DELETE", "/api/library/chat-sessions/"+item.ID+"/messages/"+history[2].ID, strings.NewReader(jsonText(chatMessageChange{ExpectedLastMessageID: history[3].ID, ExpectedContent: history[2].Content})))
+	if out.Code != 200 {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	history, err = s.Store.chatHistory(libraryChatOwner, item.ID)
+	if err != nil || len(history) != 2 {
+		t.Fatal("withdrawal changed the wrong session", history, err)
+	}
+}

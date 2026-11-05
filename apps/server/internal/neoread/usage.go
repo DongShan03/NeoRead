@@ -183,7 +183,7 @@ func (s *Server) processingUsageSink(documentID, stage, target string) func(Usag
 		if err != nil {
 			return err
 		}
-		_, err = s.Store.DB.Exec("INSERT INTO processing_usage(id,document_id,body) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", call.ID, documentID, body)
+		_, err = s.Store.DB.Exec("INSERT INTO "+chatTable(documentID, "processing_usage")+"(id,document_id,body) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", call.ID, documentID, body)
 		return err
 	}
 }

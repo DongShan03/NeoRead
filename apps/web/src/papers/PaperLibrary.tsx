@@ -19,6 +19,7 @@ import {
 } from "react";
 import {
   X,
+  Bot,
   ChevronRight,
   Paperclip,
   ArrowDown,
@@ -132,6 +133,7 @@ import {
   descendingSorts,
   duplicateGroups,
   filterPapers,
+  matchesView,
   flattenCategories,
   hasTag,
   pairKey,
@@ -171,6 +173,11 @@ import {
   uploadAttachments,
 } from "./attachments";
 const AttachmentPreview = lazy(() => import("./AttachmentPreview"));
+const LibraryAgentPanel = lazy(() =>
+  import("./LibraryAgentPanel").then((module) => ({
+    default: module.LibraryAgentPanel,
+  })),
+);
 
 export interface PaperLibraryProps {
   documents: Document[];
@@ -182,6 +189,7 @@ export interface PaperLibraryProps {
   moveToBooks: (doc: Document) => void;
   navOpen: boolean;
   onToggleNav: () => void;
+  onSettings?: () => void;
 }
 
 const busy = (job?: Processing) =>
@@ -197,12 +205,32 @@ export function PaperLibrary({
   moveToBooks,
   navOpen,
   onToggleNav,
+  onSettings = () => {},
 }: PaperLibraryProps) {
   const prefs = useReaderStore((s) => s.libraryPreferences.papers) || {};
   const sort: PaperSort = prefs.sort || "added";
   const reverse = !!prefs.sortReverse;
   const columnControls = usePaperColumns(prefs);
   const ui = usePaperUI();
+  const scopeDocuments = useMemo(
+    () =>
+      documents.filter(
+        (doc) =>
+          doc.library === "papers" &&
+          matchesView(doc, ui.view, jobs, {
+            subcategories: prefs.subcategoryItems !== false,
+            smart: prefs.smartCategories,
+          }),
+      ),
+    [
+      documents,
+      ui.view,
+      jobs,
+      prefs.subcategoryItems,
+      prefs.smartCategories,
+      prefs.notDuplicates,
+    ],
+  );
   const {
     view,
     query,
@@ -901,6 +929,15 @@ export function PaperLibrary({
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              variant={ui.libraryAgentOpen ? "secondary" : "outline"}
+              size="sm"
+              aria-pressed={ui.libraryAgentOpen}
+              onClick={() => ui.setLibraryAgentOpen(!ui.libraryAgentOpen)}
+            >
+              <Bot />
+              Agent
+            </Button>
             {table && <PaperColumns controls={columnControls} />}
             <Tabs
               value={layout}
@@ -1299,8 +1336,27 @@ export function PaperLibrary({
               emptyState
             )}
           </section>
+          {ui.libraryAgentOpen && (
+            <Suspense
+              fallback={
+                <div
+                  className="library-agent-pane"
+                  aria-label="正在打开书库 Agent"
+                />
+              }
+            >
+              <LibraryAgentPanel
+                scope={{
+                  category: title,
+                  documentIds: scopeDocuments.map((doc) => doc.id),
+                }}
+                onClose={() => ui.setLibraryAgentOpen(false)}
+                onSettings={onSettings}
+              />
+            </Suspense>
+          )}
           <DetailSheet
-            open={!!selected && !picking}
+            open={!!selected && !picking && !ui.libraryAgentOpen}
             onClose={() => ui.select(null)}
             container={libraryBody}
             label="论文详情"

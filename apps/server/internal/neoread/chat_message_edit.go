@@ -26,12 +26,17 @@ type chatMessageChangeResult struct {
 // run replays and provider continuations must move to that branch atomically.
 func (s *Store) changeChatMessage(ctx context.Context, documentID, sessionID, messageID string, change chatMessageChange) (chatMessageChangeResult, int, error) {
 	result := chatMessageChangeResult{Messages: []Message{}}
+	messagesTable := chatTable(documentID, "messages")
+	runsTable := chatTable(documentID, "chat_runs")
+	agentsTable := chatTable(documentID, "chat_agent_runs")
+	conversationsTable := chatTable(documentID, "document_conversations")
+	sessionsTable := chatTable(documentID, "chat_sessions")
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return result, 500, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, "SELECT rowid,body FROM messages WHERE document_id=? AND COALESCE(json_extract(body,'$.sessionId'),'')=? ORDER BY rowid", documentID, sessionID)
+	rows, err := tx.QueryContext(ctx, "SELECT rowid,body FROM "+messagesTable+" WHERE document_id=? AND COALESCE(json_extract(body,'$.sessionId'),'')=? ORDER BY rowid", documentID, sessionID)
 	if err != nil {
 		return result, 500, err
 	}
@@ -70,17 +75,20 @@ func (s *Store) changeChatMessage(ctx context.Context, documentID, sessionID, me
 	}
 	result.Messages = append(result.Messages, history[:index]...)
 	// Include the target question when clearing old runs, even when editing it.
-	tail := "SELECT id FROM messages WHERE document_id=? AND COALESCE(json_extract(body,'$.sessionId'),'')=? AND rowid>=?"
+	tail := "SELECT id FROM " + messagesTable + " WHERE document_id=? AND COALESCE(json_extract(body,'$.sessionId'),'')=? AND rowid>=?"
 	args := []any{documentID, sessionID, targetRow}
 	statements := []struct {
 		query string
 		args  []any
 	}{
 		{"UPDATE annotations SET body=json_set(body,'$.answerId','','$.resolved',json('false')) WHERE document_id=? AND json_extract(body,'$.answerId') IN (" + tail + ")", append([]any{documentID}, args...)},
-		{"DELETE FROM chat_agent_runs WHERE document_id=? AND json_extract(body,'$.messageId') IN (" + tail + ")", append([]any{documentID}, args...)},
-		{"DELETE FROM chat_runs WHERE session_id=? AND json_extract(body,'$.userMessageId') IN (" + tail + ")", append([]any{sessionID}, args...)},
+		{"DELETE FROM " + agentsTable + " WHERE document_id=? AND json_extract(body,'$.messageId') IN (" + tail + ")", append([]any{documentID}, args...)},
+		{"DELETE FROM " + runsTable + " WHERE session_id=? AND json_extract(body,'$.userMessageId') IN (" + tail + ")", append([]any{sessionID}, args...)},
 	}
-	for _, statement := range statements {
+	for i, statement := range statements {
+		if documentID == libraryChatOwner && i == 0 {
+			continue
+		}
 		if _, err = tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			return result, 500, err
 		}
@@ -88,20 +96,20 @@ func (s *Store) changeChatMessage(ctx context.Context, documentID, sessionID, me
 	cutoff := targetRow
 	if change.Content != nil {
 		result.Message.Content = strings.TrimSpace(*change.Content)
-		if _, err = tx.ExecContext(ctx, "UPDATE messages SET body=? WHERE id=? AND document_id=?", jsonText(result.Message), messageID, documentID); err != nil {
+		if _, err = tx.ExecContext(ctx, "UPDATE "+messagesTable+" SET body=? WHERE id=? AND document_id=?", jsonText(result.Message), messageID, documentID); err != nil {
 			return result, 500, err
 		}
 		result.Messages = append(result.Messages, result.Message)
 		cutoff++
 	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM messages WHERE document_id=? AND COALESCE(json_extract(body,'$.sessionId'),'')=? AND rowid>=?", documentID, sessionID, cutoff); err != nil {
+	if _, err = tx.ExecContext(ctx, "DELETE FROM "+messagesTable+" WHERE document_id=? AND COALESCE(json_extract(body,'$.sessionId'),'')=? AND rowid>=?", documentID, sessionID, cutoff); err != nil {
 		return result, 500, err
 	}
 	prefix := "session:" + sessionID + ":"
-	if _, err = tx.ExecContext(ctx, "DELETE FROM document_conversations WHERE document_id=? AND substr(provider,1,?)=?", documentID, len(prefix), prefix); err != nil {
+	if _, err = tx.ExecContext(ctx, "DELETE FROM "+conversationsTable+" WHERE document_id=? AND substr(provider,1,?)=?", documentID, len(prefix), prefix); err != nil {
 		return result, 500, err
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE chat_sessions SET updated_at=? WHERE id=? AND document_id=?", now(), sessionID, documentID); err != nil {
+	if _, err = tx.ExecContext(ctx, "UPDATE "+sessionsTable+" SET updated_at=? WHERE id=? AND document_id=?", now(), sessionID, documentID); err != nil {
 		return result, 500, err
 	}
 	return result, 200, tx.Commit()
@@ -121,11 +129,11 @@ func (s *Server) changeSessionMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	documentID, sessionID := r.PathValue("id"), r.PathValue("session")
 	doc, err := s.Store.Document(documentID)
-	if err != nil || doc.DeletedAt != "" {
+	if documentID != libraryChatOwner && (err != nil || doc.DeletedAt != "") {
 		fail(w, 404, "文档不存在")
 		return
 	}
-	ctx, finish, err := s.beginDocumentTask(r.Context(), documentID)
+	ctx, finish, err := s.beginChatTask(r.Context(), documentID, sessionID)
 	if err != nil {
 		fail(w, 409, "文档不可用")
 		return

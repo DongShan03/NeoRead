@@ -25,6 +25,8 @@ import type {
   ChatMessageChange,
   ChatMessageChangeResult,
   DocumentChatSession,
+  LibraryChatSession,
+  LibraryChatScope,
   Document,
   DocumentOverview,
   OverviewJob,
@@ -196,6 +198,11 @@ export type ZoteroImportResult = components["schemas"]["ZoteroImportResult"];
 export type PaperAttachment = components["schemas"]["PaperAttachment"];
 export type PaperRefreshProgress =
   components["schemas"]["PaperRefreshProgress"];
+
+const chatSessionRoot = (id: string) =>
+  id === "library"
+    ? "/api/library/chat-sessions"
+    : `/api/documents/${encodeURIComponent(id)}/chat-sessions`;
 
 export const api = {
   paperRefreshStatus: () =>
@@ -777,12 +784,23 @@ export const api = {
     ),
   messages: (id: string, signal?: AbortSignal) =>
     request<Message[]>(`/api/documents/${id}/messages`, { signal }),
+  libraryChatSessions: (signal?: AbortSignal) =>
+    request<LibraryChatSession[]>("/api/library/chat-sessions", { signal }),
+  createLibraryChatSession: (provider: string, scope: LibraryChatScope) =>
+    request<LibraryChatSession>("/api/library/chat-sessions", {
+      method: "POST",
+      body: JSON.stringify({ provider, scope }),
+    }),
+  validateLibraryEvidence: (session: string, message: string, source: string) =>
+    request<{ valid: boolean; documentId: string; location: DocumentLocation }>(
+      `/api/library/chat-sessions/${encodeURIComponent(session)}/messages/${encodeURIComponent(message)}/sources/${encodeURIComponent(source)}`,
+    ),
   chatSessions: (id: string, signal?: AbortSignal) =>
-    request<DocumentChatSession[]>(`/api/documents/${id}/chat-sessions`, {
+    request<DocumentChatSession[]>(chatSessionRoot(id), {
       signal,
     }),
   createChatSession: (id: string, provider: string) =>
-    request<DocumentChatSession>(`/api/documents/${id}/chat-sessions`, {
+    request<DocumentChatSession>(chatSessionRoot(id), {
       method: "POST",
       body: JSON.stringify({ provider }),
     }),
@@ -791,15 +809,14 @@ export const api = {
     sessionId: string,
     patch: { title?: string; provider?: string },
   ) =>
-    request<DocumentChatSession>(
-      `/api/documents/${id}/chat-sessions/${sessionId}`,
-      { method: "PATCH", body: JSON.stringify(patch) },
-    ),
+    request<DocumentChatSession>(`${chatSessionRoot(id)}/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   sessionMessages: (id: string, sessionId: string, signal?: AbortSignal) =>
-    request<Message[]>(
-      `/api/documents/${id}/chat-sessions/${sessionId}/messages`,
-      { signal },
-    ),
+    request<Message[]>(`${chatSessionRoot(id)}/${sessionId}/messages`, {
+      signal,
+    }),
   changeSessionMessage: (
     id: string,
     sessionId: string,
@@ -807,7 +824,7 @@ export const api = {
     change: ChatMessageChange,
   ) =>
     request<ChatMessageChangeResult>(
-      `/api/documents/${id}/chat-sessions/${sessionId}/messages/${messageId}`,
+      `${chatSessionRoot(id)}/${sessionId}/messages/${messageId}`,
       {
         method: change.content === undefined ? "DELETE" : "PATCH",
         body: JSON.stringify(change),
@@ -828,14 +845,14 @@ export const api = {
       readingLocation?: DocumentLocation;
     },
   ) =>
-    request<ChatRun>(`/api/documents/${id}/chat-sessions/${sessionId}/chat`, {
+    request<ChatRun>(`${chatSessionRoot(id)}/${sessionId}/chat`, {
       method: "POST",
       body: JSON.stringify(input),
       signal: AbortSignal.timeout(30_000),
     }),
   cancelChatRun: (id: string, sessionId: string, runId: string) =>
     request<{ ok: boolean }>(
-      `/api/documents/${id}/chat-sessions/${sessionId}/runs/${runId}/cancel`,
+      `${chatSessionRoot(id)}/${sessionId}/runs/${runId}/cancel`,
       { method: "POST", signal: AbortSignal.timeout(30_000) },
     ),
   codexHandoff: (id: string, sessionId?: string) =>
@@ -992,7 +1009,7 @@ export async function watchChatRun(
   emit: (event: ChatStreamEvent) => void,
 ) {
   const response = await diagnosticFetch(
-    `/api/documents/${id}/chat-sessions/${sessionId}/runs/${runId}/events`,
+    `${chatSessionRoot(id)}/${sessionId}/runs/${runId}/events`,
     { headers: { Authorization: `Bearer ${sessionToken}` }, signal },
   );
   if (!response.ok) {

@@ -9,6 +9,8 @@ export const usePaperUI = create<{
   tagFilter: Pick<TagBoard, "tags" | "match">;
   setTagFilter: (filter: Pick<TagBoard, "tags" | "match">) => void;
   selectedId: string | null;
+  libraryAgentOpen: boolean;
+  setLibraryAgentOpen: (open: boolean) => void;
   picking: boolean;
   picked: Set<string>;
   anchor: string | null;
@@ -37,6 +39,8 @@ export const usePaperUI = create<{
   tagFilter: { tags: [], match: "all" },
   setTagFilter: (tagFilter) => set({ tagFilter, selectedId: null }),
   selectedId: null,
+  libraryAgentOpen: false,
+  setLibraryAgentOpen: (libraryAgentOpen) => set({ libraryAgentOpen }),
   picking: false,
   picked: new Set(),
   anchor: null,

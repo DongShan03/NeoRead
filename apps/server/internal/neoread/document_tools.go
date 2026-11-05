@@ -19,26 +19,29 @@ type documentToolDefinition struct {
 
 var documentTextToolDefinitions = []documentToolDefinition{
 	{"get_outline", "Read the current document overview, original terms, sections, and coverage. Overview is derived navigation, not a verbatim source. Use sectionId or firstBlockId to inspect original text when needed.", json.RawMessage(`{"type":"object","properties":{"cursor":{"type":"string"}},"additionalProperties":false}`)},
-	{"search_document", "Search all extracted original text in the current document. Use short keywords; try alternate terms or languages when necessary. Results are candidates: read_passage for original evidence and neighboring conditions.", json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":512},"limit":{"type":"integer","minimum":1,"maximum":12}},"required":["query"],"additionalProperties":false}`)},
-	{"read_passage", "Read original text by exactly one selector: blockId (with neighbors), sectionId, PDF fromPage/toPage, or full=true. Ranges are returned in source order within the context budget; continue with the same selector and nextCursor. Cite returned sourceId only. A short paper can be read in one call; a range may span many paragraphs.", json.RawMessage(`{"type":"object","properties":{"blockId":{"type":"string"},"before":{"type":"integer","minimum":0,"maximum":3},"after":{"type":"integer","minimum":0,"maximum":3},"sectionId":{"type":"string"},"fromPage":{"type":"integer","minimum":1},"toPage":{"type":"integer","minimum":1},"full":{"type":"boolean"},"cursor":{"type":"string"}},"additionalProperties":false}`)},
+	{"search_document", "Search all extracted original text in the current document. Use short keywords; try alternate terms or languages when necessary. Results are candidates: read_passage for original evidence and neighboring conditions.", json.RawMessage(`{"type":"object","properties":{"documentId":{"type":"string"},"query":{"type":"string","minLength":1,"maxLength":512},"limit":{"type":"integer","minimum":1,"maximum":12}},"required":["query"],"additionalProperties":false}`)},
+	{"read_passage", "Read original text by exactly one selector: blockId (with neighbors), sectionId, PDF fromPage/toPage, or full=true. Ranges are returned in source order within the context budget; continue with the same selector and nextCursor. Cite returned sourceId only. A short paper can be read in one call; a range may span many paragraphs.", json.RawMessage(`{"type":"object","properties":{"documentId":{"type":"string"},"blockId":{"type":"string"},"before":{"type":"integer","minimum":0,"maximum":3},"after":{"type":"integer","minimum":0,"maximum":3},"sectionId":{"type":"string"},"fromPage":{"type":"integer","minimum":1},"toPage":{"type":"integer","minimum":1},"full":{"type":"boolean"},"cursor":{"type":"string"}},"additionalProperties":false}`)},
 }
 
 var documentToolDefinitions = append(append([]documentToolDefinition(nil), documentTextToolDefinitions...), documentToolDefinition{
-	"read_pdf_pages", "View original PDF pages as images to inspect figures, tables, formulas, scans and layout. Request one or several 1-based page numbers in pages (up to 8). Images have page labels and source IDs. If remainingPages is nonempty, request those next. Use text tools for ordinary prose; never guess unread visual details.", json.RawMessage(`{"type":"object","properties":{"pages":{"type":"array","items":{"type":"integer","minimum":1},"minItems":1,"maxItems":8}},"required":["pages"],"additionalProperties":false}`),
+	"read_pdf_pages", "View original PDF pages as images to inspect figures, tables, formulas, scans and layout. Request one or several 1-based page numbers in pages (up to 8). Images have page labels and source IDs. If remainingPages is nonempty, request those next. Use text tools for ordinary prose; never guess unread visual details.", json.RawMessage(`{"type":"object","properties":{"documentId":{"type":"string"},"pages":{"type":"array","items":{"type":"integer","minimum":1},"minItems":1,"maxItems":8}},"required":["pages"],"additionalProperties":false}`),
 })
 
 // The optional vision tool does not invalidate existing text-tool capability probes.
 var documentToolSchemaVersion = sourceKey("chat-completions-v1\n" + jsonText(documentTextToolDefinitions))
 
 type documentEvidence struct {
-	PageImage *documentPageImage `json:"pageImage,omitempty"`
-	SourceID  string             `json:"sourceId"`
-	BlockID   string             `json:"blockId"`
-	Text      string             `json:"text"`
-	Location  json.RawMessage    `json:"location"`
-	Revision  string             `json:"corpusRevision"`
-	Hash      string             `json:"contentHash"`
-	Precision string             `json:"precision"`
+	DocumentID       string             `json:"documentId,omitempty"`
+	DocumentTitle    string             `json:"documentTitle,omitempty"`
+	DocumentRevision string             `json:"documentRevision,omitempty"`
+	PageImage        *documentPageImage `json:"pageImage,omitempty"`
+	SourceID         string             `json:"sourceId"`
+	BlockID          string             `json:"blockId"`
+	Text             string             `json:"text"`
+	Location         json.RawMessage    `json:"location"`
+	Revision         string             `json:"corpusRevision"`
+	Hash             string             `json:"contentHash"`
+	Precision        string             `json:"precision"`
 }
 type documentToolTrace struct {
 	Tool      string          `json:"tool"`
@@ -93,7 +96,7 @@ func (a *documentAgent) resetAttempt(provider string) {
 	defer a.mu.Unlock()
 	if len(a.Traces) > 0 {
 		body, _ := json.Marshal(map[string]any{"id": a.ID, "provider": a.provider, "mode": a.Mode, "status": "failed", "errorCode": "superseded_attempt", "corpusRevision": a.corpus.Revision, "tools": a.Traces, "evidence": a.Evidence})
-		_, _ = a.server.Store.DB.Exec("INSERT OR IGNORE INTO chat_agent_runs VALUES(?,?,?)", a.ID, a.corpus.DocumentID, string(body))
+		_, _ = a.server.Store.DB.Exec("INSERT OR IGNORE INTO "+chatTable(a.corpus.DocumentID, "chat_agent_runs")+" VALUES(?,?,?)", a.ID, a.corpus.DocumentID, string(body))
 	}
 	a.ID = id()
 	a.provider = provider
@@ -128,6 +131,9 @@ func (a *documentAgent) check(ctx context.Context) error {
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if a.corpus.Library != nil {
+		return a.corpus.Library.check(ctx, a.server)
 	}
 	d, e := a.server.Store.Document(a.corpus.DocumentID)
 	if e != nil || d.DeletedAt != "" {
@@ -186,7 +192,7 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 		a.repeatedCalls = 1
 	}
 	invalid := func() (json.RawMessage, error) {
-		r := json.RawMessage(`{"error":"invalid_arguments","message":"Check the tool schema; no paths or document IDs are accepted."}`)
+		r := json.RawMessage(`{"error":"invalid_arguments","message":"Check the tool schema and use only IDs returned for the current scope."}`)
 		a.Traces = append(a.Traces, documentToolTrace{tool, append(json.RawMessage(nil), args...), r})
 		return r, nil
 	}
@@ -227,6 +233,26 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 		if strictToolArguments(args, &q) != nil {
 			return invalid()
 		}
+		if a.corpus.Library != nil {
+			start := 0
+			if q.Cursor != "" {
+				var err error
+				start, err = strconv.Atoi(q.Cursor)
+				if err != nil || start < 0 || start >= len(a.corpus.Library.Papers) {
+					return invalid()
+				}
+			}
+			for i := start; i < len(a.corpus.Library.Papers); i++ {
+				if len(items) >= 40 {
+					result["nextCursor"] = strconv.Itoa(i)
+					result["truncated"] = true
+					break
+				}
+				paper := a.corpus.Library.Papers[i]
+				items = append(items, map[string]any{"documentId": paper.ID, "sectionId": paper.ID, "title": paper.Title, "available": paper.Available, "abstract": documentExcerpt(paper.Abstract, 1000)})
+			}
+			break
+		}
 		start := 0
 		if q.Cursor != "" {
 			var e error
@@ -252,7 +278,7 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 				result["truncated"] = true
 				break
 			}
-			candidate := append(append([]any{}, items...), map[string]any{"sectionId": p.Section, "title": documentExcerpt(p.Label, 200), "firstBlockId": p.ID, "location": compactDocumentLocation(p.Location)})
+			candidate := append(append([]any{}, items...), map[string]any{"sectionId": p.Section, "title": documentExcerpt(p.Label, 200), "firstBlockId": p.ID, "documentId": p.DocumentID, "documentTitle": p.DocumentTitle, "location": compactDocumentLocation(p.Location)})
 			encoded, _ := json.Marshal(candidate)
 			if len(encoded) > itemBudget {
 				result["nextCursor"] = strconv.Itoa(i)
@@ -264,8 +290,9 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 		}
 	case "search_document":
 		var q struct {
-			Query string `json:"query"`
-			Limit int    `json:"limit"`
+			DocumentID string `json:"documentId"`
+			Query      string `json:"query"`
+			Limit      int    `json:"limit"`
 		}
 		if strictToolArguments(args, &q) != nil || len(q.Query) > 512 || strings.TrimSpace(q.Query) == "" || q.Limit < 0 || q.Limit > 12 {
 			return invalid()
@@ -284,21 +311,7 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 		for i, t := range terms {
 			terms[i] = `"` + strings.ReplaceAll(t, `"`, `""`) + `"`
 		}
-		rows, e := a.server.Store.DB.QueryContext(ctx, "SELECT block_id FROM document_passages_fts WHERE document_id=? AND revision=? AND document_passages_fts MATCH ? ORDER BY bm25(document_passages_fts),rowid LIMIT ?", a.corpus.DocumentID, a.corpus.Revision, strings.Join(terms, " OR "), q.Limit)
-		if e != nil {
-			return nil, e
-		}
-		var ids []string
-		for rows.Next() {
-			var v string
-			if e = rows.Scan(&v); e != nil {
-				rows.Close()
-				return nil, e
-			}
-			ids = append(ids, v)
-		}
-		e = rows.Err()
-		rows.Close()
+		ids, e := a.searchPassageIDs(ctx, terms, q.Limit, q.DocumentID)
 		if e != nil {
 			return nil, e
 		}
@@ -306,7 +319,7 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 		matches := []documentPassage{}
 		seen := map[string]bool{}
 		for _, p := range a.corpus.Passages {
-			if strings.Contains(strings.ToLower(p.Text), strings.ToLower(query)) {
+			if (q.DocumentID == "" || p.DocumentID == q.DocumentID || a.corpus.Library == nil && q.DocumentID == a.corpus.DocumentID) && strings.Contains(strings.ToLower(p.Text), strings.ToLower(query)) {
 				matches = append(matches, p)
 				seen[p.ID] = true
 				if len(matches) >= q.Limit {
@@ -326,7 +339,7 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 			}
 		}
 		for _, p := range matches {
-			candidate := append(append([]any{}, items...), map[string]any{"blockId": p.ID, "sectionId": p.Section, "excerpt": documentExcerpt(p.Text, 650), "location": compactDocumentLocation(p.Location)})
+			candidate := append(append([]any{}, items...), map[string]any{"blockId": p.ID, "sectionId": p.Section, "excerpt": documentExcerpt(p.Text, 650), "documentId": p.DocumentID, "documentTitle": p.DocumentTitle, "location": compactDocumentLocation(p.Location)})
 			encoded, _ := json.Marshal(candidate)
 			if len(encoded) > itemBudget {
 				result["truncated"] = true
@@ -448,6 +461,11 @@ func (a *documentAgent) references(text string) (json.RawMessage, error) {
 			if ev.SourceID == source {
 				found = true
 				ref := map[string]any{"text": ev.Text, "location": ev.Location, "kind": "section", "sourceId": source, "corpusRevision": ev.Revision, "contentHash": ev.Hash, "precision": ev.Precision}
+				if ev.DocumentID != "" {
+					ref["documentId"] = ev.DocumentID
+					ref["documentTitle"] = ev.DocumentTitle
+					ref["documentRevision"] = ev.DocumentRevision
+				}
 				if ev.PageImage != nil {
 					ref["pageImage"] = ev.PageImage
 				}
@@ -495,7 +513,12 @@ func documentExcerpt(text string, limit int) string {
 	return strings.TrimSuffix(truncateChatText(text, limit), "…（历史回答已截短）") + "…"
 }
 func modelDocumentEvidence(ev documentEvidence) any {
-	return map[string]any{"sourceId": ev.SourceID, "blockId": ev.BlockID, "text": ev.Text, "location": compactDocumentLocation(ev.Location), "corpusRevision": ev.Revision, "contentHash": ev.Hash, "precision": ev.Precision}
+	result := map[string]any{"sourceId": ev.SourceID, "blockId": ev.BlockID, "text": ev.Text, "location": compactDocumentLocation(ev.Location), "corpusRevision": ev.Revision, "contentHash": ev.Hash, "precision": ev.Precision}
+	if ev.DocumentID != "" {
+		result["documentId"] = ev.DocumentID
+		result["documentTitle"] = ev.DocumentTitle
+	}
+	return result
 }
 func compactDocumentLocation(raw json.RawMessage) any {
 	var location map[string]any

@@ -316,17 +316,18 @@ func applySyncRecords(ctx context.Context, tx *sql.Tx, key string, before, after
 		before = emptySyncDocument()
 	}
 	for recordKey, record := range before.Records {
-		if !strings.HasPrefix(recordKey, "chat/") || syncHash(record["messages"]) == syncHash(after.Records[recordKey]["messages"]) {
+		owner := strings.TrimPrefix(key, "document/")
+		if !strings.HasPrefix(recordKey, "chat/") || syncHash(record[chatTable(owner, "messages")]) == syncHash(after.Records[recordKey][chatTable(owner, "messages")]) {
 			continue
 		}
 		// Provider continuations are device-local. A replaced transcript must
 		// resume from its newly saved messages rather than replay an old thread.
 		session := strings.TrimPrefix(recordKey, "chat/")
 		prefix := "session:" + session + ":"
-		query := "DELETE FROM document_conversations WHERE document_id=? AND substr(provider,1,?)=?"
+		query := "DELETE FROM " + chatTable(owner, "document_conversations") + " WHERE document_id=? AND substr(provider,1,?)=?"
 		args := []any{strings.TrimPrefix(key, "document/"), len(prefix), prefix}
 		if session == "" {
-			query = "DELETE FROM document_conversations WHERE document_id=? AND substr(provider,1,8)<>'session:'"
+			query = "DELETE FROM " + chatTable(owner, "document_conversations") + " WHERE document_id=? AND substr(provider,1,8)<>'session:'"
 			args = args[:1]
 		}
 		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
@@ -483,6 +484,18 @@ func (s *Server) installSync(ctx context.Context, run string, initial *syncSnaps
 	defer root.Close()
 	for key, after := range updates {
 		owner := strings.TrimPrefix(key, "document/")
+		if key == "library" {
+			busy := false
+			for task, tasks := range s.documentTasks {
+				if strings.HasPrefix(task, "library-chat/") && len(tasks) > 0 {
+					busy = true
+					break
+				}
+			}
+			if busy {
+				continue
+			}
+		}
 		if key != "library" && (len(s.documentTasks[owner]) > 0 || s.reparsingDocuments[owner] || s.deletingDocuments[owner]) {
 			continue
 		}

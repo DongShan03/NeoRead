@@ -4,6 +4,732 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/library/chat-sessions":
+        {
+          "get":
+            {
+              "summary": "List library conversations with their fixed paper scope",
+              "parameters": [],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/LibraryChatSession",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "summary": "Start a conversation scoped to selected library papers",
+              "parameters": [],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties":
+                                {
+                                  "provider":
+                                    {
+                                      "enum":
+                                        ["api", "codex", "claude", "kimi"],
+                                    },
+                                  "scope":
+                                    {
+                                      "$ref": "#/components/schemas/LibraryChatScope",
+                                    },
+                                },
+                              "required": ["provider", "scope"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "201":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/LibraryChatSession",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/library/chat-sessions/{session}":
+        {
+          "patch":
+            {
+              "summary": "Rename a session or change its backend while idle",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties":
+                                {
+                                  "title":
+                                    { "type": "string", "maxLength": 80 },
+                                  "provider":
+                                    {
+                                      "enum":
+                                        ["api", "codex", "claude", "kimi"],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentChatSession",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/library/chat-sessions/{session}/messages":
+        {
+          "get":
+            {
+              "summary": "Read one session transcript",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    { "$ref": "#/components/schemas/Message" },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/library/chat-sessions/{session}/messages/{message}":
+        {
+          "patch":
+            {
+              "summary": "Edit a question and remove its answer and following messages",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "message",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "required":
+                                [
+                                  "expectedLastMessageId",
+                                  "expectedContent",
+                                  "content",
+                                ],
+                              "properties":
+                                {
+                                  "expectedLastMessageId": { "type": "string" },
+                                  "expectedContent": { "type": "string" },
+                                  "content":
+                                    {
+                                      "type": "string",
+                                      "description": "Non-empty, at most 16000 UTF-8 bytes",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Updated session transcript; message is the edited or withdrawn question",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["message", "messages"],
+                                  "properties":
+                                    {
+                                      "message":
+                                        {
+                                          "$ref": "#/components/schemas/Message",
+                                        },
+                                      "messages":
+                                        {
+                                          "type": "array",
+                                          "items":
+                                            {
+                                              "$ref": "#/components/schemas/Message",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error (409 if the session is running or history changed)",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "delete":
+            {
+              "summary": "Withdraw a question and following messages",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "message",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "required":
+                                ["expectedLastMessageId", "expectedContent"],
+                              "properties":
+                                {
+                                  "expectedLastMessageId": { "type": "string" },
+                                  "expectedContent": { "type": "string" },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Updated session transcript; message is the edited or withdrawn question",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["message", "messages"],
+                                  "properties":
+                                    {
+                                      "message":
+                                        {
+                                          "$ref": "#/components/schemas/Message",
+                                        },
+                                      "messages":
+                                        {
+                                          "type": "array",
+                                          "items":
+                                            {
+                                              "$ref": "#/components/schemas/Message",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error (409 if the session is running or history changed)",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/library/chat-sessions/{session}/chat":
+        {
+          "post":
+            {
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/ChatRun" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "provider":
+                                    {
+                                      "enum":
+                                        ["codex", "claude", "kimi", "api"],
+                                    },
+                                  "attachments":
+                                    {
+                                      "type": "array",
+                                      "maxItems": 4,
+                                      "items":
+                                        {
+                                          "type": "string",
+                                          "pattern": "^p[1-9][0-9]*-b[1-9][0-9]*$",
+                                        },
+                                    },
+                                  "userMessageId":
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{32}$",
+                                      "description": "Stable client-generated user message ID. Reuse only for explicit regeneration of the same unanswered last question, with unchanged prompt, context, references, attachments and reading location. The server uses current model settings, does not insert a duplicate question, and returns 409 if the turn has an answer or later messages. Omit for legacy clients.",
+                                    },
+                                  "prompt": { "type": "string" },
+                                  "context": { "type": "string" },
+                                  "readingLocation":
+                                    {
+                                      "$ref": "#/components/schemas/DocumentLocation",
+                                      "description": "Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence.",
+                                    },
+                                  "references":
+                                    {
+                                      "type": "array",
+                                      "items":
+                                        {
+                                          "anyOf":
+                                            [
+                                              {
+                                                "type": "object",
+                                                "properties":
+                                                  {
+                                                    "text":
+                                                      { "type": "string" },
+                                                    "kind":
+                                                      {
+                                                        "enum":
+                                                          [
+                                                            "selection",
+                                                            "section",
+                                                          ],
+                                                      },
+                                                    "location":
+                                                      {
+                                                        "$ref": "#/components/schemas/DocumentLocation",
+                                                      },
+                                                    "sourceId":
+                                                      { "type": "string" },
+                                                    "pageImage":
+                                                      {
+                                                        "$ref": "#/components/schemas/PageImageEvidence",
+                                                      },
+                                                    "corpusRevision":
+                                                      { "type": "string" },
+                                                    "contentHash":
+                                                      { "type": "string" },
+                                                    "precision":
+                                                      {
+                                                        "type": "string",
+                                                        "enum":
+                                                          [
+                                                            "page",
+                                                            "block",
+                                                            "paragraph",
+                                                          ],
+                                                      },
+                                                  },
+                                                "required":
+                                                  ["text", "location"],
+                                              },
+                                              {
+                                                "type": "object",
+                                                "description": "User-selected conversation text. Stored with the question; does not identify document evidence or a document location.",
+                                                "properties":
+                                                  {
+                                                    "kind": { "const": "chat" },
+                                                    "text":
+                                                      { "type": "string" },
+                                                  },
+                                                "required": ["kind", "text"],
+                                              },
+                                            ],
+                                        },
+                                    },
+                                  "webSearch":
+                                    {
+                                      "type": "boolean",
+                                      "description": "Omission uses saved search settings. Explicit true requires those settings to permit search; false opts out. Saved questions retain their permission on regeneration.",
+                                    },
+                                },
+                              "required": ["provider", "prompt", "context"],
+                            },
+                        },
+                    },
+                },
+              "summary": "Start a server-owned run; one active run per session, at most four globally",
+            },
+        },
+      "/api/library/chat-sessions/{session}/runs/{run}/events":
+        {
+          "get":
+            {
+              "summary": "Replay and subscribe to a run; disconnecting never cancels it",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "run",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Incremental ChatStream SSE; done follows successful persistence",
+                      "content":
+                        {
+                          "text/event-stream":
+                            { "schema": { "type": "string" } },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/library/chat-sessions/{session}/runs/{run}/cancel":
+        {
+          "post":
+            {
+              "summary": "Cancel this run and wait for it to settle",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "run",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["ok"],
+                                  "properties": { "ok": { "type": "boolean" } },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/library/chat-sessions/{session}/messages/{message}/sources/{source}":
+        {
+          "get":
+            {
+              "summary": "Validate one saved paper source before navigating to its original",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "message",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "source",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Validated original source",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required":
+                                    ["valid", "documentId", "location"],
+                                  "properties":
+                                    {
+                                      "valid": { "type": "boolean" },
+                                      "documentId": { "type": "string" },
+                                      "location":
+                                        {
+                                          "$ref": "#/components/schemas/DocumentLocation",
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/sync/webdav/libraries":
         {
           "get":
@@ -6491,6 +7217,39 @@
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "LibraryChatScope":
+            {
+              "type": "object",
+              "required": ["category", "documentIds"],
+              "properties":
+                {
+                  "category":
+                    { "type": "string", "minLength": 1, "maxLength": 256 },
+                  "documentIds":
+                    {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": { "type": "string" },
+                    },
+                },
+            },
+          "LibraryChatSession":
+            {
+              "allOf":
+                [
+                  { "$ref": "#/components/schemas/DocumentChatSession" },
+                  {
+                    "type": "object",
+                    "required": ["scope"],
+                    "properties":
+                      {
+                        "scope":
+                          { "$ref": "#/components/schemas/LibraryChatScope" },
+                      },
+                  },
+                ],
+            },
           "WebDAVConfig":
             {
               "type": "object",
@@ -7458,6 +8217,9 @@
                                         "type": "string",
                                         "enum": ["page", "block", "paragraph"],
                                       },
+                                    "documentId": { "type": "string" },
+                                    "documentTitle": { "type": "string" },
+                                    "documentRevision": { "type": "string" },
                                   },
                                 "required": ["text", "location"],
                               },

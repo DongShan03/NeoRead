@@ -1358,6 +1358,73 @@ func TestLibraryArchivePreservesPeakAndCurrentReadingPosition(t *testing.T) {
 	}
 }
 
+func TestLibraryArchivePreservesLibraryChatsAndExcludesOtherCategorySources(t *testing.T) {
+	s := testServer(t)
+	archiveDocument(t, s.Store, "alpha", "研究")
+	archiveDocument(t, s.Store, "beta", "其他")
+	inside := createLibrarySessionTest(t, s, "alpha")
+	outside := createLibrarySessionTest(t, s, "alpha", "beta")
+	for _, session := range []libraryChatSession{inside, outside} {
+		if err := s.Store.saveMessage(Message{ID: id(), DocumentID: libraryChatOwner, SessionID: session.ID, Role: "user", Content: "review " + session.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive := filepath.Join(t.TempDir(), "library.zip")
+	if err := ExportLibraryArchive(s.Store.Root, archive, LibraryArchiveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "imported")
+	if err := ImportLibraryArchive(archive, destination, ""); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := store.chatHistory(libraryChatOwner, outside.ID)
+	if err != nil || len(history) != 1 {
+		t.Fatal("whole library export lost review chats", history, err)
+	}
+	if err = store.saveMessage(Message{ID: id(), DocumentID: libraryChatOwner, SessionID: outside.ID, Role: "user", Content: "withdrawn after export"}); err != nil {
+		t.Fatal(err)
+	}
+	store.DB.Close()
+	merged := filepath.Join(t.TempDir(), "merged")
+	if err = ImportLibraryArchive(archive, merged, destination); err != nil {
+		t.Fatal(err)
+	}
+	store = archiveFixture(t, merged)
+	history, err = store.chatHistory(libraryChatOwner, outside.ID)
+	if err != nil || len(history) != 1 {
+		t.Fatal("archive merge mixed different transcript versions", history, err)
+	}
+	store.DB.Close()
+	archive = filepath.Join(t.TempDir(), "category.zip")
+	if err = ExportLibraryArchive(s.Store.Root, archive, LibraryArchiveOptions{Library: "papers", Folder: "研究"}); err != nil {
+		t.Fatal(err)
+	}
+	destination = filepath.Join(t.TempDir(), "category")
+	if err = ImportLibraryArchive(archive, destination, ""); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenStore(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB.Close()
+	history, err = store.chatHistory(libraryChatOwner, inside.ID)
+	if err != nil || len(history) != 1 {
+		t.Fatal("category export lost its review chat", history, err)
+	}
+	if _, err = store.libraryScope(outside.ID); err == nil {
+		t.Fatal("category export included a chat quoting excluded papers")
+	}
+	history, err = store.chatHistory(libraryChatOwner, outside.ID)
+	if err != nil || len(history) != 0 {
+		t.Fatal("category export leaked excluded quotations", history, err)
+	}
+}
+
 func TestLibraryArchiveDetachesInterruptedSyncOnlyInExportedCopy(t *testing.T) {
 	store := archiveFixture(t, filepath.Join(t.TempDir(), "source"))
 	archiveDocument(t, store, "paper", "研究")
@@ -1397,7 +1464,7 @@ func TestLibraryArchiveDetachesInterruptedSyncOnlyInExportedCopy(t *testing.T) {
 func TestLibraryArchiveExportsUnopenedLegacyLibraryWithoutChangingItsSchema(t *testing.T) {
 	store := archiveFixture(t, filepath.Join(t.TempDir(), "source"))
 	archiveDocument(t, store, "paper", "研究")
-	for _, table := range []string{"sync_receiving", "sync_receipts"} {
+	for _, table := range []string{"library_chat_runs", "library_messages", "library_document_conversations", "library_chat_agent_runs", "library_processing_usage", "library_chat_usage_coverage", "library_chat_sessions", "sync_receiving", "sync_receipts"} {
 		if _, err := store.DB.Exec("DROP TABLE " + table); err != nil {
 			t.Fatal(err)
 		}

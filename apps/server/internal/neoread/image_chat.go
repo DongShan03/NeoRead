@@ -291,7 +291,7 @@ func (s *Store) prepareChatQuestion(messages []Message, user Message) ([]Message
 		}
 		// IDs are global; a request must never reuse another document's message.
 		var exists int
-		if err := s.DB.QueryRow("SELECT count(*) FROM messages WHERE id=?", user.ID).Scan(&exists); err != nil {
+		if err := s.DB.QueryRow("SELECT (SELECT count(*) FROM messages WHERE id=?) + (SELECT count(*) FROM library_messages WHERE id=?)", user.ID, user.ID).Scan(&exists); err != nil {
 			return nil, 500, errors.New("无法核对问题消息")
 		}
 		if exists != 0 {

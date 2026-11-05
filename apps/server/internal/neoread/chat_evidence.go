@@ -34,17 +34,24 @@ func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, 
 	}
 	defer tx.Rollback()
 	var deleted string
-	if e = tx.QueryRowContext(ctx, "SELECT deleted_at FROM documents WHERE id=?", a.corpus.DocumentID).Scan(&deleted); e != nil || deleted != "" {
-		return generationError(ErrorCanceled, "文档已不可用")
+	if a.corpus.Library == nil {
+		if e = tx.QueryRowContext(ctx, "SELECT deleted_at FROM documents WHERE id=?", a.corpus.DocumentID).Scan(&deleted); e != nil || deleted != "" {
+			return generationError(ErrorCanceled, "文档已不可用")
+		}
+		var revision string
+		if e = tx.QueryRowContext(ctx, "SELECT revision FROM document_corpora WHERE document_id=?", a.corpus.DocumentID).Scan(&revision); e != nil || revision != a.corpus.Revision {
+			return generationError(ErrorProtocol, "原文版本已改变，回答未保存")
+		}
+	} else {
+		var exists int
+		if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM library_chat_sessions WHERE id=?", a.sessionID).Scan(&exists); e != nil || exists != 1 {
+			return generationError(ErrorCanceled, "书库会话已不可用")
+		}
 	}
-	var revision string
-	if e = tx.QueryRowContext(ctx, "SELECT revision FROM document_corpora WHERE document_id=?", a.corpus.DocumentID).Scan(&revision); e != nil || revision != a.corpus.Revision {
-		return generationError(ErrorProtocol, "原文版本已改变，回答未保存")
-	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO messages VALUES(?,?,?,?)", message.ID, message.DocumentID, string(body), message.CreatedAt); e != nil {
+	if _, e = tx.ExecContext(ctx, "INSERT INTO "+chatTable(message.DocumentID, "messages")+" VALUES(?,?,?,?)", message.ID, message.DocumentID, string(body), message.CreatedAt); e != nil {
 		return generationError(ErrorSave, "无法保存回答与来源")
 	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO chat_agent_runs VALUES(?,?,?)", a.ID, message.DocumentID, string(run)); e != nil {
+	if _, e = tx.ExecContext(ctx, "INSERT INTO "+chatTable(message.DocumentID, "chat_agent_runs")+" VALUES(?,?,?)", a.ID, message.DocumentID, string(run)); e != nil {
 		return generationError(ErrorSave, "无法保存回答与来源")
 	}
 	if e = a.commitConversation(ctx, tx, message.ID); e != nil {
@@ -59,7 +66,7 @@ func (s *Server) saveFailedDocumentRun(a *documentAgent, provider string, cause 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	body, _ := json.Marshal(map[string]any{"id": a.ID, "provider": provider, "mode": a.Mode, "status": "failed", "errorCode": errorKind(cause), "readingCoverage": a.readingCoverage(), "corpusRevision": a.corpus.Revision, "tools": a.Traces, "evidence": a.turnEvidence(), "conversationEvents": cleanConversationEvents(a.conversationEvents), "checkpoints": a.checkpoints})
-	_, _ = s.Store.DB.Exec("INSERT OR IGNORE INTO chat_agent_runs VALUES(?,?,?)", a.ID, a.corpus.DocumentID, string(body))
+	_, _ = s.Store.DB.Exec("INSERT OR IGNORE INTO "+chatTable(a.corpus.DocumentID, "chat_agent_runs")+" VALUES(?,?,?)", a.ID, a.corpus.DocumentID, string(body))
 }
 func (s *Server) validateChatEvidence(w http.ResponseWriter, r *http.Request) {
 	d, e := s.Store.Document(r.PathValue("id"))
