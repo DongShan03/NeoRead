@@ -87,7 +87,7 @@ func CopyLibrary(source, destination string) (err error) {
 		if err != nil || relative == "." {
 			return err
 		}
-		if relative == "ai-work" || relative == "claude-history" {
+		if relative == "ai-work" {
 			return filepath.SkipDir
 		}
 		if relative == "neoread.lock" || relative == "server.json" {

@@ -224,7 +224,13 @@ func TestClaudeNativeHistoryHidesRestoresAndContinuesAfterRestart(t *testing.T) 
 				t.Fatal(err)
 			}
 			setReadingHistoryHidden(t, s, true)
-			hidden := s.claudeHistoryPath(item.ID, "hidden")
+			hidden := claudeHiddenPath(item)
+			if hidden != filepath.Join(filepath.Dir(item.VisiblePath), "claude-history-hidden", item.ID+".jsonl") {
+				t.Fatal("hidden session is not beside its original Claude transcript", hidden)
+			}
+			if _, err := os.Stat(filepath.Join(s.Store.Root, "claude-history-hidden")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("native history was created inside the library", err)
+			}
 			data, err := os.ReadFile(hidden)
 			if err != nil || string(data) != string(original) {
 				t.Fatal("hiding changed the native transcript", err)
@@ -386,7 +392,7 @@ func TestClaudeHistoryUsesLatestPreferenceAtTurnEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, item := readClaudeSession(t, s, "doc", "")
-	if _, err := os.Stat(s.claudeHistoryPath(item.ID, "hidden")); err != nil {
+	if _, err := os.Stat(claudeHiddenPath(item)); err != nil {
 		t.Fatal("completed turn did not apply the latest preference", err)
 	}
 	if _, err := os.Stat(item.VisiblePath); !errors.Is(err, os.ErrNotExist) {
@@ -398,10 +404,13 @@ func TestClaudeNativeOwnershipIsExcludedFromIndependentLibraries(t *testing.T) {
 	root := t.TempDir()
 	source := archiveFixture(t, filepath.Join(root, "source"))
 	archiveDocument(t, source, "paper", "分类")
-	if _, err := source.DB.Exec("INSERT INTO claude_history_sessions VALUES('owned-session','paper','/synthetic/owned-session.jsonl')"); err != nil {
+	config := filepath.Join(root, "claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	visible := filepath.Join(config, "projects", "synthetic", "owned-session.jsonl")
+	if _, err := source.DB.Exec("INSERT INTO claude_history_sessions VALUES('owned-session','paper',?)", visible); err != nil {
 		t.Fatal(err)
 	}
-	private := filepath.Join(source.Root, "claude-history", "hidden")
+	private := filepath.Join(filepath.Dir(visible), "claude-history-hidden")
 	if err := os.MkdirAll(private, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +437,7 @@ func TestClaudeNativeOwnershipIsExcludedFromIndependentLibraries(t *testing.T) {
 	if err := copied.DB.QueryRow("SELECT count(*) FROM claude_history_sessions").Scan(&count); err != nil || count != 0 {
 		t.Fatal("independent copy inherited another library's native writer", count, err)
 	}
-	if _, err := os.Stat(filepath.Join(copied.Root, "claude-history")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(copied.Root, "claude-history-hidden")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("private native history was copied", err)
 	}
 	if err := source.DB.QueryRow("SELECT count(*) FROM claude_history_sessions").Scan(&count); err != nil || count != 1 {

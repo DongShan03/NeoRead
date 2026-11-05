@@ -27,15 +27,18 @@ func claudeSessionID() string {
 	return raw[:8] + "-" + raw[8:12] + "-4" + raw[13:16] + "-a" + raw[17:20] + "-" + raw[20:]
 }
 
-func (s *Server) claudeHistoryPath(session, kind string) string {
-	return filepath.Join(s.Store.Root, "claude-history", kind, session+".jsonl")
+func claudeHiddenPath(item claudeHistorySession) string {
+	return filepath.Join(filepath.Dir(item.VisiblePath), "claude-history-hidden", item.ID+".jsonl")
 }
 
-func (s *Server) claudeSnapshotPath(snapshot string) (string, error) {
+func claudeSnapshotPath(item claudeHistorySession, snapshot string) (string, error) {
+	if item.VisiblePath == "" || !localClaudeHistoryPath(item) {
+		return "", os.ErrNotExist
+	}
 	if decoded, err := hex.DecodeString(snapshot); err != nil || len(decoded) != 16 {
 		return "", os.ErrNotExist
 	}
-	return s.claudeHistoryPath(snapshot, "committed"), nil
+	return filepath.Join(filepath.Dir(claudeHiddenPath(item)), "committed", snapshot+".jsonl"), nil
 }
 
 func (s *Server) claudeHistorySession(ctx context.Context, session string) (claudeHistorySession, error) {
@@ -48,7 +51,10 @@ func (s *Server) claudeHistorySession(ctx context.Context, session string) (clau
 }
 
 func (s *Server) claudeTranscriptPath(item claudeHistorySession) (string, error) {
-	hidden := s.claudeHistoryPath(item.ID, "hidden")
+	if item.VisiblePath == "" {
+		return "", os.ErrNotExist
+	}
+	hidden := claudeHiddenPath(item)
 	if _, err := regularClaudeTranscript(hidden); err == nil {
 		if item.VisiblePath != "" {
 			if _, err := regularClaudeTranscript(item.VisiblePath); err == nil {
@@ -60,9 +66,6 @@ func (s *Server) claudeTranscriptPath(item claudeHistorySession) (string, error)
 		return hidden, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
-	}
-	if item.VisiblePath == "" {
-		return "", os.ErrNotExist
 	}
 	_, err := regularClaudeTranscript(item.VisiblePath)
 	return item.VisiblePath, err
@@ -223,7 +226,7 @@ func (s *Server) setClaudeHistoryVisibility(item claudeHistorySession, hide bool
 	if item.VisiblePath == "" {
 		return nil
 	}
-	source, destination := item.VisiblePath, s.claudeHistoryPath(item.ID, "hidden")
+	source, destination := item.VisiblePath, claudeHiddenPath(item)
 	if !hide {
 		source, destination = destination, source
 	}
@@ -236,17 +239,20 @@ func (s *Server) setClaudeHistoryVisibility(item claudeHistorySession, hide bool
 		// Claude's own retention policy may have pruned a visible transcript.
 		// Restore the last answer committed by NeoRead, not an unfinished turn.
 		var snapshot string
-		err := s.Store.DB.QueryRow(`SELECT json_extract(body,'$.nativeSnapshot') FROM document_conversations
+		err := s.Store.DB.QueryRow(`SELECT COALESCE(json_extract(body,'$.nativeSnapshot'),'') FROM document_conversations
  WHERE json_extract(body,'$.nativeThread')=? AND (provider='claude' OR substr(provider,-7)=':claude')
- UNION ALL SELECT json_extract(body,'$.nativeSnapshot') FROM library_document_conversations
+ UNION ALL SELECT COALESCE(json_extract(body,'$.nativeSnapshot'),'') FROM library_document_conversations
  WHERE json_extract(body,'$.nativeThread')=? AND (provider='claude' OR substr(provider,-7)=':claude') LIMIT 1`, item.ID, item.ID).Scan(&snapshot)
-		if errors.Is(err, sql.ErrNoRows) || snapshot == "" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		path, err := s.claudeSnapshotPath(snapshot)
+		if snapshot == "" {
+			return nil
+		}
+		path, err := claudeSnapshotPath(item, snapshot)
 		if err != nil {
 			return err
 		}
@@ -339,7 +345,7 @@ func (a *documentAgent) beginClaudeConversation(ctx context.Context, in AIInput)
 		resume, err = s.claudeTranscriptPath(item)
 		if err == nil && c.NativeDirty {
 			var snapshot string
-			snapshot, err = s.claudeSnapshotPath(c.NativeSnapshot)
+			snapshot, err = claudeSnapshotPath(item, c.NativeSnapshot)
 			if err == nil {
 				err = copyClaudeTranscript(snapshot, resume, true)
 			}
@@ -366,7 +372,7 @@ func (a *documentAgent) beginClaudeConversation(ctx context.Context, in AIInput)
 		if !c.NativeDirty && c.NativeSnapshot != "" {
 			// Keep legitimate external continuation of a visible session when a
 			// later NeoRead turn is canceled or fails to save.
-			snapshot, e := s.claudeSnapshotPath(c.NativeSnapshot)
+			snapshot, e := claudeSnapshotPath(item, c.NativeSnapshot)
 			if e == nil {
 				e = copyClaudeTranscript(resume, snapshot, true)
 			}
@@ -438,7 +444,7 @@ func (a *documentAgent) prepareClaudeNativeCommit() error {
 	if err != nil {
 		return generationError(ErrorSave, "无法保存 Claude 原生会话恢复点")
 	}
-	snapshot, err := s.claudeSnapshotPath(a.ID)
+	snapshot, err := claudeSnapshotPath(a.claudeNative.item, a.ID)
 	if err == nil {
 		err = copyClaudeTranscript(path, snapshot, false)
 	}
@@ -450,10 +456,10 @@ func (a *documentAgent) prepareClaudeNativeCommit() error {
 }
 
 func (a *documentAgent) finishClaudeNativeCommit() {
-	if a.claudeNative == nil || a.committedConversation.NativeSnapshot == "" {
+	if a.claudeNative == nil || a.committedConversation.NativeSnapshot == "" || a.committedConversation.NativeThread != a.claudeNative.item.ID {
 		return
 	}
-	if path, err := a.server.claudeSnapshotPath(a.committedConversation.NativeSnapshot); err == nil && a.committedConversation.NativeSnapshot != a.ID {
+	if path, err := claudeSnapshotPath(a.claudeNative.item, a.committedConversation.NativeSnapshot); err == nil && a.committedConversation.NativeSnapshot != a.ID {
 		_ = os.Remove(path)
 	}
 }
