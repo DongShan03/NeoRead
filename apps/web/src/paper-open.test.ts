@@ -3,6 +3,7 @@ import { api } from "@neoread/api";
 import type { Processing } from "@neoread/core";
 import {
   openLibraryDocument,
+  openLibraryDocuments,
   openLinkTarget,
   openWhenParsed,
   useReaderStore,
@@ -12,6 +13,7 @@ import { paper } from "./papers/fixtures";
 vi.mock("@neoread/api", () => ({
   api: {
     processing: vi.fn(),
+    update: vi.fn(async () => ({})),
     saveLibraryPreferences: vi.fn(async (value) => value),
   },
 }));
@@ -42,16 +44,20 @@ it.each(["queued", "running", "paused", "waiting", "failed"] as const)(
   async (status) => {
     vi.mocked(api.processing).mockResolvedValue([job({ status })]);
     await expect(openLibraryDocument(doc)).rejects.toThrow(
-      "论文飞速解析中，请稍等",
+      ["queued", "running"].includes(status)
+        ? "论文飞速解析中，请稍等" : "论文解析没有完成，无法打开",
     );
     expect(useReaderStore.getState().active).toBeNull();
   },
 );
 it("blocks unknown and incomplete parsing", async () => {
-  for (const jobs of [[], [job({ phase: "translating", incomplete: true })]]) {
-    vi.mocked(api.processing).mockResolvedValue(jobs);
+  for (const [jobs, reason] of [
+    [[], "论文解析任务已不存在，请重新解析文档"],
+    [[job({ phase: "translating", incomplete: true })], "论文正文不完整，无法打开"],
+  ] as const) {
+    vi.mocked(api.processing).mockResolvedValue([...jobs]);
     await expect(openLibraryDocument(doc)).rejects.toThrow(
-      "论文飞速解析中，请稍等",
+      reason,
     );
     expect(useReaderStore.getState().active).toBeNull();
   }
@@ -200,4 +206,49 @@ it("reports a missing parsing task instead of polling indefinitely", async () =>
     "解析任务已不存在",
   );
   expect(api.processing).toHaveBeenCalledOnce();
+});
+
+
+it("opens only allowed documents with one processing snapshot and records every visit", async () => {
+  const book = paper({ id: "book", library: "books" });
+  const ready = paper({ id: "ready" });
+  vi.mocked(api.processing).mockResolvedValue([job(), job({ documentId: ready.id, phase: "ready" })]);
+  const result = await openLibraryDocuments([doc, book, ready]);
+  expect(api.processing).toHaveBeenCalledOnce();
+  expect(result.opened).toEqual([book, ready]);
+  expect(result.skipped).toEqual([{ document: doc, reason: "论文飞速解析中，请稍等" }]);
+  expect(api.update).toHaveBeenCalledWith(book.id, {});
+  expect(api.update).toHaveBeenCalledWith(ready.id, {});
+  expect(useReaderStore.getState().active).toEqual(book);
+});
+it("keeps the current view when every requested document is blocked", async () => {
+  const book = paper({ id: "book", library: "books" });
+  useReaderStore.getState().open(book);
+  vi.mocked(api.processing).mockResolvedValue([job({ status: "failed", detail: "解析失败" })]);
+  expect((await openLibraryDocuments([doc])).skipped[0].reason).toBe("解析失败");
+  expect(useReaderStore.getState().active).toEqual(book);
+  expect(api.update).not.toHaveBeenCalled();
+});
+it("does not replace a newer navigation with a late batch response", async () => {
+  let resolve!: (jobs: Processing[]) => void;
+  vi.mocked(api.processing).mockReturnValue(new Promise((done) => { resolve = done; }));
+  const pending = openLibraryDocuments([doc]);
+  const book = paper({ id: "book", library: "books" });
+  useReaderStore.getState().open(book);
+  resolve([job({ phase: "ready" })]);
+  expect((await pending).opened).toEqual([]);
+  expect(useReaderStore.getState().active).toEqual(book);
+});
+it("does not cancel a pending open for an empty tab group", async () => {
+  let resolve!: (jobs: Processing[]) => void;
+  vi.mocked(api.processing).mockReturnValue(new Promise((done) => { resolve = done; }));
+  const pending = openLibraryDocument(doc);
+  useReaderStore.getState().openMany([]);
+  await openLibraryDocuments([]);
+  resolve([job({ phase: "ready" })]);
+  expect(await pending).toBe(true);
+});
+it("preserves receiving papers' existing opening permission", async () => {
+  vi.mocked(api.processing).mockResolvedValue([job({ receiving: true })]);
+  expect(await openLibraryDocument(doc)).toBe(true);
 });

@@ -52,6 +52,7 @@ import {
   openLinkTarget,
   openWhenParsed,
   openLibraryDocument,
+  openLibraryDocuments,
   documentTabsShown,
 } from "./store";
 import { TrashView } from "./TrashView";
@@ -450,10 +451,13 @@ export function App() {
   };
   const tabsShown = documentTabsShown({ theme, tabIds, closedTabGroups });
   const openDocuments = (docs: Document[]) => {
-    if (!docs.length) return;
-    useReaderStore.getState().openMany(docs);
-    setEditingLibrary(false);
-    void api.update(docs[0].id, {}).catch((e) => toast.error(e.message));
+    void openLibraryDocuments(docs).then(({ opened, skipped }) => {
+      if (opened.length) setEditingLibrary(false);
+      if (skipped.length) {
+        const reasons = [...new Set(skipped.map((item) => item.reason))].join("；");
+        toast.info(`已跳过 ${skipped.length} 份文档：${reasons}`);
+      }
+    }).catch((e) => toast.error(e.message));
   };
   const filtered = filterDocuments(
     documents,
