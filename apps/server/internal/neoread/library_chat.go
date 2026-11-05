@@ -13,7 +13,7 @@ import (
 )
 
 const libraryChatSchema = `
- CREATE TABLE IF NOT EXISTS library_chat_sessions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL DEFAULT 'library',title TEXT NOT NULL,provider TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,scope TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS library_chat_sessions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL DEFAULT 'library',title TEXT NOT NULL,provider TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,scope TEXT NOT NULL,title_manual INTEGER NOT NULL DEFAULT 0 CHECK(title_manual IN (0,1)));
  CREATE TABLE IF NOT EXISTS library_messages(id TEXT PRIMARY KEY,document_id TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS library_messages_session ON library_messages(json_extract(body,'$.sessionId'));
  CREATE TABLE IF NOT EXISTS library_chat_runs(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES library_chat_sessions(id) ON DELETE CASCADE,body TEXT NOT NULL);
@@ -93,7 +93,7 @@ func (s *Server) registerLibraryChat(mux *http.ServeMux) {
 }
 
 func (s *Server) listLibraryChatSessions(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.DB.QueryContext(r.Context(), `SELECT s.id,s.document_id,s.title,s.provider,s.created_at,s.updated_at,s.scope,
+	rows, err := s.Store.DB.QueryContext(r.Context(), `SELECT s.id,s.document_id,s.title,s.provider,s.created_at,s.updated_at,s.scope,s.title_manual,
     (SELECT json_remove(r.body,'$.events') FROM library_chat_runs r WHERE r.session_id=s.id ORDER BY r.rowid DESC LIMIT 1)
     FROM library_chat_sessions s ORDER BY s.rowid DESC`)
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *Server) listLibraryChatSessions(w http.ResponseWriter, r *http.Request)
 		var item libraryChatSession
 		var scope string
 		var run sql.NullString
-		if err = rows.Scan(&item.ID, &item.DocumentID, &item.Title, &item.Provider, &item.CreatedAt, &item.UpdatedAt, &scope, &run); err != nil {
+		if err = rows.Scan(&item.ID, &item.DocumentID, &item.Title, &item.Provider, &item.CreatedAt, &item.UpdatedAt, &scope, &item.TitleManual, &run); err != nil {
 			break
 		}
 		if err = json.Unmarshal([]byte(scope), &item.Scope); err != nil {
@@ -130,10 +130,11 @@ func (s *Server) listLibraryChatSessions(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) createLibraryChatSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID       string           `json:"id"`
-		Title    string           `json:"title"`
-		Provider string           `json:"provider"`
-		Scope    libraryChatScope `json:"scope"`
+		ID          string           `json:"id"`
+		Title       string           `json:"title"`
+		TitleManual bool             `json:"titleManual"`
+		Provider    string           `json:"provider"`
+		Scope       libraryChatScope `json:"scope"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -161,8 +162,8 @@ func (s *Server) createLibraryChatSession(w http.ResponseWriter, r *http.Request
 	if req.ID == "" {
 		req.ID = "library-" + id()
 	}
-	item := libraryChatSession{ChatSession: ChatSession{ID: req.ID, DocumentID: libraryChatOwner, Title: title, Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}, Scope: req.Scope}
-	if _, err := s.Store.DB.ExecContext(r.Context(), "INSERT INTO library_chat_sessions(id,document_id,title,provider,created_at,updated_at,scope) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", item.ID, item.DocumentID, item.Title, item.Provider, item.CreatedAt, item.UpdatedAt, jsonText(item.Scope)); err != nil {
+	item := libraryChatSession{ChatSession: ChatSession{ID: req.ID, DocumentID: libraryChatOwner, Title: title, TitleManual: req.TitleManual, Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}, Scope: req.Scope}
+	if _, err := s.Store.DB.ExecContext(r.Context(), "INSERT INTO library_chat_sessions(id,document_id,title,provider,created_at,updated_at,scope,title_manual) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", item.ID, item.DocumentID, item.Title, item.Provider, item.CreatedAt, item.UpdatedAt, jsonText(item.Scope), item.TitleManual); err != nil {
 		fail(w, 500, "无法创建书库对话")
 		return
 	}
@@ -202,6 +203,7 @@ func (s *Server) updateLibraryChatSession(w http.ResponseWriter, r *http.Request
 			return
 		}
 		item.Title = title
+		item.TitleManual = true
 	}
 	if req.Provider != nil {
 		if !validAgent(*req.Provider) {
@@ -215,7 +217,7 @@ func (s *Server) updateLibraryChatSession(w http.ResponseWriter, r *http.Request
 		item.Provider = *req.Provider
 	}
 	item.UpdatedAt = now()
-	if _, err = s.Store.DB.Exec("UPDATE library_chat_sessions SET title=?,provider=?,updated_at=? WHERE id=?", item.Title, item.Provider, item.UpdatedAt, item.ID); err != nil {
+	if _, err = s.Store.DB.Exec("UPDATE library_chat_sessions SET title=?,title_manual=?,provider=?,updated_at=? WHERE id=?", item.Title, item.TitleManual, item.Provider, item.UpdatedAt, item.ID); err != nil {
 		fail(w, 500, "无法保存会话")
 		return
 	}

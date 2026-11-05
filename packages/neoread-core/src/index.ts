@@ -985,6 +985,7 @@ export interface DocumentChatSession {
   id: string;
   documentId: string;
   title: string;
+  titleManual?: boolean;
   provider: string;
   createdAt: string;
   updatedAt: string;

@@ -69,6 +69,7 @@
                                   "title":
                                     { "type": "string", "maxLength": 80 },
 
+                                  "titleManual": { "type": "boolean" },
                                   "provider":
                                     {
                                       "enum":
@@ -6616,6 +6617,7 @@
 
                                   "title":
                                     { "type": "string", "maxLength": 80 },
+                                  "titleManual": { "type": "boolean" },
                                   "provider":
                                     {
                                       "enum":
@@ -9454,6 +9456,7 @@
                   "id": { "type": "string" },
                   "documentId": { "type": "string" },
                   "title": { "type": "string" },
+                  "titleManual": { "type": "boolean" },
                   "provider": { "type": "string" },
                   "createdAt": { "type": "string" },
                   "updatedAt": { "type": "string" },

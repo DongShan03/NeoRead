@@ -145,7 +145,7 @@ func (s *Server) startSessionChat(w http.ResponseWriter, r *http.Request, docume
 		fail(w, 500, "无法记录运行状态")
 		return
 	}
-	if session.Title == "新会话" {
+	if !session.TitleManual && session.Title == "新会话" {
 		session.Title = sessionTitle(user.Content)
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE "+chatTable(document.ID, "chat_sessions")+" SET title=?,provider=?,updated_at=? WHERE id=?", session.Title, config.Primary, stamp, sessionID)

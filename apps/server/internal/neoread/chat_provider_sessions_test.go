@@ -536,7 +536,16 @@ func TestPiSessionsConcurrentCancelAndDetachedSubscriber(t *testing.T) {
 	defer upstream.Close()
 	configureDocumentAPI(t, s, upstream.URL)
 	a, b := createSessionTest(t, s), createSessionTest(t, s)
+	if out := request(t, s, "PATCH", "/api/documents/doc/chat-sessions/"+a.ID, strings.NewReader(`{"title":"新会话"}`)); out.Code != 200 {
+		t.Fatal(out.Body.String())
+	}
 	runA, runB := startSessionTest(t, s, a, "ALPHA"), startSessionTest(t, s, b, "BETA")
+	if named, err := s.Store.chatSession("doc", a.ID); err != nil || named.Title != "新会话" || !named.TitleManual {
+		t.Fatal("first turn replaced an explicit name", named, err)
+	}
+	if out := request(t, s, "PATCH", "/api/documents/doc/chat-sessions/"+a.ID, strings.NewReader(`{"title":"运行中的手动名称"}`)); out.Code != 200 {
+		t.Fatal(out.Body.String())
+	}
 	for i := 0; i < 2; i++ {
 		select {
 		case <-started:
@@ -567,6 +576,9 @@ func TestPiSessionsConcurrentCancelAndDetachedSubscriber(t *testing.T) {
 		t.Fatal(stopped.Code)
 	}
 	aResult := awaitRunTest(t, s, runA)
+	if named, err := s.Store.chatSession("doc", a.ID); err != nil || named.Title != "运行中的手动名称" || !named.TitleManual {
+		t.Fatal("run completion replaced the name", named, err)
+	}
 	if aResult.Status != "cancelled" {
 		t.Fatal(aResult.Status, aResult.Error)
 	}
@@ -1077,5 +1089,84 @@ func TestDeleteConversationIsScopedAtomicAndDoesNotRecreateAnEmptyHistory(t *tes
 				t.Fatal("deleted last conversation was recreated", out.Body.String())
 			}
 		})
+	}
+}
+
+func TestManualSessionNamesPersistWithoutMessagesAndRemainEditable(t *testing.T) {
+	s := testServer(t)
+	archiveDocument(t, s.Store, "doc", "研究")
+	if _, err := s.Store.DB.Exec("DELETE FROM messages"); err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{"doc", libraryChatOwner} {
+		root := "/api/documents/doc/chat-sessions"
+		sid := id()
+		body := map[string]any{"id": sid, "title": "新会话", "titleManual": true, "provider": "api"}
+		if owner == libraryChatOwner {
+			root = "/api/library/chat-sessions"
+			sid = "library-" + sid
+			body["id"] = sid
+			body["scope"] = libraryChatScope{Category: "研究", CategoryKey: "folder:研究", DocumentIDs: []string{"doc"}}
+		}
+		out := request(t, s, "POST", root, strings.NewReader(jsonText(body)))
+		if out.Code != 201 {
+			t.Fatal(out.Code, out.Body.String())
+		}
+		// A delayed automatic create uses the same identity and must not undo the rename.
+		body["title"], body["titleManual"] = "automatic title", false
+		out = request(t, s, "POST", root, strings.NewReader(jsonText(body)))
+		if out.Code != 201 {
+			t.Fatal(out.Code, out.Body.String())
+		}
+		saved, err := s.Store.chatSession(owner, sid)
+		if err != nil || saved.Title != "新会话" || !saved.TitleManual {
+			t.Fatal(saved, err)
+		}
+		s.chatReservations = map[string]bool{sid: true}
+		out = request(t, s, "PATCH", root+"/"+sid, strings.NewReader(`{"title":"运行中也能改名"}`))
+		delete(s.chatReservations, sid)
+		if out.Code != 200 {
+			t.Fatal(out.Code, out.Body.String())
+		}
+		if history, err := s.Store.chatHistory(owner, sid); err != nil || len(history) != 0 {
+			t.Fatal("renaming fabricated a message", history, err)
+		}
+		reopened, err := OpenStore(s.Store.Root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved, err = reopened.chatSession(owner, sid)
+		reopened.DB.Close()
+		if err != nil || !saved.TitleManual || saved.Title != "运行中也能改名" {
+			t.Fatal("manual name was not retained after reopening", saved, err)
+		}
+		out = request(t, s, "GET", root, nil)
+		var items []ChatSession
+		if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &items) != nil || len(items) != 1 || !items[0].TitleManual {
+			t.Fatal("list lost manual state", out.Body.String())
+		}
+	}
+}
+
+func TestChatSessionTitleMigrationPreservesOldEmptySessions(t *testing.T) {
+	s := testServer(t)
+	archiveDocument(t, s.Store, "doc", "研究")
+	doc := createSessionTest(t, s)
+	library := createLibrarySessionTest(t, s, "doc")
+	for _, table := range []string{"chat_sessions", "library_chat_sessions"} {
+		if _, err := s.Store.DB.Exec("ALTER TABLE " + table + " DROP COLUMN title_manual"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if err := s.Store.migrateChatSessionTitles(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, item := range []ChatSession{doc, library.ChatSession} {
+		saved, err := s.Store.chatSession(item.DocumentID, item.ID)
+		if err != nil || saved.Title != item.Title || saved.TitleManual {
+			t.Fatal("migration changed an old conversation", saved, err)
+		}
 	}
 }

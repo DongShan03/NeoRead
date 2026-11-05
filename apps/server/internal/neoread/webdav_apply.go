@@ -270,7 +270,11 @@ func execSyncRow(ctx context.Context, tx *sql.Tx, name string, schema syncTable,
 		row = copy
 	}
 	for _, column := range schema.columns {
-		value, err := syncSQLValue(row[column])
+		raw, exists := row[column]
+		if !exists && column == "title_manual" && (name == "chat_sessions" || name == "library_chat_sessions") {
+			raw = int64(0)
+		}
+		value, err := syncSQLValue(raw)
 		if err != nil {
 			return err
 		}

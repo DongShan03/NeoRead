@@ -10,13 +10,34 @@ import (
 )
 
 type ChatSession struct {
-	ID         string   `json:"id"`
-	DocumentID string   `json:"documentId"`
-	Title      string   `json:"title"`
-	Provider   string   `json:"provider"`
-	CreatedAt  string   `json:"createdAt"`
-	UpdatedAt  string   `json:"updatedAt"`
-	LatestRun  *ChatRun `json:"latestRun,omitempty"`
+	ID          string   `json:"id"`
+	DocumentID  string   `json:"documentId"`
+	Title       string   `json:"title"`
+	TitleManual bool     `json:"titleManual,omitempty"`
+	Provider    string   `json:"provider"`
+	CreatedAt   string   `json:"createdAt"`
+	UpdatedAt   string   `json:"updatedAt"`
+	LatestRun   *ChatRun `json:"latestRun,omitempty"`
+}
+
+func (s *Store) migrateChatSessionTitles() error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"chat_sessions", "library_chat_sessions"} {
+		var exists bool
+		if err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name='title_manual')", table).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			if _, err = tx.Exec("ALTER TABLE " + table + " ADD COLUMN title_manual INTEGER NOT NULL DEFAULT 0 CHECK(title_manual IN (0,1))"); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 // Migrate in a single transaction. IDs, evidence, reading positions and annotation
@@ -50,7 +71,7 @@ func (s *Store) ensureDefaultChatSession(documentID, provider string) (string, e
 }
 func (s *Store) chatSession(documentID, sessionID string) (ChatSession, error) {
 	var session ChatSession
-	err := s.DB.QueryRow("SELECT id,document_id,title,provider,created_at,updated_at FROM "+chatTable(documentID, "chat_sessions")+" WHERE id=? AND document_id=?", sessionID, documentID).Scan(&session.ID, &session.DocumentID, &session.Title, &session.Provider, &session.CreatedAt, &session.UpdatedAt)
+	err := s.DB.QueryRow("SELECT id,document_id,title,provider,created_at,updated_at,title_manual FROM "+chatTable(documentID, "chat_sessions")+" WHERE id=? AND document_id=?", sessionID, documentID).Scan(&session.ID, &session.DocumentID, &session.Title, &session.Provider, &session.CreatedAt, &session.UpdatedAt, &session.TitleManual)
 	return session, err
 }
 
@@ -101,7 +122,7 @@ func (s *Server) listChatSessions(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "无法迁移会话历史")
 		return
 	}
-	rows, err := s.Store.DB.Query("SELECT id,document_id,title,provider,created_at,updated_at FROM chat_sessions WHERE document_id=? ORDER BY rowid", doc.ID)
+	rows, err := s.Store.DB.Query("SELECT id,document_id,title,provider,created_at,updated_at,title_manual FROM chat_sessions WHERE document_id=? ORDER BY rowid", doc.ID)
 	if err != nil {
 		fail(w, 500, "无法读取会话")
 		return
@@ -109,7 +130,7 @@ func (s *Server) listChatSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := []ChatSession{}
 	for rows.Next() {
 		var v ChatSession
-		if err = rows.Scan(&v.ID, &v.DocumentID, &v.Title, &v.Provider, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err = rows.Scan(&v.ID, &v.DocumentID, &v.Title, &v.Provider, &v.CreatedAt, &v.UpdatedAt, &v.TitleManual); err != nil {
 			break
 		}
 		sessions = append(sessions, v)
@@ -133,9 +154,10 @@ func (s *Server) listChatSessions(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) createChatSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID       string `json:"id"`
-		Title    string `json:"title"`
-		Provider string `json:"provider"`
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		TitleManual bool   `json:"titleManual"`
+		Provider    string `json:"provider"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -167,8 +189,8 @@ func (s *Server) createChatSession(w http.ResponseWriter, r *http.Request) {
 	if req.ID == "" {
 		req.ID = id()
 	}
-	v := ChatSession{ID: req.ID, DocumentID: doc.ID, Title: title, Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}
-	_, err = s.Store.DB.ExecContext(ctx, "INSERT INTO chat_sessions(id,document_id,title,provider,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", v.ID, v.DocumentID, v.Title, v.Provider, v.CreatedAt, v.UpdatedAt)
+	v := ChatSession{ID: req.ID, DocumentID: doc.ID, Title: title, TitleManual: req.TitleManual, Provider: req.Provider, CreatedAt: now(), UpdatedAt: now()}
+	_, err = s.Store.DB.ExecContext(ctx, "INSERT INTO chat_sessions(id,document_id,title,provider,created_at,updated_at,title_manual) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", v.ID, v.DocumentID, v.Title, v.Provider, v.CreatedAt, v.UpdatedAt, v.TitleManual)
 	if err != nil {
 		fail(w, 500, "无法创建会话")
 		return
@@ -202,6 +224,7 @@ func (s *Server) updateChatSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.Title = title
+		v.TitleManual = true
 	}
 	if req.Provider != nil {
 		if !validAgent(*req.Provider) {
@@ -215,7 +238,7 @@ func (s *Server) updateChatSession(w http.ResponseWriter, r *http.Request) {
 		v.Provider = *req.Provider
 	}
 	v.UpdatedAt = now()
-	if _, err = s.Store.DB.Exec("UPDATE chat_sessions SET title=?,provider=?,updated_at=? WHERE id=?", v.Title, v.Provider, v.UpdatedAt, v.ID); err != nil {
+	if _, err = s.Store.DB.Exec("UPDATE chat_sessions SET title=?,title_manual=?,provider=?,updated_at=? WHERE id=?", v.Title, v.TitleManual, v.Provider, v.UpdatedAt, v.ID); err != nil {
 		fail(w, 500, "无法保存会话")
 		return
 	}

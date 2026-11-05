@@ -1200,7 +1200,7 @@ func TestLibraryArchiveOnlineImportKeepsSourceOpenAndMergeSettings(t *testing.T)
 func chatArchiveSnapshot(t *testing.T, store *Store) map[string][]string {
 	t.Helper()
 	queries := map[string]string{
-		"sessions":      "SELECT json_array(id,document_id,title,provider,created_at,updated_at) FROM chat_sessions WHERE document_id='doc' ORDER BY rowid",
+		"sessions":      "SELECT json_array(id,document_id,title,provider,created_at,updated_at,title_manual) FROM chat_sessions WHERE document_id='doc' ORDER BY rowid",
 		"messages":      "SELECT json_array(id,body,created_at) FROM messages WHERE document_id='doc' ORDER BY rowid",
 		"runs":          "SELECT json_array(id,body) FROM chat_runs WHERE session_id IN (SELECT id FROM chat_sessions WHERE document_id='doc') ORDER BY rowid",
 		"evidence":      "SELECT json_array(id,body) FROM chat_agent_runs WHERE document_id='doc' ORDER BY rowid",
@@ -1239,7 +1239,7 @@ func chatArchiveSnapshot(t *testing.T, store *Store) map[string][]string {
 func TestChatSessionsPersistAndMigrateAfterEditsAndWithdrawals(t *testing.T) {
 	s, a, b, _ := chatEditFixture(t)
 	createSessionTest(t, s) // Explicitly retain an empty session; listing no longer creates one.
-	if _, err := s.Store.DB.Exec("UPDATE chat_sessions SET title=CASE id WHEN ? THEN '公式讨论' WHEN ? THEN '方法讨论' ELSE title END,provider=CASE id WHEN ? THEN 'codex' ELSE provider END", a.ID, b.ID, b.ID); err != nil {
+	if _, err := s.Store.DB.Exec("UPDATE chat_sessions SET title=CASE id WHEN ? THEN '公式讨论' WHEN ? THEN '方法讨论' ELSE title END,provider=CASE id WHEN ? THEN 'codex' ELSE provider END,title_manual=(id=?)", a.ID, b.ID, b.ID, a.ID); err != nil {
 		t.Fatal(err)
 	}
 	// The retained second session has a completed run, tool use, web sources and
@@ -1300,7 +1300,7 @@ func TestChatSessionsPersistAndMigrateAfterEditsAndWithdrawals(t *testing.T) {
 				current := archiveFixture(t, filepath.Join(parent, "existing"))
 				archiveDocument(t, current, "existing", "旧分类")
 				archiveDocument(t, current, "doc", "旧文档版本")
-				if _, err := current.DB.Exec("INSERT INTO chat_sessions VALUES('obsolete-session','doc','被替换的旧会话','api','old','old')"); err != nil {
+				if _, err := current.DB.Exec("INSERT INTO chat_sessions(id,document_id,title,provider,created_at,updated_at) VALUES('obsolete-session','doc','被替换的旧会话','api','old','old')"); err != nil {
 					t.Fatal(err)
 				}
 				current.DB.Close()

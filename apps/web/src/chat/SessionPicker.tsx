@@ -23,6 +23,8 @@ import {
   chatSessionBusy,
   chatSessionHasStarted,
   chatSessionRecordId,
+  getChatSession,
+  renameChatSession,
   forgetChatSession,
   isDraftSession,
 } from "./session-registry";
@@ -66,17 +68,24 @@ export function SessionPicker({
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState<DocumentChatSession>();
-  const selection = `${documentId}:${current?.id ?? ""}`;
+  const viewId = current
+    ? (getChatSession(documentId, current.id).viewId ?? current.id)
+    : "";
+  const selection = `${documentId}:${viewId}`;
   const activeSelection = useRef(selection);
   activeSelection.current = selection;
   useEffect(() => {
     setRenaming(false);
     setSaving(false);
-  }, [current?.id]);
+  }, [selection]);
   const create = async () => {
     setSaving(true);
     try {
-      if (current && !(await chatSessionHasStarted(documentId, current.id)))
+      if (
+        current &&
+        !current.titleManual &&
+        !(await chatSessionHasStarted(documentId, current.id))
+      )
         return;
       if (activeSelection.current !== selection) return;
       await onCreate();
@@ -113,7 +122,7 @@ export function SessionPicker({
     if (!current) return;
     setSaving(true);
     try {
-      await api.updateChatSession(documentId, current.id, { title });
+      await renameChatSession(documentId, current.id, title);
       await onRefresh();
       setRenaming(false);
     } catch (error) {
@@ -187,7 +196,7 @@ export function SessionPicker({
           size="icon-xs"
           className="bg-background dark:hover:bg-muted disabled:text-muted-foreground disabled:opacity-100"
           aria-label="重命名会话"
-          disabled={!current || isDraftSession(current.id) || saving}
+          disabled={!current || saving}
           onClick={() => {
             setName(current?.title ?? "");
             setRenaming(true);

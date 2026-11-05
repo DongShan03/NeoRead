@@ -12,6 +12,7 @@ import {
   chatSessionRecordId,
   chatSessionHasStarted,
   recoverCreatedChatDrafts,
+  renameChatSession,
 } from "./session-registry";
 vi.mock("../store", () => ({ refreshAIConfig: vi.fn(async () => {}) }));
 vi.mock("@neoread/api", () => ({
@@ -22,6 +23,7 @@ vi.mock("@neoread/api", () => ({
     sessionMessages: vi.fn(),
     startChatRun: vi.fn(),
     cancelChatRun: vi.fn(),
+    updateChatSession: vi.fn(),
   },
   watchChatRun: vi.fn(),
 }));
@@ -36,11 +38,23 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", clearTimeout);
   vi.mocked(api.chatSessions).mockResolvedValue([]);
   vi.mocked(api.sessionMessages).mockImplementation(async () => history);
+  vi.mocked(api.updateChatSession).mockImplementation(
+    async (owner, id, patch) => ({
+      id,
+      documentId: owner,
+      title: patch.title!.trim(),
+      titleManual: true,
+      provider: "api",
+      createdAt: "now",
+      updatedAt: "now",
+    }),
+  );
   vi.mocked(api.createChatSession).mockImplementation(
     async (owner, provider, options) => ({
       id: options!.id!,
       documentId: owner,
-      title: options!.title!,
+      title: options!.title!.trim(),
+      titleManual: options?.titleManual,
       provider,
       createdAt: "now",
       updatedAt: "now",
@@ -50,7 +64,8 @@ beforeEach(() => {
     async (provider, scope, options) => ({
       id: options!.id!,
       documentId: "library",
-      title: options!.title!,
+      title: options!.title!.trim(),
+      titleManual: options?.titleManual,
       provider,
       scope,
       createdAt: "now",
@@ -261,3 +276,91 @@ it.each([false, true])(
     cleanup.push({ owner, id: session.sessionId! });
   },
 );
+
+it.each([false, true])(
+  "keeps a manually named empty conversation and uses it on first send: library=%s",
+  async (library) => {
+    const owner = library ? "library" : "doc-" + crypto.randomUUID();
+    const draft = library
+      ? createLibraryChatDraft("api", {
+          category: "研究",
+          categoryKey: "folder:研究",
+          documentIds: ["alpha"],
+        })
+      : createChatDraft(owner, "api");
+    cleanup.push({ owner, id: draft.id });
+    const store = getChatSession(owner, draft.id);
+    await store.load();
+    if (library)
+      vi.mocked(api.createLibraryChatSession).mockImplementationOnce(
+        async (provider, scope, options) => ({
+          id: options!.id!,
+          documentId: owner,
+          provider,
+          scope,
+          title: "first send already created this record",
+          titleManual: false,
+          createdAt: "now",
+          updatedAt: "now",
+        }),
+      );
+    const saved = await renameChatSession(owner, draft.id, " 手动综述 ");
+    cleanup.push({ owner, id: saved.id });
+    expect(saved.title).toBe("手动综述");
+    expect(saved.titleManual).toBe(true);
+    expect(listChatDrafts(owner)).toHaveLength(0);
+    expect(getChatSession(owner, saved.id)).toBe(store);
+    expect(store.getSnapshot().messages).toHaveLength(0);
+    await store.send(input);
+    expect(
+      library ? api.createLibraryChatSession : api.createChatSession,
+    ).toHaveBeenCalledTimes(1);
+    if (library) {
+      expect(api.updateChatSession).toHaveBeenCalledWith(owner, saved.id, {
+        title: " 手动综述 ",
+      });
+      expect(saved).toHaveProperty(
+        "scope",
+        expect.objectContaining({ documentIds: ["alpha"] }),
+      );
+    } else expect(api.updateChatSession).not.toHaveBeenCalled();
+    expect(api.startChatRun).toHaveBeenCalledWith(
+      owner,
+      saved.id,
+      expect.any(Object),
+    );
+  },
+);
+
+it("keeps a rename when the first-send creation response arrives afterward", async () => {
+  const owner = "doc-" + crypto.randomUUID(),
+    draft = createChatDraft(owner, "api");
+  cleanup.push({ owner, id: draft.id });
+  const store = getChatSession(owner, draft.id);
+  await store.load();
+  let ready!: (item: any) => void;
+  vi.mocked(api.createChatSession).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        ready = resolve;
+      }),
+  );
+  const sent = store.send(input);
+  await Promise.resolve();
+  const created = vi.fn();
+  window.addEventListener(chatCreatedEvent, created);
+  try {
+    const saved = await renameChatSession(owner, draft.id, "新会话");
+    cleanup.push({ owner, id: saved.id });
+    ready({ ...saved, title: "automatic name", titleManual: false });
+    await sent;
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(
+      (created.mock.calls[0][0] as CustomEvent).detail.session,
+    ).toMatchObject({ title: "新会话", titleManual: true });
+    expect(getChatSession(owner, saved.id)).toBe(store);
+    expect(api.startChatRun).toHaveBeenCalledTimes(1);
+  } finally {
+    window.removeEventListener(chatCreatedEvent, created);
+  }
+});

@@ -72,6 +72,37 @@ export function chatSessionRecordId(documentId: string, id: string) {
     ? savedDraftId(documentId, id)
     : undefined;
 }
+/** A manual name is an explicit request to keep the conversation, even if empty. */
+export async function renameChatSession(
+  documentId: string,
+  id: string,
+  title: string,
+) {
+  const key = documentId + ":" + id;
+  const draft = drafts.get(key);
+  if (!draft) {
+    const resolved = sessions.get(key)?.sessionId ?? id;
+    if (isDraftSession(resolved)) throw new Error("会话已关闭，请重新选择");
+    return api.updateChatSession(documentId, resolved, { title });
+  }
+  const options = {
+    id: savedDraftId(documentId, id),
+    title,
+    titleManual: true,
+  };
+  let saved: DocumentChatSession | LibraryChatSession =
+    documentId === "library" && "scope" in draft
+      ? await api.createLibraryChatSession(draft.provider, draft.scope, options)
+      : await api.createChatSession(documentId, draft.provider, options);
+  // The first send may have inserted the same stable ID before this request.
+  if (!saved.titleManual || saved.title !== title.trim())
+    saved = {
+      ...saved,
+      ...(await api.updateChatSession(documentId, saved.id, { title })),
+    };
+  saveChatDraft(documentId, id, saved);
+  return saved;
+}
 function saveChatDraft(
   documentId: string,
   draftId: string,

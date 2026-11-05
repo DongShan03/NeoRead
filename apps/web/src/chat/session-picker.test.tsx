@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   forget: vi.fn(),
   busy: vi.fn(() => false),
   started: vi.fn(async () => true),
+  rename: vi.fn(async () => {}),
 }));
 vi.mock("@neoread/api", () => ({
   api: {
@@ -23,6 +24,8 @@ vi.mock("@neoread/api", () => ({
 vi.mock("./session-registry", () => ({
   chatSessionBusy: mocks.busy,
   chatSessionHasStarted: mocks.started,
+  getChatSession: (_owner: string, id: string) => ({ viewId: id }),
+  renameChatSession: mocks.rename,
   chatSessionRecordId: (_owner: string, id: string) =>
     id.startsWith("draft-") ? undefined : id,
   forgetChatSession: mocks.forget,
@@ -307,3 +310,58 @@ it("does not create a conversation in a category or document that was left while
   await act(async () => currentReady(true));
   expect(onCreate).toHaveBeenCalledTimes(1);
 });
+
+it.each(["doc", "library"])(
+  "allows renaming an empty draft and creating another conversation after it is named: %s",
+  async (documentId) => {
+    const current: DocumentChatSession = {
+      id: "draft-rename",
+      documentId,
+      title: "默认会话",
+      provider: "api",
+      createdAt: "now",
+      updatedAt: "now",
+    };
+    const onCreate = vi.fn(async () => {}),
+      onRefresh = vi.fn(async () => {});
+    const render = (item: DocumentChatSession) =>
+      act(async () =>
+        root.render(
+          <SessionPicker
+            documentId={documentId}
+            sessions={[item]}
+            current={item}
+            onCreate={onCreate}
+            onDeleted={() => {}}
+            onChange={() => {}}
+            onRefresh={onRefresh}
+          />,
+        ),
+      );
+    await render(current);
+    const rename = host.querySelector<HTMLButtonElement>(
+      '[aria-label="重命名会话"]',
+    )!;
+    expect(rename.disabled).toBe(false);
+    await act(async () => rename.click());
+    await act(async () =>
+      document
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(mocks.rename).toHaveBeenCalledWith(
+      documentId,
+      current.id,
+      "默认会话",
+    );
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    mocks.started.mockResolvedValue(false);
+    await render({ ...current, id: "saved-renamed", titleManual: true });
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[aria-label="新建会话"]')!.click(),
+    );
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  },
+);

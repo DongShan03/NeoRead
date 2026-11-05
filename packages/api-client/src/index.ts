@@ -789,7 +789,7 @@ export const api = {
   createLibraryChatSession: (
     provider: string,
     scope: LibraryChatScope,
-    options?: { id?: string; title?: string },
+    options?: { id?: string; title?: string; titleManual?: boolean },
   ) =>
     request<LibraryChatSession>("/api/library/chat-sessions", {
       method: "POST",
@@ -806,7 +806,7 @@ export const api = {
   createChatSession: (
     id: string,
     provider: string,
-    options?: { id?: string; title?: string },
+    options?: { id?: string; title?: string; titleManual?: boolean },
   ) =>
     request<DocumentChatSession>(chatSessionRoot(id), {
       method: "POST",

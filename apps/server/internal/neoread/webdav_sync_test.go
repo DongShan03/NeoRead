@@ -1257,7 +1257,7 @@ func TestWebDAVReplacedTranscriptClearsOnlyItsProviderContinuations(t *testing.T
 	a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
 	syncDocumentFixture(t, a.Store, "paper", "分类")
 	for _, session := range []string{"first", "second"} {
-		if _, err := a.Store.DB.Exec(`INSERT INTO chat_sessions VALUES(?,'paper',?,'codex','now','now')`, session, session); err != nil {
+		if _, err := a.Store.DB.Exec(`INSERT INTO chat_sessions(id,document_id,title,provider,created_at,updated_at) VALUES(?,'paper',?,'codex','now','now')`, session, session); err != nil {
 			t.Fatal(err)
 		}
 		m := Message{ID: session, SessionID: session, DocumentID: "paper", Role: "assistant", Content: "saved answer", CreatedAt: "now"}
@@ -1939,6 +1939,9 @@ func TestWebDAVSyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T) {
 		syncDocumentFixture(t, a.Store, owner, "研究")
 	}
 	item := createLibrarySessionTest(t, a, "alpha", "beta")
+	if out := request(t, a, "PATCH", "/api/library/chat-sessions/"+item.ID, strings.NewReader(`{"title":"手动综述"}`)); out.Code != 200 {
+		t.Fatal(out.Body.String())
+	}
 	for _, message := range []Message{{ID: id(), DocumentID: libraryChatOwner, SessionID: item.ID, Role: "user", Content: "compare"}, {ID: id(), DocumentID: libraryChatOwner, SessionID: item.ID, Role: "assistant", Content: "saved review"}} {
 		if err := a.Store.saveMessage(message); err != nil {
 			t.Fatal(err)
@@ -1951,6 +1954,9 @@ func TestWebDAVSyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T) {
 	runSync(t, a)
 	runSync(t, b)
 	items, err := b.Store.chatHistory(libraryChatOwner, item.ID)
+	if named, err := b.Store.chatSession(libraryChatOwner, item.ID); err != nil || !named.TitleManual || named.Title != "手动综述" {
+		t.Fatal("manual name did not sync", named, err)
+	}
 	if err != nil || len(items) != 2 || items[1].Content != "saved review" {
 		t.Fatal("library transcript did not arrive", items, err)
 	}
@@ -2170,4 +2176,36 @@ func TestWebDAVCompressedMetadataChecksLimitsAndIntegrity(t *testing.T) {
 	if _, err = unpackSyncMetadata(packed, int64(len(body))); err == nil {
 		t.Fatal("damaged gzip accepted")
 	}
+}
+
+func TestWebDAVReceivesOldChatRowsWithoutManualTitleState(t *testing.T) {
+	remote, _ := testDAV(t)
+	a, b := syncFixture(t, remote, "Old Mac"), syncFixture(t, remote, "New Mac")
+	a.Token = "test-secret"
+	syncDocumentFixture(t, a.Store, "paper", "研究")
+	out := request(t, a, "POST", "/api/documents/paper/chat-sessions", strings.NewReader(`{"title":"旧对话","provider":"api"}`))
+	var paper ChatSession
+	if out.Code != 201 || json.Unmarshal(out.Body.Bytes(), &paper) != nil {
+		t.Fatal(out.Body.String())
+	}
+	library := createLibrarySessionTest(t, a, "paper")
+	// Model a cloud snapshot written by the version before title provenance existed.
+	for _, table := range []string{"chat_sessions", "library_chat_sessions"} {
+		if _, err := a.Store.DB.Exec("ALTER TABLE " + table + " DROP COLUMN title_manual"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runSync(t, a)
+	runSync(t, b)
+	for _, item := range []ChatSession{paper, library.ChatSession} {
+		received, err := b.Store.chatSession(item.DocumentID, item.ID)
+		if err != nil || received.Title != item.Title || received.TitleManual {
+			t.Fatal("old cloud conversation could not be read", received, err)
+		}
+	}
+	if err := a.Store.migrateChatSessionTitles(); err != nil {
+		t.Fatal(err)
+	}
+	runSync(t, a)
+	runSync(t, b)
 }

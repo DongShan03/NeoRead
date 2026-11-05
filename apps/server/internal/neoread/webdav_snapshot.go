@@ -535,15 +535,26 @@ func validateSyncDocument(key string, doc *syncDocument, schema map[string]syncT
 				return errors.New("云端同步包含不支持的记录类型")
 			}
 			for _, row := range rows {
-				if len(row) != len(table.columns) {
+				_, hasTitleManual := row["title_manual"]
+				legacyTitle := (name == "chat_sessions" || name == "library_chat_sessions") && !hasTitleManual
+				if len(row) != len(table.columns) && !(legacyTitle && len(row)+1 == len(table.columns)) {
 					return errors.New("云端同步记录版本不兼容")
 				}
 				for _, column := range table.columns {
+					if legacyTitle && column == "title_manual" {
+						continue
+					}
 					if _, ok := row[column]; !ok {
 						return errors.New("云端同步字段不完整")
 					}
 					if _, err := syncSQLValue(row[column]); err != nil {
 						return err
+					}
+				}
+				if (name == "chat_sessions" || name == "library_chat_sessions") && hasTitleManual {
+					value, _ := syncSQLValue(row["title_manual"])
+					if value != int64(0) && value != int64(1) && value != float64(0) && value != float64(1) {
+						return errors.New("云端会话命名状态无效")
 					}
 				}
 				jsonColumns := []string{}

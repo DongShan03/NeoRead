@@ -55,6 +55,7 @@ export interface paths {
                     "application/json": {
                         id?: string;
                         title?: string;
+                        titleManual?: boolean;
                         /** @enum {unknown} */
                         provider: "api" | "codex" | "claude" | "kimi";
                         scope: components["schemas"]["LibraryChatScope"];
@@ -5838,6 +5839,7 @@ export interface paths {
                     "application/json": {
                         id?: string;
                         title?: string;
+                        titleManual?: boolean;
                         /** @enum {unknown} */
                         provider: "api" | "codex" | "claude" | "kimi";
                     };
@@ -7136,6 +7138,7 @@ export interface components {
             id: string;
             documentId: string;
             title: string;
+            titleManual?: boolean;
             provider: string;
             createdAt: string;
             updatedAt: string;
