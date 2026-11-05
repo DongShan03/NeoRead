@@ -762,7 +762,7 @@ app
         app.getPath("userData"),
         appearance ?? "system",
         typeof preferences === "object" && preferences !== null && "reducedMotion" in preferences
-          ? preferences.reducedMotion === true : false,
+          ? preferences.reducedMotion === true : undefined,
       ).catch(
         (error) =>
           diagnostics?.record("startup.appearance_cache_failed", error),

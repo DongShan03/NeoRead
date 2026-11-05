@@ -1463,3 +1463,9 @@ it("passes only the motion hint through the existing appearance cache path", asy
   handlers.get("neoread:appearance")!(event(), "light", {});
   expect(save).toHaveBeenLastCalledWith("/userdata", "light", undefined);
 });
+
+it("recovery: preserves cached motion when recovery settings omit the preference", async () => {
+  const { saveStartupAppearance } = await import("./startup-appearance-cache");
+  expect(recoveryStart).toHaveBeenCalledOnce();
+  expect(saveStartupAppearance).toHaveBeenCalledWith("/userdata", "system", undefined);
+});
