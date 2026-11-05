@@ -70,6 +70,16 @@ vi.mock("../chat/MessageMarkdown", () => ({
           >
             {content}
           </a>
+        ) : content === "见附录 C.1" ? (
+          <a
+            href="#appendix"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate?.(citationBlockId!, "appendix:C.1");
+            }}
+          >
+            {content}
+          </a>
         ) : (
           content
         )}
@@ -1208,6 +1218,30 @@ it("focuses the image from a translated figure reference even with sync disabled
   );
   expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
     "figure-3",
+    "parallel",
+  );
+  expect(adapter.goTo).not.toHaveBeenCalled();
+});
+
+it("focuses an appendix heading from the translation even with synchronized scrolling disabled", async () => {
+  fixture.translations[0].sentences[0].target = "见附录 C.1";
+  await renderView(defaultTheme, [
+    {
+      id: "appendix-c1",
+      page: 9,
+      label: "paragraph_title",
+      text: "C.1 Additional results",
+      bounds: { x: 0.1, y: 0.2, width: 0.8, height: 0.04 },
+    },
+  ]);
+  await click("原文译文");
+  await click("取消同步效果");
+  vi.mocked(adapter.focusBlock!).mockClear();
+  await act(async () =>
+    host.querySelector<HTMLAnchorElement>('a[href="#appendix"]')!.click(),
+  );
+  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
+    "appendix-c1",
     "parallel",
   );
   expect(adapter.goTo).not.toHaveBeenCalled();

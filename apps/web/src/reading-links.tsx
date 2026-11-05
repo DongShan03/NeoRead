@@ -1,3 +1,4 @@
+import { appendixReferences } from "./readers/appendix-references";
 import { figureReferences } from "./readers/figure-references";
 import { createContext } from "react";
 import { toast } from "sonner";
@@ -41,18 +42,21 @@ export function remarkReadingCitations({ blockId }: { blockId?: string }) {
   };
 }
 function readingParts(value: string, blockId: string) {
-  const figures = figureReferences(value);
-  if (!figures.length) return citationParts(value, blockId);
+  const references = [
+    ...figureReferences(value).map((ref) => ({ ...ref, kind: "figure" })),
+    ...appendixReferences(value).map((ref) => ({ ...ref, kind: "appendix" })),
+  ].sort((a, b) => a.index - b.index);
+  if (!references.length) return citationParts(value, blockId);
   const parts: PhrasingContent[] = [];
   let start = 0;
-  for (const figure of figures) {
-    const before = value.slice(start, figure.index);
+  for (const reference of references) {
+    const before = value.slice(start, reference.index);
     parts.push(...(citationParts(before, blockId) ?? [text(before)]), {
       type: "link",
-      url: citationHref(blockId, `figure:${figure.label}`),
-      children: [text(figure.text)],
+      url: citationHref(blockId, `${reference.kind}:${reference.label}`),
+      children: [text(reference.text)],
     });
-    start = figure.index + figure.text.length;
+    start = reference.index + reference.text.length;
   }
   const after = value.slice(start);
   parts.push(...(citationParts(after, blockId) ?? [text(after)]));

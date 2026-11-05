@@ -209,3 +209,50 @@ it("renders bracketed figure references as one keyboard-accessible link", async 
     await act(async () => root.unmount());
   }
 });
+
+it("keeps appendix links separate from figures, bibliography, code and existing links", () => {
+  const math = { type: "inlineMath", value: "Appendix C.1" };
+  const tree = run(
+    paragraph(
+      { type: "text", value: "见附录 C.1 和 Appendix B.2，图三及 [4]。" },
+      math,
+      { type: "inlineCode", value: "Appendix A" },
+      {
+        type: "link",
+        url: "https://example.com",
+        children: [{ type: "text", value: "Appendix D" }],
+      },
+    ),
+  );
+  expect(citations(tree)).toEqual([
+    "appendix:C.1",
+    "appendix:B.2",
+    "figure:3",
+    "4",
+  ]);
+  expect(math.value).toBe("Appendix C.1");
+});
+it("routes a translated appendix reference through the existing reading navigation", async () => {
+  const navigate = vi.fn();
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <ReadingLinkNavigation.Provider value={navigate}>
+          <MessageMarkdown
+            content="更多结果见附录 C.1。"
+            citationBlockId="body"
+          />
+        </ReadingLinkNavigation.Provider>,
+      ),
+    );
+    const link = host.querySelector<HTMLAnchorElement>(
+      'a[href^="#neoread-citation?"]',
+    )!;
+    expect(link.textContent).toBe("附录 C.1");
+    link.click();
+    expect(navigate).toHaveBeenCalledWith("body", "appendix:C.1");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});

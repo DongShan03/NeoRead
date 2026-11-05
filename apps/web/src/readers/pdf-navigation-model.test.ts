@@ -5,6 +5,7 @@ import {
   type Annotation,
   type TOCItem,
 } from "@neoread/core";
+import { appendixReferences, appendixTarget } from "./appendix-references";
 import { figureReferences, figureTarget } from "./figure-references";
 import { type PDFDocumentProxy } from "pdfjs-dist";
 import { numberedReference, resolvePDFCitation } from "./pdf-citations";
@@ -93,6 +94,71 @@ describe("figure-references", () => {
     expect(
       figureTarget([target, { ...target, id: "duplicate" }], "s1"),
     ).toBeUndefined();
+  });
+});
+
+describe("appendix references", () => {
+  const heading = (id: string, text: string): PDFBlock => ({
+    id,
+    text,
+    label: "paragraph_title",
+    page: 9,
+    bounds: { x: 0.1, y: 0.2, width: 0.8, height: 0.04 },
+  });
+  it("recognizes complete English and Chinese appendix identifiers without consuming following punctuation", () => {
+    const text =
+      "See Appendix C.1, App. A.2.3, 附录 C.1、附錄 Ｂ．２，以及 Appendix C。";
+    const refs = appendixReferences(text);
+    expect(refs.map((ref) => ref.label)).toEqual([
+      "C.1",
+      "A.2.3",
+      "C.1",
+      "B.2",
+      "C",
+    ]);
+    for (const ref of refs)
+      expect(text.slice(ref.index, ref.index + ref.text.length)).toBe(ref.text);
+    expect(
+      appendixReferences(
+        "Application C.1, Appendix Coordinate, Appendix C.1word, myAppendix C.1",
+      ),
+    ).toEqual([]);
+  });
+  it("finds only unique, exactly numbered appendix headings", () => {
+    const target = heading("target", "C.1. Additional experiments");
+    const body = {
+      ...heading("mention", "Appendix C.1 provides details."),
+      label: "text",
+    };
+    const blocks = [
+      body,
+      heading("other", "C.10 Other experiments"),
+      heading("child", "C.1.1 More details"),
+      target,
+    ];
+    expect(appendixTarget(blocks, "c.1")).toBe(target);
+    expect(appendixTarget(blocks, "C")).toBeUndefined();
+    expect(appendixTarget([body], "C.1")).toBeUndefined();
+    expect(
+      appendixTarget([heading("invalid", "C.1.2word")], "C.1"),
+    ).toBeUndefined();
+    expect(
+      appendixTarget(
+        [...blocks, { ...target, id: "duplicate", page: 10 }],
+        "C.1",
+      ),
+    ).toBeUndefined();
+  });
+  it.each([
+    "Appendix C.1 Additional experiments",
+    "附录 C.1 实验细节",
+    "C . 1\nAdditional experiments",
+    "C.1：实验细节",
+    "C.1",
+    "## Ｃ．１ 更多结果",
+  ])("accepts appendix heading styles: %s", (text) => {
+    const target = heading("target", text);
+    expect(appendixTarget([target], "C.1")).toBe(target);
   });
 });
 

@@ -148,3 +148,43 @@ it("preserves unrelated internal links and external links", () => {
   expect(focus).not.toHaveBeenCalled();
   links.destroy();
 });
+
+it("links appendix references across native spans and preserves their exact heading target", () => {
+  const host = document.createElement("div");
+  host.innerHTML =
+    '<div class="page"><div class="textLayer"><span style="transform: scaleX(0.8)">See Appendix</span><span>C.</span><span>1 and 附录 C.10</span></div><div class="annotationLayer"><a class="internalLink" href="#native"> </a></div></div>';
+  document.body.append(host);
+  const heading: PDFBlock = {
+    ...image,
+    id: "appendix-c1",
+    label: "paragraph_title",
+    text: "C.1 Additional results",
+    caption: undefined,
+    page: 9,
+  };
+  const focus = vi.fn();
+  const links = new PDFFigureLinks(host, () => [heading], focus);
+  const text = host.textContent;
+  links.repaint();
+  links.repaint();
+  expect(host.textContent).toBe(text);
+  expect(host.querySelector("span")!.style.transform).toBe("scaleX(0.8)");
+  const anchors = host.querySelectorAll<HTMLAnchorElement>(
+    "a[data-appendix-reference]",
+  );
+  expect(anchors).toHaveLength(3);
+  anchors[0].click();
+  expect(focus).toHaveBeenLastCalledWith(heading);
+  for (const anchor of anchors)
+    anchor.getClientRects = () =>
+      [new DOMRect(10, 20, 40, 15)] as unknown as DOMRectList;
+  const native = host.querySelector<HTMLAnchorElement>(".annotationLayer a")!;
+  native.getClientRects = () =>
+    [new DOMRect(5, 15, 50, 25)] as unknown as DOMRectList;
+  const original = vi.fn((event: Event) => event.preventDefault());
+  native.addEventListener("click", original);
+  native.click();
+  expect(original).not.toHaveBeenCalled();
+  expect(focus).toHaveBeenCalledTimes(2);
+  links.destroy();
+});

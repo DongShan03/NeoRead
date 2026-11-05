@@ -1,19 +1,34 @@
+import { appendixReferences, appendixTarget } from "./appendix-references";
 import type { PDFBlock } from "@neoread/core";
 import { figureReferences, figureTarget } from "./figure-references";
+
+const referenceSelector =
+  "a[data-figure-reference], a[data-appendix-reference]";
+type ReferenceKind = "figure" | "appendix";
+const identity = (link: HTMLAnchorElement) =>
+  link.dataset.appendixReference !== undefined
+    ? "appendix:" + link.dataset.appendixReference
+    : "figure:" + link.dataset.figureReference;
 
 /** Keep PDF.js spans and their transforms intact; only wrap text inside them. */
 export class PDFFigureLinks {
   private targetBlocks?: PDFBlock[];
   private targets = new Map<string, PDFBlock | undefined>();
-  private target(label: string) {
+  private target(label: string, kind: ReferenceKind = "figure") {
     const blocks = this.blocks();
     if (blocks !== this.targetBlocks) {
       this.targetBlocks = blocks;
       this.targets.clear();
     }
-    if (!this.targets.has(label))
-      this.targets.set(label, figureTarget(blocks, label));
-    return this.targets.get(label);
+    const key = kind + ":" + label;
+    if (!this.targets.has(key))
+      this.targets.set(
+        key,
+        kind === "appendix"
+          ? appendixTarget(blocks, label)
+          : figureTarget(blocks, label),
+      );
+    return this.targets.get(key);
   }
   constructor(
     private host: HTMLElement,
@@ -33,9 +48,7 @@ export class PDFFigureLinks {
       return;
     if (this.host.ownerDocument.getSelection()?.toString()) return;
     const element = event.target instanceof Element ? event.target : null;
-    let anchor = element?.closest<HTMLAnchorElement>(
-      "a[data-figure-reference]",
-    );
+    let anchor = element?.closest<HTMLAnchorElement>(referenceSelector);
     // PDF annotations sit above the text layer. Match the whole native link
     // rectangle, so padding clicks and keyboard activation also replace PDF.js.
     const native = element?.closest<HTMLAnchorElement>(
@@ -46,8 +59,7 @@ export class PDFFigureLinks {
       const candidates = Array.from(
         native
           .closest(".page")
-          ?.querySelectorAll<HTMLAnchorElement>("a[data-figure-reference]") ??
-          [],
+          ?.querySelectorAll<HTMLAnchorElement>(referenceSelector) ?? [],
       ).filter((link) =>
         Array.from(link.getClientRects()).some((r) =>
           nativeRects.some(
@@ -58,14 +70,17 @@ export class PDFFigureLinks {
         ),
       );
       // A large annotation can span multiple references; don't guess its target.
-      if (
-        new Set(candidates.map((link) => link.dataset.figureReference)).size ===
-        1
-      )
-        anchor = candidates[0];
+      if (new Set(candidates.map(identity)).size === 1) anchor = candidates[0];
     }
     if (!anchor) return;
-    const block = this.target(anchor.dataset.figureReference!);
+    const kind =
+      anchor.dataset.appendixReference !== undefined ? "appendix" : "figure";
+    const block = this.target(
+      kind === "appendix"
+        ? anchor.dataset.appendixReference!
+        : anchor.dataset.figureReference!,
+      kind,
+    );
     if (!block) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -77,7 +92,7 @@ export class PDFFigureLinks {
         ? ".textLayer"
         : `.page[data-page-number="${pageNumber}"] .textLayer`,
     )) {
-      for (const link of layer.querySelectorAll("a[data-figure-reference]")) {
+      for (const link of layer.querySelectorAll(referenceSelector)) {
         const parent = link.parentNode!;
         link.replaceWith(...link.childNodes);
         parent.normalize();
@@ -96,8 +111,18 @@ export class PDFFigureLinks {
         text += node.data + " ";
       }
       // Reverse order keeps the offsets of earlier references stable.
-      for (const reference of figureReferences(text).reverse()) {
-        if (!this.target(reference.label)) continue;
+      const references = [
+        ...figureReferences(text).map((ref) => ({
+          ...ref,
+          kind: "figure" as const,
+        })),
+        ...appendixReferences(text).map((ref) => ({
+          ...ref,
+          kind: "appendix" as const,
+        })),
+      ].sort((a, b) => b.index - a.index);
+      for (const reference of references) {
+        if (!this.target(reference.label, reference.kind)) continue;
         const end = reference.index + reference.text.length;
         for (const entry of nodes) {
           const startOffset = Math.max(0, reference.index - entry.start);
@@ -107,8 +132,10 @@ export class PDFFigureLinks {
           range.setStart(entry.node, startOffset);
           range.setEnd(entry.node, endOffset);
           const link = document.createElement("a");
-          link.href = `#neoread-figure-${reference.label}`;
-          link.dataset.figureReference = reference.label;
+          link.href = `#neoread-${reference.kind}-${reference.label}`;
+          if (reference.kind === "appendix")
+            link.dataset.appendixReference = reference.label;
+          else link.dataset.figureReference = reference.label;
           link.setAttribute("aria-label", `跳转到 ${reference.text}`);
           // The canvas supplies visible glyphs. Preserve the invisible text
           // layer, but retain the browser's keyboard focus outline.

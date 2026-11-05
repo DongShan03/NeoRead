@@ -1,4 +1,5 @@
 import { useTranslationRendering } from "./useTranslationRendering";
+import { appendixTarget } from "../readers/appendix-references";
 import { figureTarget } from "../readers/figure-references";
 import { readerLayout, updateReaderLayout } from "../neoread-layout";
 import {
@@ -587,13 +588,17 @@ export function PDFReadingView({
   const outline = useRef<TOCItem[]>([]);
   const actions = useRef({ go, focus });
   actions.current = { go, focus };
+  const referenceBlock = (label: string) =>
+    label.startsWith("appendix:")
+      ? appendixTarget(blocks, label.slice(9))
+      : figureTarget(blocks, label.slice(7));
   useEffect(() => {
     if (!root.current || !engine) return;
     return installCitationHover(
       root.current,
       async (blockId, label) => {
-        if (label.startsWith("figure:")) {
-          const block = figureTarget(blocks, label.slice(7));
+        if (label.startsWith("figure:") || label.startsWith("appendix:")) {
+          const block = referenceBlock(label);
           return block
             ? {
                 type: "pdf" as const,
@@ -616,9 +621,14 @@ export function PDFReadingView({
   }, [engine, blocks, mode]);
   const visitCitation = async (blockId: string, label: string) => {
     try {
-      if (label.startsWith("figure:")) {
-        const block = figureTarget(blocks, label.slice(7));
-        if (!block) throw new Error(`未找到图 ${label.slice(7)} 的图片位置`);
+      if (label.startsWith("figure:") || label.startsWith("appendix:")) {
+        const block = referenceBlock(label);
+        if (!block)
+          throw new Error(
+            label.startsWith("appendix:")
+              ? `未找到附录 ${label.slice(9)} 的跳转位置`
+              : `未找到图 ${label.slice(7)} 的图片位置`,
+          );
         if (facade.current) events.internalLink?.(facade.current.getLocation());
         focusBlock(block, "translation");
         return;
