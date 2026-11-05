@@ -191,6 +191,9 @@ func (a configuredCLIAdapter) Stream(ctx context.Context, req GenerateRequest, e
 }
 
 func (a cliAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && (a.provider == "claude" || a.provider == "kimi") {
+		return streamCLIDocumentChat(ctx, a, req.Input, emit)
+	}
 	child, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var emitErr error

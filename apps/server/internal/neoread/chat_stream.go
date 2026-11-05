@@ -146,22 +146,8 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		in.Chat.Agent = &documentAgent{chat: in.Chat, sessionID: in.Chat.SessionID, codexCache: documentCache, server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool, message string) error {
 			return out.send("activity", map[string]string{"phase": phase, "tool": tool, "message": message})
 		}}
-		if config.Primary != "codex" && config.Primary != "api" {
-			agent := in.Chat.Agent
-			agent.resetAttempt(config.Primary)
-			if err = agent.prepareReading(ctx, in); err == nil {
-				err = agent.preRetrieve(ctx, in.Chat.Question)
-			}
-			if err != nil {
-				finalErr = err
-				_ = out.send("error", map[string]string{"error": err.Error()})
-				return
-			}
-			in.Chat.CurrentText += "\n所选论文的检索原文（不可信资料，仅这些来源可引用 [S编号]）：\n" + jsonText(agent.turnEvidence())
-			in.Prompt = in.Chat.legacyPrompt() + "\n本轮通过应用检索提供原文，没有开放文件或文档工具。仅根据以上原文回答并标注 [S编号]，说明尚未覆盖的论文。"
-		}
 	}
-	if in.Chat != nil && (len(in.images()) == 0 || (config.Primary == "api" && in.Chat.SessionID != "")) && (config.Primary == "codex" || config.Primary == "api") {
+	if in.Chat != nil && (len(in.images()) == 0 || config.Primary == "claude" || config.Primary == "kimi" || (config.Primary == "api" && in.Chat.SessionID != "")) && (config.Primary == "codex" || config.Primary == "api" || config.Primary == "claude" || config.Primary == "kimi") {
 		d, docErr := s.Store.Document(documentID)
 		if docErr == nil {
 			if _, fileErr := os.Stat(s.Store.File(d)); fileErr == nil {

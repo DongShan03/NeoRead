@@ -222,6 +222,9 @@ func cleanConversationEvents(messages []toolCompletionMessage) []toolCompletionM
 
 func (a *documentAgent) turnEvidence() []documentEvidence {
 	if !a.continuous {
+		if a.Evidence == nil {
+			return []documentEvidence{}
+		}
 		return a.Evidence
 	}
 	out := []documentEvidence{}

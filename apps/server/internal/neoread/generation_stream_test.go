@@ -682,7 +682,10 @@ func runAgentProcess() {
 			emit(map[string]any{"type": "control_response", "response": map[string]any{"request_id": "1", "subtype": "success", "response": map[string]any{"models": []any{map[string]any{"value": "test", "resolvedModel": "test-model", "displayName": "Test"}}}}})
 			return
 		}
-		_, _ = io.ReadAll(reader)
+		rest, _ := io.ReadAll(reader)
+		if runFakeClaudeDocument(mode, first+string(rest), emit, gate) {
+			return
+		}
 		if path := os.Getenv("NEOREAD_AGENT_CAPTURE"); path != "" {
 			_ = os.WriteFile(path, []byte(args), 0600)
 		}
@@ -715,6 +718,10 @@ func runAgentProcess() {
 		return
 	}
 	if provider == "kimi" {
+		if strings.HasPrefix(mode, "document-") {
+			runFakeKimiDocument(mode, emit)
+			return
+		}
 		if path := os.Getenv("NEOREAD_SYSTEM_CAPTURE"); path != "" {
 			for i, arg := range os.Args {
 				if arg == "--agent-file" && i+1 < len(os.Args) {
