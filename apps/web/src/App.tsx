@@ -74,6 +74,7 @@ import { applyDocumentTheme, useResolvedTheme } from "./appearance";
 import { LibraryFilterBar, LibraryTagFilters } from "./DocumentManagement";
 import { TagBoards } from "./TagBoards";
 import { LibraryDocuments } from "./LibraryDocuments";
+import { LibraryConnectionError } from "./LibraryConnectionError";
 import { BookDetail, saveBookDetailWidth } from "./BookDetail";
 import { DetailSheet } from "./DetailSheet";
 import type { BookMenuActions } from "./BookMenu";
@@ -696,6 +697,8 @@ export function App() {
                 trash={trash}
                 jobs={jobsById}
                 loading={loading}
+                error={error}
+                processingError={processingError}
                 openDocument={openDocument}
                 moveToBooks={(doc) => void moveDocument(doc, "books")}
                 navOpen={nav}
@@ -809,16 +812,7 @@ export function App() {
                         </p>
                       )}
                       {error ? (
-                        <div className="empty-state">
-                          <h2>暂时无法连接本地书库</h2>
-                          <p>{error}</p>
-                          <Button
-                            variant="outline"
-                            onClick={() => location.reload()}
-                          >
-                            重新连接
-                          </Button>
-                        </div>
+                        <LibraryConnectionError error={error} />
                       ) : loading ? (
                         <div className="empty-state">
                           <Loader2 className="animate-spin text-muted-foreground" />

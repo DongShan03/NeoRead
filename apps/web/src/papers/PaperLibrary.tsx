@@ -1,3 +1,4 @@
+import { LibraryConnectionError } from "../LibraryConnectionError";
 import { PaperColumns, usePaperColumns } from "./PaperColumns";
 import { bodyReadingProgress } from "./body-progress";
 import { setPaperDragImage } from "./paper-drag-image";
@@ -184,6 +185,8 @@ export interface PaperLibraryProps {
   trash: Document[];
   jobs: Map<string, Processing>;
   loading: boolean;
+  error?: string;
+  processingError?: string;
   openDocument: (doc: Document) => void;
   openDocuments?: (docs: Document[]) => void;
   moveToBooks: (doc: Document) => void;
@@ -200,6 +203,8 @@ export function PaperLibrary({
   trash,
   jobs,
   loading,
+  error,
+  processingError,
   openDocument,
   openDocuments,
   moveToBooks,
@@ -1166,7 +1171,14 @@ export function PaperLibrary({
                 </div>
               </div>
             )}
-            {loading ? (
+            {processingError && (
+              <p className="processing-warning" role="status">
+                解析进度暂时不可用：{processingError}
+              </p>
+            )}
+            {error ? (
+              <LibraryConnectionError error={error} />
+            ) : loading ? (
               <div className="empty-state">
                 <Loader2 className="animate-spin text-muted-foreground" />
               </div>
