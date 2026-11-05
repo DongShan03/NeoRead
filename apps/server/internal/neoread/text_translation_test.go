@@ -1582,8 +1582,8 @@ func TestTranslationUnitGlyphsAreOptional(t *testing.T) {
 		{"mixed_ohm_required_retained", "Ω Ω", "Ω", true},
 		{"two_optional_micro_one_retained", "µ µ", "μ", true},
 		{"two_optional_micro_both_retained", "µ µ", `μ $\mu$`, true},
-		{"extra_micro", "5 \u00b5m", "5 μm μ", false},
-		{"extra_ohm", "10 \u2126", `10 Ω $\Omega$`, false},
+		{"extra_micro", "5 \u00b5m", "5 μm μ", true},
+		{"extra_ohm", "10 \u2126", `10 Ω $\Omega$`, true},
 		{"micro_replaced_by_alpha", "5 \u00b5m", `$\alpha$`, false},
 		{"micro_replaced_by_omega", "5 \u00b5m", `$\Omega$`, false},
 		{"required_mu_omitted", "5 \u03bcm", "5 微米", false},
@@ -1606,6 +1606,49 @@ func TestTranslationUnitGlyphsAreOptional(t *testing.T) {
 				}
 			} else if !errors.Is(err, errTranslationMath) {
 				t.Fatal("invalid symbols accepted by translation parser", parsed, err)
+			}
+		})
+	}
+}
+
+const refusalSetSource = `which sums the first-token softmax mass over $\mathcal{K}_{\mathrm{refuse}}$ , the per-model first-token IDs of the 17 re- fusal templates used in Sec. 3.3.`
+const refusalSetTarget = `该分数对 $\mathcal{K}_{\mathrm{refuse}}$ 上的首词元 softmax 概率质量求和，其中 $\mathcal{K}_{\mathrm{refuse}}$ 是第 3.3 节所用 17 个拒绝模板在各模型中的首词元 ID。`
+const causalEffectSource = `The causal ef- fect of patching n on a harmful query q is the drop in this score when $a_{n}$ is clamped to $\hat{a}_{n}$ : ∆ $P_{n}^{q}=P_{\mathrm{refuse}}^{\mathrm{clean}}(q)−P_{\mathrm{refuse}}^{\mathrm{patch}}(q)$ .`
+const causalEffectTarget = `在有害查询 $q$ 上修补神经元 $n$ 的因果效应，是将 $a_n$ 钳制为 $\hat{a}_n$ 时该分数的下降量：$\Delta P_n^q=P_{\mathrm{refuse}}^{\mathrm{clean}}(q)-P_{\mathrm{refuse}}^{\mathrm{patch}}(q)$。`
+
+func TestTranslationMathRepetitionPreservesAtomsAndScriptSets(t *testing.T) {
+	for _, tt := range []struct {
+		name, source, target string
+		valid                bool
+	}{
+		{"real_apposition", refusalSetSource, refusalSetTarget, true},
+		{"real_causal_effect", causalEffectSource, causalEffectTarget, true},
+		{"repeat_greek", `The change is ∆.`, `变化为 $\Delta$，即 $\Delta$。`, true},
+		{"repeat_decorated_atom", `The value is $\hat{a}$.`, `数值为 $\hat{a}$，即 $\hat{a}$。`, true},
+		{"repeat_script_set", `$\hat{a}+\hat{a}^{l}$`, `$\hat{a}^{l}+\hat{a}+\hat{a}^{l}$`, true},
+		{"lost_decoration", `$\hat{a}$`, `$a$`, false},
+		{"changed_decoration", `$\hat{a}$`, `$\bar{a}$`, false},
+		{"tau_to_latin", `τ`, `$t$`, false},
+		{"square_union_to_sum", `$\bigsqcup_j q_j$`, `$\sum_j q_j$`, false},
+		{"new_greek", `τ`, `$\tau+\Gamma$`, false},
+		{"decoration_on_new_variable", `$\hat{a}$`, `$\hat{a}+\hat{b}$`, false},
+		{"script_count_changed", `$\hat{a}^{l}$`, `$\hat{a}$`, false},
+		{"script_variant_missing", `$\hat{a}+\hat{a}^{l}$`, `$\hat{a}^{l}+\hat{a}^{l}$`, false},
+		{"script_variant_added", `$\hat{a}$`, `$\hat{a}+\hat{a}^{l}$`, false},
+		{"decorated_occurrence_missing", `$\hat{a}+\hat{a}$`, `$\hat{a}$`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchingMathDecorations(tt.source, tt.target); got != tt.valid {
+				t.Errorf("matchingMathDecorations(%q, %q) = %v, want %v", tt.source, tt.target, got, tt.valid)
+			}
+			pairs := []TranslationSentence{{Source: tt.source, Target: tt.target}}
+			parsed, err := parseTranslationSource(jsonText(map[string]any{"sentences": pairs}), tt.source, true)
+			if tt.valid {
+				if err != nil || jsonText(parsed) != jsonText(pairs) {
+					t.Fatal("valid repeated math rejected or rewritten", parsed, err)
+				}
+			} else if !errors.Is(err, errTranslationMath) {
+				t.Fatal("changed math accepted", parsed, err)
 			}
 		})
 	}

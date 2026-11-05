@@ -11,6 +11,7 @@ import (
 	"neoread.local/server/internal/runtimeenv"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -20,6 +21,8 @@ type recognizedInlineFormula struct {
 	Sentence int    `json:"sentenceIndex"`
 	Formula  string `json:"formula"`
 }
+
+var recoveryMathIdentifier = regexp.MustCompile(`^[A-Za-z][0-9]*$`)
 
 func (s *Server) renderTranslationMath(ctx context.Context, doc Document, block PDFBlock) ([]byte, error) {
 	node, processor := os.Getenv("NEOREAD_NODE"), os.Getenv("NEOREAD_PROCESSOR")
@@ -173,7 +176,7 @@ func (s *Server) recoverTranslationMath(ctx context.Context, doc Document, m lay
 	for i, part := range parts {
 		cursor := 0
 		for _, span := range spans[i] {
-			token := fmt.Sprintf("%s%d", prefix, at)
+			token := fmt.Sprintf("%s%d_END", prefix, at)
 			tokens[at] = token
 			protected[i] += part[cursor:span.Start] + token
 			corrected[i] += part[cursor:span.Start] + recognized[at]
@@ -189,7 +192,7 @@ func (s *Server) recoverTranslationMath(ctx context.Context, doc Document, m lay
 	phase = "translating"
 	bounded := *textService
 	bounded.timeout = formulaTimeout
-	result, err = bounded.Generate(child, AIInput{Prompt: "所有 NEOREAD_MATH_ 开头的占位符都表示已经核对的行内公式，必须原样保留且每个出现一次，不能转换成 LaTeX 或推测其内容；应用会还原公式。\n" + translationPrompt(doc, m, batch, bounded.translationInstructions)}, false, nil)
+	result, err = bounded.Generate(child, AIInput{Prompt: "所有 NEOREAD_MATH_ 开头的占位符都表示已经核对的行内公式，本句原有的每个占位符必须至少原样保留一次，需要时可以重复引用本段的占位符。占位符不得放进美元分隔符，不能转换成 LaTeX 或推测其内容；应用会还原公式。\n" + translationPrompt(doc, m, batch, bounded.translationInstructions)}, false, nil)
 	if err != nil {
 		return recovered, err
 	}
@@ -205,18 +208,31 @@ func (s *Server) recoverTranslationMath(ctx context.Context, doc Document, m lay
 		return recovered, generationError(ErrorProtocol, "公式修复后的译文未完整逐句对应")
 	}
 	pairs := make([]TranslationSentence, len(parts))
+	restoredTargets := make([]string, len(parts))
 	for i, pair := range translated.Sentences {
 		target := pair.Target
-		if len(inlineMathSpans(target)) > 0 {
-			return recovered, generationError(ErrorProtocol, "译文另行改写了已识别的公式")
+		for _, span := range inlineMathSpans(target) {
+			identifier := strings.TrimSpace(span.Formula)
+			if target[span.Start] != '$' || strings.HasPrefix(target[span.Start:span.End], "$$") || !recoveryMathIdentifier.MatchString(identifier) || !regexp.MustCompile(`\b`+identifier+`\b`).MatchString(protected[i]) {
+				return recovered, generationError(ErrorProtocol, "译文另行改写了已识别的公式")
+			}
 		}
+		validationTarget := target
 		for j, token := range tokens {
-			if strings.Count(target, token) != strings.Count(protected[i], token) {
+			required := strings.Count(protected[i], token)
+			if strings.Count(target, token) < required {
 				return recovered, generationError(ErrorProtocol, "译文未完整保留已识别的公式")
 			}
 			target = strings.ReplaceAll(target, token, recognized[j])
+			// A verified formula repeated from another sentence is not a new
+			// symbol in this sentence. Keep those copies protected during its
+			// source-local validation, then publish the fully restored target.
+			if required > 0 {
+				validationTarget = strings.ReplaceAll(validationTarget, token, recognized[j])
+			}
 		}
-		pairs[i] = TranslationSentence{Source: corrected[i], Target: target}
+		pairs[i] = TranslationSentence{Source: corrected[i], Target: validationTarget}
+		restoredTargets[i] = target
 	}
 	correctedSource := strings.Join(corrected, " ")
 	pairs, err = parseTranslationSource(jsonText(map[string]any{"sentences": pairs}), correctedSource, true)
@@ -227,6 +243,7 @@ func (s *Server) recoverTranslationMath(ctx context.Context, doc Document, m lay
 		return recovered, generationError(ErrorProtocol, "公式修复后的句子边界发生变化")
 	}
 	for i := range pairs {
+		pairs[i].Target = restoredTargets[i]
 		if pairs[i].Source != parts[i] {
 			pairs[i].Anchor = parts[i]
 		}

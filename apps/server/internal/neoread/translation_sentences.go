@@ -49,12 +49,12 @@ func matchingMathDecorations(source, target string) bool {
 	}
 	expected, actual := counts(source), counts(target)
 	for name, count := range expected {
-		if actual[name] < count-optional[name] || actual[name] > count {
+		if actual[name] < count-optional[name] {
 			return false
 		}
 	}
-	for name, count := range actual {
-		if mathGreekName(name) && count > expected[name] {
+	for name := range actual {
+		if mathGreekName(name) && expected[name] == 0 {
 			return false
 		}
 	}
@@ -63,9 +63,25 @@ func matchingMathDecorations(source, target string) bool {
 	// total number of carets in the sentence (which also counts repaired labels).
 	before, after := decoratedMathScripts(source), decoratedMathScripts(target)
 	for atom, scripts := range before {
-		slices.Sort(scripts)
-		slices.Sort(after[atom])
-		if !slices.Equal(scripts, after[atom]) {
+		if len(after[atom]) < len(scripts) {
+			return false
+		}
+		// Repeating an atom may repeat its existing script shapes, but cannot
+		// remove a shape or add a different superscript count.
+		for _, count := range scripts {
+			if !slices.Contains(after[atom], count) {
+				return false
+			}
+		}
+		for _, count := range after[atom] {
+			if !slices.Contains(scripts, count) {
+				return false
+			}
+		}
+	}
+	for atom := range after {
+		name, _, _ := strings.Cut(atom, ":")
+		if expected[name] > 0 && len(before[atom]) == 0 {
 			return false
 		}
 	}
