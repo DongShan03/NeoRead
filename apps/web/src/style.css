@@ -4564,3 +4564,18 @@ textarea.paper-note-editor-input {
   box-shadow: 0 4px 18px rgb(0 0 0 / 8%);
   font-size: 13px;
 }
+
+.library-file-drop {
+  position: fixed;
+  inset: 12px;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--brand);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--popover) 90%, transparent);
+  color: var(--popover-foreground);
+  font-size: 18px;
+  font-weight: 500;
+  pointer-events: none;
+}

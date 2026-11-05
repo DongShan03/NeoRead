@@ -1,3 +1,4 @@
+import { useLibraryFileDrop } from "./useLibraryFileDrop";
 import { QuickFind } from "./QuickFind";
 import { useShortcut, loadBindings, isMac } from "./shortcuts/shortcuts";
 import { libraryShortcut } from "./library-shortcuts";
@@ -394,6 +395,7 @@ export function App() {
       setBusy(false);
     }
   };
+  const { dragging, ...fileDrop } = useLibraryFileDrop((files) => void importFiles(files));
   const sample = async () => {
     setBusy(true);
     try {
@@ -523,14 +525,9 @@ export function App() {
         className="app"
         data-platform={window.neoreadDesktop?.platform}
         data-has-tabs={tabsShown || undefined}
-        onDragOver={(e) => {
-          e.preventDefault();
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          void importFiles(Array.from(e.dataTransfer.files));
-        }}
+        {...fileDrop}
       >
+        {dragging && <div className="library-file-drop" role="status">松开以导入到{papers ? "论文库" : "图书库"}</div>}
         <input
           type="file"
           ref={fileRef}
