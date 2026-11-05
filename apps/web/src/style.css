@@ -6,6 +6,8 @@
 @custom-variant motion-safe (&:where(:root:not([data-reduced-motion="true"]), :root:not([data-reduced-motion="true"]) *));
 :root {
   color-scheme: light;
+  --font-size-small: 11px;
+  --library-progress: #6b8373;
   --background: oklch(1 0 0);
   --foreground: oklch(0.205 0 0);
   --card: oklch(1 0 0);
@@ -29,6 +31,7 @@
 /* Graphite: a warm charcoal paper. Shell #211e21, surface #2f2c2f,
    wear #777477. */
 .dark {
+  --library-progress: #94ad9b;
   color-scheme: dark;
   --background: #2f2c2f;
   --foreground: #e4dfda;
@@ -114,6 +117,7 @@
 :root[data-theme="sepia"] {
   color-scheme: light;
   --brand: #c2643e;
+  --library-progress: var(--brand);
   --brand-90: color-mix(in srgb, var(--brand) 90%, transparent);
   --brand-10: color-mix(in srgb, var(--brand) 10%, transparent);
   --brand-30: color-mix(in srgb, var(--brand) 30%, transparent);
@@ -199,6 +203,8 @@
       BlinkMacSystemFont,
       "Segoe UI",
       "PingFang SC",
+      "Microsoft YaHei UI",
+      "Noto Sans CJK SC",
       sans-serif;
     color: var(--foreground);
     background: var(--background);
@@ -255,7 +261,7 @@ html[data-citation-window] :is(button, input, select, textarea, a) {
   app-region: no-drag;
 }
 kbd {
-  font-size: 10px;
+  font-size: var(--font-size-small);
   font-family: inherit;
   background: var(--background);
   padding: 2px 4px;
@@ -507,7 +513,7 @@ kbd {
   z-index: 1;
 }
 .cover-top span {
-  font-size: 8px;
+  font-size: calc(8px * var(--card-scale, 1));
   letter-spacing: 1.5px;
   font-weight: 400;
   opacity: 0.65;
@@ -535,7 +541,7 @@ kbd {
 }
 .cover-author {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: calc(10px * var(--card-scale, 1));
   line-height: 1.4;
   font-weight: 400;
   opacity: 0.75;
@@ -551,18 +557,18 @@ kbd {
 }
 .cover-decoration {
   position: absolute;
-  width: 170px;
-  height: 170px;
-  right: -52px;
-  bottom: 26px;
+  width: calc(170px * var(--card-scale, 1));
+  height: calc(170px * var(--card-scale, 1));
+  right: calc(-52px * var(--card-scale, 1));
+  bottom: calc(26px * var(--card-scale, 1));
   border: 1px solid currentColor;
   border-radius: 50%;
   opacity: 0.09;
   box-shadow:
-    0 0 0 18px transparent,
-    0 0 0 19px currentColor,
-    0 0 0 38px transparent,
-    0 0 0 39px currentColor;
+    0 0 0 calc(18px * var(--card-scale, 1)) transparent,
+    0 0 0 calc(19px * var(--card-scale, 1)) currentColor,
+    0 0 0 calc(38px * var(--card-scale, 1)) transparent,
+    0 0 0 calc(39px * var(--card-scale, 1)) currentColor;
 }
 .book-meta {
   display: grid;
@@ -589,7 +595,7 @@ kbd {
   display: flex;
   justify-content: space-between;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: var(--font-size-small);
   margin-top: 8px;
   gap: 10px;
 }
@@ -601,13 +607,10 @@ kbd {
 }
 .book-progress > div {
   height: 100%;
-  background: #798d7f;
-}
-.book-status {
-  font-size: 9px;
+  background: var(--library-progress);
 }
 .empty-state {
-  min-height: 490px;
+  min-height: min(490px, 60dvh);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -764,7 +767,7 @@ kbd {
   border: 0;
 }
 .panel-label {
-  font-size: 9px;
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
   letter-spacing: 1.4px;
   padding: 20px 20px 12px;
@@ -917,7 +920,7 @@ kbd {
 }
 .navigation-link small {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--font-size-small);
   opacity: 0.6;
   margin-left: auto;
 }
@@ -959,7 +962,7 @@ kbd {
   margin-bottom: 8px;
 }
 .search-result small {
-  font-size: 10px;
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
 }
 .neoread-block-search-hit {
@@ -1118,7 +1121,7 @@ kbd {
   white-space: nowrap;
 }
 .selection-bar [data-slot="badge"] {
-  font-size: 9px;
+  font-size: var(--font-size-small);
   margin-right: 5px;
 }
 .setting-row {
@@ -1296,7 +1299,7 @@ kbd {
   margin-top: 10px;
 }
 .message-author {
-  font-size: 10px;
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
   display: block;
   margin-bottom: 7px;
@@ -1539,7 +1542,7 @@ kbd {
   padding: 3px 6px;
   border-radius: 5px;
   margin: 3px 0;
-  font-size: 10px;
+  font-size: var(--font-size-small);
 }
 .quote-chips span {
   white-space: nowrap;
@@ -1551,7 +1554,7 @@ kbd {
   display: inline-block;
   width: 5px;
   height: 5px;
-  background: #829b89;
+  background: var(--library-progress);
   border-radius: 50%;
   margin-left: 5px;
   animation: pulse 1.5s infinite;
@@ -1603,7 +1606,7 @@ kbd {
   color: var(--muted-foreground);
 }
 .notes-footer button {
-  font-size: 10px;
+  font-size: var(--font-size-small);
 }
 .notes-list {
   padding: 0 15px 76px;
@@ -1619,7 +1622,7 @@ kbd {
   opacity: 0.4;
 }
 .notes-empty small {
-  font-size: 10px;
+  font-size: var(--font-size-small);
   display: block;
   margin-top: 10px;
 }
@@ -1652,7 +1655,7 @@ kbd {
   min-width: 0;
 }
 .note-card [data-slot="badge"] {
-  font-size: 9px;
+  font-size: var(--font-size-small);
 }
 .note-quote {
   display: block;
@@ -1997,7 +2000,7 @@ kbd {
   margin-top: 7px;
   height: 22px;
   padding: 0;
-  font-size: 10px;
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
 }
 .cover-analyze,
@@ -2012,7 +2015,7 @@ kbd {
   color: var(--muted-foreground);
   border-radius: 6px;
   padding: 5px 8px;
-  font-size: 10px;
+  font-size: var(--font-size-small);
 }
 .processing-warning {
   font-size: 12px;
@@ -2356,7 +2359,7 @@ kbd {
   border-radius: 4px;
 }
 .attachment-preview span {
-  font-size: 10px;
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
 }
 .attachment-remove {
@@ -3244,7 +3247,7 @@ body[data-resizing] * {
   padding: 2px 6px;
   background: color-mix(in oklch, var(--muted-foreground) 12%, transparent);
   color: var(--foreground);
-  font-size: 10px;
+  font-size: var(--font-size-small);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3272,7 +3275,7 @@ body[data-resizing] * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: var(--font-size-small);
   color: var(--destructive);
 }
 .journal-rank-refresh {
@@ -3453,7 +3456,7 @@ body[data-resizing] * {
   align-items: center;
   justify-content: space-between;
   min-height: 24px;
-  font-size: 10px;
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
 }
 .paper-card-meta .paper-row-status {
@@ -4515,7 +4518,7 @@ textarea.paper-note-editor-input {
   background: var(--muted);
   border-radius: 6px;
 }
-@media (prefers-reduced-motion: no-preference) {
+:root:not([data-reduced-motion="true"]) {
   .paper-note button,
   .paper-note-dialog button {
     transition:
@@ -4538,7 +4541,7 @@ textarea.paper-note-editor-input {
       box-shadow 150ms ease;
   }
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-reduced-motion="true"] {
   .paper-note-dialog,
   .paper-note-dialog *,
   .paper-note,
@@ -4563,4 +4566,19 @@ textarea.paper-note-editor-input {
   background: var(--background);
   box-shadow: 0 4px 18px rgb(0 0 0 / 8%);
   font-size: 13px;
+}
+
+.library-file-drop {
+  position: fixed;
+  inset: 12px;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--brand, var(--primary));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--popover) 90%, transparent);
+  color: var(--popover-foreground);
+  font-size: 18px;
+  font-weight: 500;
+  pointer-events: none;
 }

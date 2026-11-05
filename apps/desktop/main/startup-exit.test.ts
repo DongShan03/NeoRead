@@ -76,7 +76,9 @@ beforeEach(() => {
     { runScripts: "outside-only", pretendToBeVisual: true },
   );
   motion = Object.assign(new page.window.EventTarget(), { matches: false });
-  Object.defineProperty(page.window, "matchMedia", { value: () => motion });
+  Object.defineProperty(page.window, "matchMedia", {
+    value: vi.fn(() => motion),
+  });
   fontLoad = vi.fn(async () => []);
   Object.defineProperty(page.window.document, "fonts", {
     value: { load: fontLoad },
@@ -329,7 +331,7 @@ it.each([false, true])(
 );
 
 it("skips motion when reduced motion was already enabled", async () => {
-  motion.matches = true;
+  source.window.document.documentElement.dataset.reducedMotion = "true";
   const exit = await prepareStartupExit(loading, target);
   await exit();
   expect(animate).not.toHaveBeenCalled();
@@ -374,23 +376,18 @@ it("releases a running exit on hiding without waiting for paused animations", as
     expect(animation.cancel).toHaveBeenCalledOnce();
 });
 
-it.each(["pagehide", "beforeunload", "reduced-motion", "cancel"])(
+it.each(["pagehide", "beforeunload", "cancel"])(
   "cleans a running transition on %s and removes listeners",
   async (reason) => {
     const remove = vi.spyOn(page.window, "removeEventListener");
-    const removeMotion = vi.spyOn(motion, "removeEventListener");
     const exit = await prepareStartupExit(loading, target);
     const pending = exit();
-    if (reason === "reduced-motion") {
-      motion.matches = true;
-      motion.dispatchEvent(new page.window.Event("change"));
-    } else if (reason === "cancel") animations[0].cancel();
+    if (reason === "cancel") animations[0].cancel();
     else page.window.dispatchEvent(new page.window.Event(reason));
     await pending;
     assertClean();
     for (const event of ["pagehide", "beforeunload", "resize"])
       expect(remove).toHaveBeenCalledWith(event, expect.any(Function));
-    expect(removeMotion).toHaveBeenCalledWith("change", expect.any(Function));
   },
 );
 
@@ -438,3 +435,22 @@ it("does not execute exit code in a destroyed target", async () => {
   await exit(false);
   expect(target.webContents.executeJavaScript).toHaveBeenCalledTimes(1);
 });
+
+it.each([undefined, "false"])(
+  "animates with missing or enabled app motion even if the system disables motion (%s)",
+  async (marker) => {
+    if (marker !== undefined)
+      source.window.document.documentElement.dataset.reducedMotion = marker;
+    motion.matches = true;
+    const query = vi.mocked(page.window.matchMedia);
+    const exit = await prepareStartupExit(loading, target);
+    const pending = exit();
+    expect(animate).toHaveBeenCalledTimes(2);
+    motion.dispatchEvent(new page.window.Event("change"));
+    expect(overlay()).not.toBeNull();
+    expect(query).not.toHaveBeenCalled();
+    for (const animation of animations) animation.resolve();
+    await pending;
+    assertClean();
+  },
+);

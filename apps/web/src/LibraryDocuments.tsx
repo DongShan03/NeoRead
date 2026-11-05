@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { coverStatus } from "./cover-status";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   FileText,
@@ -62,6 +63,14 @@ export function LibraryDocuments({
   onActivate?: (id: string | null) => void;
 }) {
   const overviewJobs = useOverviewJobs();
+  const jobsById = useMemo(
+    () => new Map(jobs.map((job) => [job.documentId, job])),
+    [jobs],
+  );
+  const overviewsById = useMemo(
+    () => new Map(overviewJobs.map((job) => [job.documentId, job])),
+    [overviewJobs],
+  );
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState(false);
   const clickIntent = useClickIntent(activeId);
@@ -193,7 +202,13 @@ export function LibraryDocuments({
         </div>
       )}
       <div className={`book-grid ${libraryView === "list" ? "book-list" : ""}`}>
-        {documents.map((doc, i) => (
+        {documents.map((doc, i) => {
+          const status = coverStatus(
+            doc.type,
+            jobsById.get(doc.id),
+            overviewsById.get(doc.id),
+          );
+          return (
           <ContextMenu key={doc.id}>
             <ContextMenuTrigger
               render={<article />}
@@ -300,38 +315,18 @@ export function LibraryDocuments({
                   </div>
                   <div className="cover-decoration" />
                 </Button>
-                {overviewJobs.some(
-                  (o) =>
-                    o.documentId === doc.id &&
-                    (!["complete", "canceled"].includes(o.status) ||
-                      !jobs.some(
-                        (j) =>
-                          j.documentId === doc.id &&
-                          (j.incomplete ||
-                            j.status === "failed" ||
-                            j.status === "waiting"),
-                      )),
-                ) &&
-                !jobs.some(
-                  (j) =>
-                    j.documentId === doc.id &&
-                    (j.status === "running" ||
-                      j.status === "queued" ||
-                      (!!j.bookLayout && j.bookLayout.status !== "complete")),
-                ) ? (
+                {status.kind === "overview" ? (
                   <CoverOverview
-                    job={overviewJobs.find((o) => o.documentId === doc.id)!}
+                    job={status.job}
                     onOpen={() => onOverview(doc)}
                   />
-                ) : (
-                  doc.type === "pdf" &&
-                  (jobs.find((job) => job.documentId === doc.id) ? (
-                    <CoverProcessing
-                      job={jobs.find((job) => job.documentId === doc.id)!}
-                      onSettings={onSettings}
-                      unavailable={!!processingError}
-                    />
-                  ) : (
+                ) : status.kind === "processing" ? (
+                  <CoverProcessing
+                    job={status.job}
+                    onSettings={onSettings}
+                    unavailable={!!processingError}
+                  />
+                ) : status.kind === "analyze" ? (
                     <Button
                       data-document-action
                       className="cover-analyze"
@@ -345,8 +340,7 @@ export function LibraryDocuments({
                     >
                       分析文档
                     </Button>
-                  ))
-                )}
+                ) : null}
               </div>
               <div className="book-meta">
                 <Button
@@ -404,7 +398,8 @@ export function LibraryDocuments({
               )}
             </ContextMenuContent>
           </ContextMenu>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

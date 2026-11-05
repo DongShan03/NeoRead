@@ -1209,3 +1209,36 @@ it("uses the existing toolbar to save a hovered sentence without a native select
   );
   expect(host.querySelector(".selection-bar")).toBeNull();
 });
+
+it("does not rerender mounted workspaces for another document's job update", async () => {
+  const { ReadingWorkspaces } = await import("./DocumentTabs");
+  const hidden = paper({ id: "hidden-doc" });
+  useReaderStore.setState({
+    documents: [doc, hidden],
+    tabIds: [doc.id, hidden.id],
+    visitedTabs: [doc.id, hidden.id],
+    active: doc,
+  });
+  const onLibrary = () => {},
+    onSettings = () => {};
+  const show = (jobs: Processing[]) =>
+    root.render(
+      <TooltipProvider>
+        <ReadingWorkspaces
+          theme={defaultTheme}
+          jobs={jobs}
+          onLibrary={onLibrary}
+          onSettings={onSettings}
+        />
+      </TooltipProvider>,
+    );
+  await act(async () => show([processing]));
+  const before = panels.readerRenders;
+  await act(async () =>
+    show([
+      processing,
+      { ...processing, documentId: "unrelated", updatedAt: "new" },
+    ]),
+  );
+  expect(panels.readerRenders).toBe(before);
+});

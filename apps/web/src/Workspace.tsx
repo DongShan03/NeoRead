@@ -25,6 +25,7 @@ import { AnnotationHoverCard } from "./AnnotationHoverCard";
 import { AnnotationNoteWindow } from "./AnnotationNoteWindow";
 import { AnnotationQuote } from "./AnnotationQuote";
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -192,7 +193,7 @@ function IconButton({
     </Tooltip>
   );
 }
-export function Workspace({
+export const Workspace = memo(function Workspace({
   document: doc,
   active = true,
   theme: sharedTheme,
@@ -2328,4 +2329,4 @@ export function Workspace({
       />
     </div>
   );
-}
+});

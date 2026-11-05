@@ -239,6 +239,7 @@ export interface LibraryPreferences {
   mode?: LibraryMode;
   papers?: PaperLibraryPreferences;
   books?: {
+    view?: "grid" | "list";
     /** Width of the book detail panel in CSS pixels. */
     detailWidth?: number;
     /** Size of book cards relative to the default. */

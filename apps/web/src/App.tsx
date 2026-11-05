@@ -1,6 +1,9 @@
+import { useLibraryFileDrop } from "./useLibraryFileDrop";
+import { QuickFind } from "./QuickFind";
 import { useShortcut, loadBindings, isMac } from "./shortcuts/shortcuts";
+import { libraryShortcut } from "./library-shortcuts";
 import { useSaveReaderSettings } from "./neoread-settings";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Library,
@@ -11,7 +14,6 @@ import {
   FileText,
   Loader2,
   PanelLeft,
-  Command,
   X,
   Tags,
   CheckSquare,
@@ -52,6 +54,7 @@ import {
   openLinkTarget,
   openWhenParsed,
   openLibraryDocument,
+  openLibraryDocuments,
   documentTabsShown,
 } from "./store";
 import { TrashView } from "./TrashView";
@@ -74,6 +77,7 @@ import { applyDocumentTheme, useResolvedTheme } from "./appearance";
 import { LibraryFilterBar, LibraryTagFilters } from "./DocumentManagement";
 import { TagBoards } from "./TagBoards";
 import { LibraryDocuments } from "./LibraryDocuments";
+import { LibraryConnectionError } from "./LibraryConnectionError";
 import { BookDetail, saveBookDetailWidth } from "./BookDetail";
 import { DetailSheet } from "./DetailSheet";
 import type { BookMenuActions } from "./BookMenu";
@@ -104,7 +108,10 @@ export function App() {
   } = useReaderStore();
   const mode = libraryMode(libraryPreferences);
   const papers = mode === "papers";
-  const documents = allDocuments.filter((d) => d.library === mode);
+  const documents = useMemo(
+    () => allDocuments.filter((d) => d.library === mode),
+    [allDocuments, mode],
+  );
   const resolvedTheme = useResolvedTheme(theme);
   const { jobs, error: processingError } = useProcessing();
   useUpdateProgress();
@@ -114,11 +121,13 @@ export function App() {
   );
   const [settings, setSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"agent" | "papers">("agent");
+  const openSettings = useCallback((tab: "agent" | "papers" = "agent") => {
+    setSettingsTab(tab);
+    setSettings(true);
+  }, []);
+  const showSettings = useCallback(() => openSettings(), [openSettings]);
   useEffect(() => {
-    const openSync = () => {
-      setSettingsTab("papers");
-      setSettings(true);
-    };
+    const openSync = () => openSettings("papers");
     window.addEventListener("neoread:open-sync-settings", openSync);
     return () =>
       window.removeEventListener("neoread:open-sync-settings", openSync);
@@ -128,7 +137,15 @@ export function App() {
   const [guide, setGuide] = useState(false);
   const [filter, setFilter] = useState("all");
   const [filters, setFilters] = useState(initialFilters);
-  const [libraryView, setLibraryView] = useState<"grid" | "list">("grid");
+  const libraryView = libraryPreferences.books?.view || "grid";
+  const setLibraryView = (view: "grid" | "list") => {
+    void updateLibraryPreferences({
+      books: {
+        ...useReaderStore.getState().libraryPreferences.books,
+        view,
+      },
+    }).catch((e) => toast.error(e.message));
+  };
   const [editingLibrary, setEditingLibrary] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [libraryBody, setLibraryBody] = useState<HTMLDivElement | null>(null);
@@ -152,7 +169,6 @@ export function App() {
   );
   const [usageDocument, setUsageDocument] = useState<Document | null>(null);
   const [query, setQuery] = useState("");
-  const [commandQuery, setCommandQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [largePapers, setLargePapers] = useState<LargePaper[]>([]);
   const [largePaperFolder, setLargePaperFolder] = useState("");
@@ -195,6 +211,7 @@ export function App() {
     applyDocumentTheme(resolvedTheme);
     void window.neoreadDesktop
       ?.setAppearance(theme.appearance ?? "system", {
+        reducedMotion: theme.reducedMotion === true,
         pdfDarkContrast: theme.pdfDarkContrast,
         systemLightMode: theme.systemLightMode,
         systemDarkContrast: theme.systemDarkContrast,
@@ -204,18 +221,19 @@ export function App() {
     resolvedTheme.mode,
     resolvedTheme.pdfDarkContrast,
     theme.appearance,
+    theme.reducedMotion,
     theme.pdfDarkContrast,
     theme.systemLightMode,
     theme.systemDarkContrast,
   ]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      const action = libraryShortcut(e);
+      if (action === "find") {
         e.preventDefault();
         setCommand((v) => !v);
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+      if (action === "import") {
         e.preventDefault();
         chooseFiles();
       }
@@ -386,6 +404,9 @@ export function App() {
       setBusy(false);
     }
   };
+  const { dragging, ...fileDrop } = useLibraryFileDrop(
+    (files) => void importFiles(files),
+  );
   const sample = async () => {
     setBusy(true);
     try {
@@ -412,8 +433,14 @@ export function App() {
       toast.error(e.message),
     );
   };
-  const openLibrary = (next: LibraryMode) => {
+  const showLibrary = useCallback(() => {
     open(null);
+    void flushProgress()
+      .then(refreshLibrary)
+      .catch((e) => toast.error(e.message));
+  }, [open]);
+  const openLibrary = (next: LibraryMode) => {
+    showLibrary();
     switchMode(next);
   };
   const primaryMode = primaryLibraryMode(libraryPreferences);
@@ -441,30 +468,41 @@ export function App() {
       })
       .catch((e) => toast.error(e.message));
   };
-  const showLibrary = () => {
-    open(null);
-    void flushProgress()
-      .then(refreshLibrary)
-      .catch((e) => toast.error(e.message));
-  };
+  const selectDocumentTab = useCallback(
+    (doc: Document) => {
+      open(doc);
+      setEditingLibrary(false);
+      void api.update(doc.id, {}).catch((e) => toast.error(e.message));
+    },
+    [open],
+  );
   const tabsShown = documentTabsShown({ theme, tabIds, closedTabGroups });
   const openDocuments = (docs: Document[]) => {
-    if (!docs.length) return;
-    useReaderStore.getState().openMany(docs);
-    setEditingLibrary(false);
-    void api.update(docs[0].id, {}).catch((e) => toast.error(e.message));
+    void openLibraryDocuments(docs)
+      .then(({ opened, skipped, recentErrors }) => {
+        if (opened.length) setEditingLibrary(false);
+        if (skipped.length) {
+          const reasons = [...new Set(skipped.map((item) => item.reason))].join(
+            "；",
+          );
+          toast.info(`已跳过 ${skipped.length} 份文档：${reasons}`);
+        }
+        if (recentErrors.length)
+          toast.error(
+            `最近打开时间更新失败：${[...new Set(recentErrors)].join("；")}`,
+          );
+      })
+      .catch((e) => toast.error(e.message));
   };
-  const filtered = filterDocuments(
-    documents,
-    filter,
-    filter === "all" ? "" : query,
-    filters,
-  );
-  const searchResults = filterDocuments(
-    documents,
-    "all",
-    commandQuery,
-    initialFilters,
+  const filtered = useMemo(
+    () =>
+      filterDocuments(
+        documents,
+        filter,
+        filter === "all" ? "" : query,
+        filters,
+      ),
+    [documents, filter, query, filters],
   );
   const awaitingClassification = documents.some(
     (d) =>
@@ -514,14 +552,13 @@ export function App() {
         className="app"
         data-platform={window.neoreadDesktop?.platform}
         data-has-tabs={tabsShown || undefined}
-        onDragOver={(e) => {
-          e.preventDefault();
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          void importFiles(Array.from(e.dataTransfer.files));
-        }}
+        {...fileDrop}
       >
+        {dragging && (
+          <div className="library-file-drop" role="status">
+            松开以导入到{papers ? "论文库" : "图书库"}
+          </div>
+        )}
         <input
           type="file"
           ref={fileRef}
@@ -537,7 +574,8 @@ export function App() {
           }}
         />
         <DocumentTabs
-          onSelect={openDocument}
+          onSelect={selectDocumentTab}
+          onReopen={openDocument}
           onLibrary={showLibrary}
           onNew={() => {
             showLibrary();
@@ -548,7 +586,7 @@ export function App() {
           theme={resolvedTheme}
           jobs={jobs}
           onLibrary={showLibrary}
-          onSettings={() => setSettings(true)}
+          onSettings={showSettings}
         />
         {!active && (
           <div
@@ -593,7 +631,7 @@ export function App() {
                   {[
                     {
                       id: "all",
-                      label: papers ? "全部论文" : "全部图书",
+                      label: "全部图书",
                       icon: Library,
                       count: documents.length,
                     },
@@ -624,6 +662,7 @@ export function App() {
                       key={item.id}
                       variant="ghost"
                       className={`nav-item ${filter === item.id ? "active" : ""}`}
+                      aria-current={filter === item.id ? "page" : undefined}
                       onClick={() => {
                         setFilter(item.id);
                         setEditingLibrary(false);
@@ -658,7 +697,7 @@ export function App() {
                   data-tour="open-settings"
                   variant="ghost"
                   className="nav-item"
-                  onClick={() => setSettings(true)}
+                  onClick={() => openSettings()}
                 >
                   <Settings2 />
                   设置
@@ -690,12 +729,15 @@ export function App() {
             {nav && <LibrarySidebarResizer />}
             {papers ? (
               <PaperLibrary
-                onSettings={() => setSettings(true)}
+                onSettings={showSettings}
                 openDocuments={theme.documentTabs ? openDocuments : undefined}
                 documents={documents}
                 trash={trash}
                 jobs={jobsById}
                 loading={loading}
+                error={error}
+                processingError={processingError}
+                onImport={() => setImportingPaper(true)}
                 openDocument={openDocument}
                 moveToBooks={(doc) => void moveDocument(doc, "books")}
                 navOpen={nav}
@@ -739,9 +781,7 @@ export function App() {
                           ? "回收站"
                           : filter === "favorites"
                             ? "收藏"
-                            : papers
-                              ? "全部论文"
-                              : "全部图书"}
+                            : "全部图书"}
                     </h1>
                   </div>
                   {filter === "tags" ? (
@@ -809,16 +849,7 @@ export function App() {
                         </p>
                       )}
                       {error ? (
-                        <div className="empty-state">
-                          <h2>暂时无法连接本地书库</h2>
-                          <p>{error}</p>
-                          <Button
-                            variant="outline"
-                            onClick={() => location.reload()}
-                          >
-                            重新连接
-                          </Button>
-                        </div>
+                        <LibraryConnectionError error={error} />
                       ) : loading ? (
                         <div className="empty-state">
                           <Loader2 className="animate-spin text-muted-foreground" />
@@ -830,11 +861,15 @@ export function App() {
                         <TagBoards
                           documents={documents}
                           query={query}
+                          onMove={moveDocument}
+                          openDocuments={
+                            theme.documentTabs ? openDocuments : undefined
+                          }
                           jobs={jobs}
                           processingError={processingError}
                           openDocument={openDocument}
                           favorite={favorite}
-                          onSettings={() => setSettings(true)}
+                          onSettings={showSettings}
                           onOverview={setOverviewDocument}
                           onUsage={setUsageDocument}
                           detailId={detail?.id}
@@ -845,7 +880,7 @@ export function App() {
                           openDocuments={
                             theme.documentTabs ? openDocuments : undefined
                           }
-                          key={JSON.stringify([filter, query, filters])}
+                          key={JSON.stringify([filter, filters])}
                           documents={filtered}
                           libraryView={libraryView}
                           editing={editingLibrary}
@@ -855,7 +890,7 @@ export function App() {
                           openDocument={openDocument}
                           favorite={favorite}
                           onMove={moveDocument}
-                          onSettings={() => setSettings(true)}
+                          onSettings={showSettings}
                           onOverview={setOverviewDocument}
                           onUsage={setUsageDocument}
                           activeId={detail?.id}
@@ -872,15 +907,14 @@ export function App() {
                             </span>
                           </div>
                           <h2>
-                            {documents.length
-                              ? "没有符合筛选条件的文档"
-                              : filter === "favorites"
-                                ? "暂无收藏"
-                                : papers
-                                  ? "暂无论文"
-                                  : "暂无文档"}
+                            {filter === "favorites" &&
+                            !documents.some((doc) => doc.favorite)
+                              ? "暂无收藏"
+                              : documents.length
+                                ? "没有符合筛选条件的文档"
+                                : "暂无文档"}
                           </h2>
-                          {!!documents.length && (
+                          {(!!documents.length || filter === "favorites") && (
                             <Button
                               variant="outline"
                               onClick={() => {
@@ -892,14 +926,22 @@ export function App() {
                               显示全部图书
                             </Button>
                           )}
-                          {!documents.length && !papers && (
-                            <Button
-                              variant="link"
-                              onClick={() => void sample()}
-                              disabled={busy}
-                            >
-                              先体验示例文档 <ArrowUpRight className="size-3" />
-                            </Button>
+                          {!documents.length && filter !== "favorites" && (
+                            <>
+                              <Button
+                                onClick={() => chooseFiles()}
+                                disabled={busy}
+                              >
+                                导入文档
+                              </Button>
+                              <Button
+                                variant="link"
+                                onClick={() => void sample()}
+                                disabled={busy}
+                              >
+                                先体验示例文档 <ArrowUpRight className="size-3" />
+                              </Button>
+                            </>
                           )}
                         </div>
                       )}
@@ -974,7 +1016,7 @@ export function App() {
           open={guide}
           onOpenChange={setGuide}
           onAction={(action) => {
-            if (action === "settings") setSettings(true);
+            if (action === "settings") openSettings();
             else if (currentMode() === "papers") setImportingPaper(true);
             else chooseFiles();
           }}
@@ -983,7 +1025,9 @@ export function App() {
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
               <DialogTitle>关于 NeoRead</DialogTitle>
-              <DialogDescription>一千万以内最好的阅读器</DialogDescription>
+              <DialogDescription className="sr-only">
+                NeoRead 版本与更新
+              </DialogDescription>
             </DialogHeader>
             <dl className="flex items-center justify-between text-sm">
               <dt className="text-muted-foreground">版本</dt>
@@ -1006,53 +1050,16 @@ export function App() {
             )}
           </DialogContent>
         </Dialog>
-        <Dialog open={command} onOpenChange={setCommand}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Command size={18} />
-                快速查找
-              </DialogTitle>
-              <DialogDescription>搜索书库，或打开常用操作。</DialogDescription>
-            </DialogHeader>
-            <Input
-              autoFocus
-              placeholder="搜索标题、作者、标签…"
-              value={commandQuery}
-              onChange={(e) => setCommandQuery(e.target.value)}
-            />
-            <div className="min-w-0 max-h-72 space-y-1 overflow-auto">
-              {searchResults.map((d) => (
-                <Button
-                  key={d.id}
-                  variant="ghost"
-                  className="min-w-0 w-full justify-start"
-                  title={d.title}
-                  onClick={() => {
-                    openDocument(d);
-                    setCommand(false);
-                  }}
-                >
-                  <BookOpen />
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {d.title}
-                  </span>
-                </Button>
-              ))}
-              <Button
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={() => {
-                  setCommand(false);
-                  setSettings(true);
-                }}
-              >
-                <Settings2 />
-                打开设置
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <QuickFind
+          open={command}
+          onOpenChange={setCommand}
+          documents={documents}
+          mode={mode}
+          onDocument={openDocument}
+          onSettings={showSettings}
+          onImport={() => (papers ? setImportingPaper(true) : chooseFiles())}
+          onSwitchLibrary={() => openLibrary(papers ? "books" : "papers")}
+        />
         <LargePaperConfirmation />
         <LargePaperDialog
           papers={largePapers}
@@ -1067,6 +1074,13 @@ export function App() {
         <LibraryArchiveProgress onBackground={() => setSettings(false)} />
         <Toaster
           richColors
+          style={
+            {
+              "--normal-bg": "var(--popover)",
+              "--normal-border": "var(--border)",
+              "--normal-text": "var(--popover-foreground)",
+            } as React.CSSProperties
+          }
           position="bottom-right"
           theme={resolvedTheme.mode === "dark" ? "dark" : "light"}
         />

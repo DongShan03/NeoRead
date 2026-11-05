@@ -238,6 +238,7 @@ beforeEach(async ({ task }) => {
       hide = vi.fn();
       setEnabled = vi.fn();
       setBounds = vi.fn();
+      setBackgroundColor = vi.fn();
       maximize = vi.fn();
       focus = vi.fn();
       isMinimized = () => false;
@@ -1451,4 +1452,24 @@ it("preserves the current library and pending reading state when a new library c
   expect(catalogRemember).not.toHaveBeenCalled();
   expect(old.isDestroyed()).toBe(false);
   expect(old.setEnabled).toHaveBeenLastCalledWith(true);
+});
+
+it("passes only the motion hint through the existing appearance cache path", async () => {
+  const { saveStartupAppearance } = await import("./startup-appearance-cache");
+  const save = vi.mocked(saveStartupAppearance);
+  save.mockClear();
+  handlers.get("neoread:appearance")!(event(), "dark", { reducedMotion: true });
+  expect(save).toHaveBeenLastCalledWith("/userdata", "dark", true);
+  handlers.get("neoread:appearance")!(event(), "light", {});
+  expect(save).toHaveBeenLastCalledWith("/userdata", "light", undefined);
+});
+
+it("recovery: preserves cached motion when recovery settings omit the preference", async () => {
+  const { saveStartupAppearance } = await import("./startup-appearance-cache");
+  expect(recoveryStart).toHaveBeenCalledOnce();
+  expect(saveStartupAppearance).toHaveBeenCalledWith(
+    "/userdata",
+    "system",
+    undefined,
+  );
 });

@@ -158,6 +158,7 @@ export function useShortcut(
 export function forwardReaderShortcut(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing || event.repeat) return;
   if (
+    !(bindingFromEvent(event)?.key === "k" && !event.shiftKey) &&
     !documentTabCommand(event) &&
     ![
       "readerLeft",

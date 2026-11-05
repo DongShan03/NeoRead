@@ -49,6 +49,8 @@ export function TagBoards({
   jobs,
   processingError,
   openDocument,
+  openDocuments,
+  onMove,
   favorite,
   onSettings,
   onOverview,
@@ -61,6 +63,8 @@ export function TagBoards({
   jobs: Processing[];
   processingError: string;
   openDocument: (doc: Document) => void;
+  openDocuments?: (docs: Document[]) => void;
+  onMove?: (doc: Document, library: Document["library"]) => void;
   favorite: (doc: Document) => void;
   onSettings: () => void;
   onOverview: (doc: Document) => void;
@@ -456,12 +460,14 @@ export function TagBoards({
           </p>
         ) : filtered.length ? (
           <LibraryDocuments
-            key={JSON.stringify([activeId, tags, match, query])}
+            key={JSON.stringify([activeId, tags, match])}
             documents={filtered}
             libraryView={view}
             jobs={jobs}
             processingError={processingError}
             openDocument={openDocument}
+            openDocuments={openDocuments}
+            onMove={onMove}
             favorite={favorite}
             onSettings={onSettings}
             onOverview={onOverview}

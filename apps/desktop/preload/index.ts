@@ -121,6 +121,7 @@ contextBridge.exposeInMainWorld("neoreadDesktop", {
   setAppearance: (
     appearance: "light" | "sepia" | "dark" | "system",
     palettes: {
+      reducedMotion?: boolean;
       pdfDarkContrast?: "high" | "soft";
       systemLightMode?: "light" | "sepia";
       systemDarkContrast?: "high" | "soft";

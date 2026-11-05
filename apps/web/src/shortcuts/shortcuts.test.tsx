@@ -352,3 +352,20 @@ it("does not scan the document while typing ordinary text in an empty composer",
   }
   expect(scan).not.toHaveBeenCalled();
 });
+
+it("forwards the command palette shortcut from Readium frames", () => {
+  const listener = vi.fn((event: KeyboardEvent) => event.preventDefault());
+  window.addEventListener("keydown", listener);
+  try {
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      cancelable: true,
+    });
+    forwardReaderShortcut(event);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  } finally {
+    window.removeEventListener("keydown", listener);
+  }
+});

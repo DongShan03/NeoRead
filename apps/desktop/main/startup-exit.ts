@@ -5,6 +5,7 @@ type StartupSnapshot = {
   css: string;
   theme: string;
   background: string;
+  reducedMotion: boolean;
 };
 
 // These functions execute in separate renderers. Keep their runtime dependencies
@@ -24,6 +25,7 @@ function captureStartup(): StartupSnapshot {
   }
   return {
     html: clone.outerHTML,
+    reducedMotion: document.documentElement.dataset.reducedMotion === "true",
     css: style.textContent ?? "",
     theme: document.documentElement.dataset.startupTheme ?? "light",
     background: getComputedStyle(document.documentElement).backgroundColor,
@@ -70,7 +72,6 @@ async function installStartupExit(snapshot: StartupSnapshot): Promise<void> {
   shadow.append(style, veil, surface);
   document.head.append(fontStyle);
   document.body.append(overlay);
-  const motion = matchMedia("(prefers-reduced-motion: reduce)");
   const animations: Animation[] = [];
   let cleaned = false;
   let running = false;
@@ -90,21 +91,17 @@ async function installStartupExit(snapshot: StartupSnapshot): Promise<void> {
     window.removeEventListener("beforeunload", cleanup);
     window.removeEventListener("resize", resize);
     document.removeEventListener("visibilitychange", onVisibility);
-    motion.removeEventListener("change", onMotion);
     overlay.remove();
     fontStyle.remove();
     if (host.__neoreadStartupExit === entry) delete host.__neoreadStartupExit;
     finish();
     for (const animation of animations) animation.cancel();
   };
-  const onMotion = () => {
-    if (motion.matches) cleanup();
-  };
   const onVisibility = () => {
     if (running && document.hidden) cleanup();
   };
   const run = (animate = true): Promise<void> => {
-    if (!animate || motion.matches || document.hidden) cleanup();
+    if (!animate || snapshot.reducedMotion || document.hidden) cleanup();
     if (cleaned || running) return done;
     running = true;
     try {
@@ -148,7 +145,6 @@ async function installStartupExit(snapshot: StartupSnapshot): Promise<void> {
   window.addEventListener("beforeunload", cleanup);
   window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", onVisibility);
-  motion.addEventListener("change", onMotion);
   resize();
   // Broken embedded assets must not strand the overlay. Navigation/replacement
   // also releases preparation even if an asset promise never settles.

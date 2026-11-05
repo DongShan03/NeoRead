@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { reducedMotion } from "./motion";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -50,10 +51,12 @@ const animated = () => !reducedMotion();
 
 export function DocumentTabs({
   onSelect,
+  onReopen = onSelect,
   onLibrary,
   onNew,
 }: {
   onSelect: (doc: Document) => void;
+  onReopen?: (doc: Document) => void;
   onLibrary: () => void;
   onNew: () => void;
 }) {
@@ -144,7 +147,7 @@ export function DocumentTabs({
     if (pendingClose.current) return;
     restoreFocus.current = true;
     const doc = useReaderStore.getState().reopenTabs();
-    if (doc) onSelect(doc);
+    if (doc) onReopen(doc);
     else restoreFocus.current = false;
   };
   const extra = enabled
@@ -518,7 +521,14 @@ export function ReadingWorkspaces({
   onLibrary: () => void;
   onSettings: () => void;
 }) {
-  const { documents, tabIds, visitedTabs, active } = useReaderStore();
+  const { documents, tabIds, visitedTabs, active } = useReaderStore(
+    useShallow((s) => ({
+      documents: s.documents,
+      tabIds: s.tabIds,
+      visitedTabs: s.visitedTabs,
+      active: s.active,
+    })),
+  );
   return tabIds.map((id) => {
     const doc = documents.find((item) => item.id === id);
     if (!doc) return null;

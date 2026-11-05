@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   defaultTheme,
   type Document,
+  type Processing,
   type ReaderTheme,
   type AIConfig,
   type LibraryMode,
@@ -97,6 +98,7 @@ export const useReaderStore = create<{
       };
     }),
   openMany: (documents) => {
+    if (!documents.length) return;
     ++openRevision;
     set((state) => {
       if (!documents.length) return state;
@@ -335,6 +337,47 @@ export async function refreshTrash() {
   const trash = await api.trash(libraryMode(state.libraryPreferences));
   if (revision === trashRevision) useReaderStore.getState().setTrash(trash);
 }
+/** Explain a parsing gate without changing which stages permit opening. */
+export function paperOpenReason(job?: Processing) {
+  if (!job) return "论文解析任务已不存在，请重新解析文档";
+  if (job.incomplete)
+    return job.warning || job.detail || "论文正文不完整，无法打开";
+  if (["failed", "waiting", "paused"].includes(job.status))
+    return job.detail || "论文解析没有完成，无法打开";
+  return "论文飞速解析中，请稍等";
+}
+const paperBlocked = (job?: Processing) =>
+  !job || (job.phase === "learning" && !job.receiving) || job.incomplete;
+
+/** Check all paper gates with one snapshot before opening a tab group. */
+export async function openLibraryDocuments(documents: Document[]) {
+  const skipped: { document: Document; reason: string }[] = [];
+  const recentErrors: string[] = [];
+  if (!documents.length) return { opened: [], skipped, recentErrors };
+  const revision = ++openRevision;
+  const jobs = documents.some((doc) => doc.library === "papers")
+    ? await api.processing()
+    : [];
+  if (revision !== openRevision) return { opened: [], skipped, recentErrors };
+  const byId = new Map(jobs.map((job) => [job.documentId, job]));
+  const opened = documents.filter((document) => {
+    const job = byId.get(document.id);
+    if (document.library !== "papers" || !paperBlocked(job)) return true;
+    skipped.push({ document, reason: paperOpenReason(job) });
+    return false;
+  });
+  if (opened.length) {
+    useReaderStore.getState().openMany(opened);
+    const results = await Promise.allSettled(
+      opened.map((doc) => api.update(doc.id, {})),
+    );
+    for (const result of results)
+      if (result.status === "rejected")
+        recentErrors.push((result.reason as Error).message);
+  }
+  return { opened, skipped, recentErrors };
+}
+
 /** Check the persisted parsing stage before entering a paper reader. */
 export async function openLibraryDocument(
   doc: Document,
@@ -345,8 +388,7 @@ export async function openLibraryDocument(
     const jobs = await api.processing();
     if (revision !== openRevision) return false;
     const job = jobs.find((job) => job.documentId === doc.id);
-    if (!job || (job.phase === "learning" && !job.receiving) || job.incomplete)
-      throw new Error("论文飞速解析中，请稍等");
+    if (paperBlocked(job)) throw new Error(paperOpenReason(job));
   }
   const state = useReaderStore.getState();
   if (target && libraryMode(state.libraryPreferences) !== doc.library)
@@ -388,16 +430,14 @@ export async function openWhenParsed(id: string, onWaiting: () => void) {
     if (revision !== openRevision) return true;
     if (!useReaderStore.getState().documents.some((item) => item.id === id))
       return false;
-    if (!job) throw new Error("论文解析任务已不存在，请重新解析文档");
-    if (job.phase !== "learning") {
-      if (job.incomplete)
-        throw new Error(
-          job.warning || job.detail || "论文正文不完整，无法打开",
-        );
-      break;
-    }
-    if (["failed", "waiting", "paused"].includes(job.status))
-      throw new Error(job.detail || "论文解析没有完成，无法打开");
+    if (
+      !job ||
+      (job.phase !== "learning" && job.incomplete) ||
+      (job.phase === "learning" &&
+        ["failed", "waiting", "paused"].includes(job.status))
+    )
+      throw new Error(paperOpenReason(job));
+    if (job.phase !== "learning") break;
     if (!waiting) {
       waiting = true;
       onWaiting();
