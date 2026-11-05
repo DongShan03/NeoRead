@@ -51,10 +51,7 @@ function QuickFindContent({
   const [selected, setSelected] = useState(0);
   const listId = useId();
   const results = useMemo(
-    () =>
-      query.trim()
-        ? filterDocuments(documents, "all", query, initialFilters).slice(0, 50)
-        : [],
+    () => filterDocuments(documents, "all", query, initialFilters).slice(0, 50),
     [documents, query],
   );
   const actions = [
