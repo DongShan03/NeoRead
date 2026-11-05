@@ -3022,12 +3022,19 @@ kbd {
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 0 0 clamp(310px, 38%, 520px);
+  flex: 0 0 var(--library-agent-width, clamp(310px, 38%, 780px));
+  max-width: calc(100% - 260px);
   min-width: 0;
   min-height: 0;
   background: var(--background);
   border-left: 1px solid var(--border);
   box-shadow: -3px 0 10px color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+.library-agent-pane > .paper-detail-resizer {
+  position: absolute;
+  inset: 0 auto 0 0;
+  margin: 0;
+  z-index: 15;
 }
 .library-agent-heading {
   display: flex;
@@ -3065,7 +3072,8 @@ kbd {
   .library-agent-pane {
     position: absolute;
     inset: 0 0 0 auto;
-    width: min(440px, 100%);
+    width: min(var(--library-agent-width, 660px), 100%);
+    max-width: 100%;
     z-index: 12;
   }
 }

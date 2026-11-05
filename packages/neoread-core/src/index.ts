@@ -219,6 +219,7 @@ export interface PaperLibraryPreferences {
   columnWidths?: Partial<Record<"title" | PaperColumn, number>>;
   /** Width of the paper detail panel in CSS pixels. */
   detailWidth?: number;
+  agentWidth?: number;
   /** Look up metadata from the DOI or arXiv ID printed in imported PDFs. */
   autoLookup?: boolean;
   citationStyle?: "gb7714" | "apa" | "bibtex" | "ris" | "csl-json";
@@ -990,6 +991,7 @@ export interface DocumentChatSession {
   latestRun?: ChatRun;
 }
 export interface LibraryChatScope {
+  categoryKey?: string;
   category: string;
   documentIds: string[];
 }

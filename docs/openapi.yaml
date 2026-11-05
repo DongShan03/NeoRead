@@ -7223,6 +7223,7 @@
               "required": ["category", "documentIds"],
               "properties":
                 {
+                  "categoryKey": { "type": "string", "maxLength": 1024 },
                   "category":
                     { "type": "string", "minLength": 1, "maxLength": 256 },
                   "documentIds":

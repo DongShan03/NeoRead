@@ -1348,10 +1348,15 @@ export function PaperLibrary({
               <LibraryAgentPanel
                 scope={{
                   category: title,
+                  categoryKey: view,
                   documentIds: scopeDocuments.map((doc) => doc.id),
                 }}
                 onClose={() => ui.setLibraryAgentOpen(false)}
                 onSettings={onSettings}
+                width={prefs.agentWidth}
+                onWidthChange={(agentWidth) =>
+                  void savePaperPreferences((p) => ({ ...p, agentWidth }))
+                }
               />
             </Suspense>
           )}

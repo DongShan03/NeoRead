@@ -6,6 +6,7 @@ import {
   useState,
   useSyncExternalStore,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import {
   BookOpen,
@@ -42,6 +43,7 @@ import { AssistantPanel } from "../chat/AssistantPanel";
 import { SessionPicker } from "../chat/SessionPicker";
 import { ComposerSendButton } from "../chat/ComposerSendButton";
 import { ChatCitationNavigation } from "../chat/citations";
+import { dragHorizontally, resizeStep } from "./resize";
 import {
   focusSelectionScope,
   selectAllInScope,
@@ -52,80 +54,212 @@ const sameScope = (a: LibraryChatScope, b: LibraryChatScope) =>
   a.category === b.category &&
   [...a.documentIds].sort().join("\n") === [...b.documentIds].sort().join("\n");
 
+const selectionKey = "neoread.library-chat-selections";
+const categoryKey = (scope: LibraryChatScope) =>
+  scope.categoryKey ?? scope.category;
+function savedSelections(): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(
+      localStorage.getItem(selectionKey) ?? "{}",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(([, id]) => typeof id === "string"),
+    );
+  } catch {
+    return {};
+  }
+}
+const belongsToCategory = (
+  item: LibraryChatSession,
+  scope: LibraryChatScope,
+) =>
+  item.scope.categoryKey && scope.categoryKey
+    ? item.scope.categoryKey === scope.categoryKey
+    : item.scope.category === scope.category;
+
 export function LibraryAgentPanel({
   scope,
   onClose,
   onSettings,
+  width,
+  onWidthChange,
 }: {
   scope: LibraryChatScope;
   onClose: () => void;
   onSettings: () => void;
+  width?: number;
+  onWidthChange?: (width: number) => void;
 }) {
   const provider = useReaderStore((state) => state.aiConfig?.primary || "api");
   const [sessions, setSessions] = useState<LibraryChatSession[]>([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] =
+    useState<Record<string, string>>(savedSelections);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+  const [creating, setCreating] = useState<string[]>([]);
   const latest = useRef({ scope, provider });
   latest.current = { scope, provider };
-  const live = useRef(true);
+  const pane = useRef<HTMLElement>(null);
+  const live = useRef(true),
+    revision = useRef(0);
+  const pending = useRef(new Map<string, Promise<void>>());
+  const key = categoryKey(scope);
+  const select = useCallback(
+    (scopeKey: string, id: string) =>
+      setSelected((items) => ({ ...items, [scopeKey]: id })),
+    [],
+  );
+  useEffect(() => {
+    localStorage.setItem(selectionKey, JSON.stringify(selected));
+  }, [selected]);
   const refresh = useCallback(async () => {
+    const serial = ++revision.current;
     const items = await api.libraryChatSessions(AbortSignal.timeout(15_000));
-    if (live.current) setSessions(items);
+    if (live.current && serial === revision.current) {
+      setSessions(items);
+      setError("");
+    }
   }, []);
-  const create = useCallback(async () => {
-    const { scope, provider } = latest.current;
-    if (!scope.documentIds.length)
-      throw new Error("当前分类没有可供提问的论文");
-    const item = await api.createLibraryChatSession(provider, scope);
-    if (!live.current) return;
-    setSessions((items) => [item, ...items]);
-    setSelected(item.id);
-    localStorage.setItem("neoread.library-chat-session", item.id);
-  }, []);
+  const create = useCallback(
+    (target = latest.current.scope): Promise<void> => {
+      const scopeKey = categoryKey(target);
+      const existing = pending.current.get(scopeKey);
+      if (existing) return existing;
+      if (!target.documentIds.length)
+        return Promise.reject(new Error("当前分类没有可供提问的论文"));
+      setCreating((keys) => [...keys, scopeKey]);
+      setCreateErrors((items) => ({ ...items, [scopeKey]: "" }));
+      const run = api
+        .createLibraryChatSession(latest.current.provider, target)
+        .then((item) => {
+          if (!live.current) return;
+          revision.current++;
+          setSessions((items) => [
+            item,
+            ...items.filter((old) => old.id !== item.id),
+          ]);
+          select(scopeKey, item.id);
+        })
+        .catch((failure) => {
+          if (live.current)
+            setCreateErrors((items) => ({
+              ...items,
+              [scopeKey]: (failure as Error).message,
+            }));
+          throw failure;
+        })
+        .finally(() => {
+          pending.current.delete(scopeKey);
+          if (live.current)
+            setCreating((keys) => keys.filter((item) => item !== scopeKey));
+        });
+      pending.current.set(scopeKey, run);
+      return run;
+    },
+    [select],
+  );
   useEffect(() => {
     live.current = true;
-    let current = true;
-    void api
-      .libraryChatSessions(AbortSignal.timeout(15_000))
-      .then(async (items) => {
-        if (!current) return;
-        setSessions(items);
-        const previous = localStorage.getItem("neoread.library-chat-session");
-        const match =
-          items.find((item) => item.id === previous) ??
-          items.find((item) => sameScope(item.scope, latest.current.scope));
-        if (match) setSelected(match.id);
-        else if (latest.current.scope.documentIds.length) await create();
-      })
-      .catch((failure: Error) => {
-        if (current) setError(failure.message);
+    void refresh()
+      .catch((failure) => {
+        if (live.current) setError(failure.message);
       })
       .finally(() => {
-        if (current) setLoading(false);
+        if (live.current) setLoading(false);
       });
     return () => {
-      current = false;
       live.current = false;
+      revision.current++;
     };
-  }, [create]);
-  const current = sessions.find((item) => item.id === selected);
+  }, [refresh]);
+  const visible = useMemo(
+    () => sessions.filter((item) => belongsToCategory(item, scope)),
+    [sessions, key, scope.category],
+  );
+  const current =
+    visible.find((item) => item.id === selected[key]) ?? visible[0];
+  useEffect(() => {
+    if (
+      loading ||
+      error ||
+      createErrors[key] ||
+      current ||
+      !scope.documentIds.length ||
+      pending.current.has(key)
+    )
+      return;
+    void create(scope).catch(() => {});
+  }, [
+    key,
+    loading,
+    current?.id,
+    error,
+    createErrors,
+    scope.documentIds.length,
+    create,
+  ]);
   useEffect(() => {
     const applied = (event: Event) => {
-      const ids = (event as CustomEvent<string[]>).detail;
-      if (ids?.includes("library"))
+      if ((event as CustomEvent<string[]>).detail?.includes("library"))
         void refresh().catch((failure) => toast.error(failure.message));
     };
     window.addEventListener("neoread:sync-applied", applied);
     return () => window.removeEventListener("neoread:sync-applied", applied);
   }, [refresh]);
+  const clamp = (value: number) =>
+    Math.round(Math.min(780, Math.max(280, value)));
   return (
     <aside
+      ref={pane}
       className="library-agent-pane"
       aria-label="书库 Agent 对话"
+      style={
+        width
+          ? ({ "--library-agent-width": `${clamp(width)}px` } as CSSProperties)
+          : undefined
+      }
       onPointerDownCapture={(event) => focusSelectionScope(event.nativeEvent)}
       onKeyDownCapture={(event) => selectAllInScope(event.nativeEvent)}
     >
+      {onWidthChange && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整书库 Agent 宽度"
+          aria-valuemin={280}
+          aria-valuemax={780}
+          aria-valuenow={width}
+          tabIndex={0}
+          className="paper-detail-resizer"
+          onPointerDown={(event) => {
+            const start = pane.current?.getBoundingClientRect().width ?? 360;
+            let next = start;
+            dragHorizontally(
+              event,
+              (dx) => {
+                next = clamp(start - dx);
+                pane.current?.style.setProperty(
+                  "--library-agent-width",
+                  `${next}px`,
+                );
+              },
+              () => onWidthChange(next),
+            );
+          }}
+          onKeyDown={(event) => {
+            const dx = { ArrowLeft: resizeStep, ArrowRight: -resizeStep }[
+              event.key
+            ];
+            if (!dx) return;
+            event.preventDefault();
+            onWidthChange(
+              clamp((pane.current?.getBoundingClientRect().width ?? 360) + dx),
+            );
+          }}
+        />
+      )}
       <header className="library-agent-heading">
         <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <Bot className="size-4" />
@@ -151,11 +285,7 @@ export function LibraryAgentPanel({
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
-              void refresh()
-                .then(() => setError(""))
-                .catch((e) => setError(e.message))
-            }
+            onClick={() => void refresh().catch((e) => setError(e.message))}
           >
             重新加载
           </Button>
@@ -165,15 +295,12 @@ export function LibraryAgentPanel({
           <div className="library-agent-session">
             <SessionPicker
               documentId="library"
-              sessions={sessions}
+              sessions={visible}
               current={current}
               provider={provider}
-              onCreate={create}
+              onCreate={() => create()}
               onRefresh={refresh}
-              onChange={(id) => {
-                setSelected(id);
-                localStorage.setItem("neoread.library-chat-session", id);
-              }}
+              onChange={(id) => select(key, id)}
             />
           </div>
           {current ? (
@@ -183,21 +310,31 @@ export function LibraryAgentPanel({
               activeScope={scope}
               provider={provider}
               onSettings={onSettings}
-              onNew={create}
+              onNew={() => create()}
               onRefresh={refresh}
             />
           ) : (
             <div className="library-agent-empty">
-              <p>选择包含论文的分类，开始对话。</p>
-              <Button
-                variant="outline"
-                disabled={!scope.documentIds.length}
-                onClick={() =>
-                  void create().catch((e) => toast.error(e.message))
-                }
-              >
-                开始对话
-              </Button>
+              {createErrors[key] && <p role="alert">{createErrors[key]}</p>}
+              {creating.includes(key) ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  正在新建对话…
+                </>
+              ) : (
+                <>
+                  <p>选择包含论文的分类，开始对话。</p>
+                  <Button
+                    variant="outline"
+                    disabled={!scope.documentIds.length}
+                    onClick={() =>
+                      void create().catch((e) => toast.error(e.message))
+                    }
+                  >
+                    开始对话
+                  </Button>
+                </>
+              )}
             </div>
           )}
         </>
@@ -221,7 +358,6 @@ function LibraryConversation({
   onNew: () => Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
-  const documents = useReaderStore((state) => state.documents);
   const modelSaving = useReaderStore((state) => state.aiModelSaving);
   const session = useMemo(() => getChatSession("library", item.id), [item.id]);
   const summary = useSyncExternalStore(session.subscribe, session.getSummary);
@@ -235,9 +371,11 @@ function LibraryConversation({
   quoteRef.current = quotes;
   useEffect(() => {
     session.activate();
-    void session.load();
+    if (!session.getSnapshot().loaded) void session.load();
     return () => {
-      drafts.set(item.id, { text: prompt.current, quotes: quoteRef.current });
+      if (prompt.current || quoteRef.current.length)
+        drafts.set(item.id, { text: prompt.current, quotes: quoteRef.current });
+      else drafts.delete(item.id);
     };
   }, [session, item.id]);
   const updateDraft = () => {
@@ -290,11 +428,15 @@ function LibraryConversation({
       ),
     ]);
   };
-  const scopeChanged = !sameScope(item.scope, activeScope);
+  const scopeChanged = useMemo(
+    () => !sameScope(item.scope, activeScope),
+    [item.scope, activeScope],
+  );
+  const [scopeOpen, setScopeOpen] = useState(false);
   return (
     <>
       <div className="library-agent-scope">
-        <Popover>
+        <Popover open={scopeOpen} onOpenChange={setScopeOpen}>
           <PopoverTrigger
             render={<Button variant="ghost" size="sm" className="max-w-full" />}
           >
@@ -312,14 +454,7 @@ function LibraryConversation({
             <PopoverTitle className="mb-2 text-sm font-medium">
               本会话的论文范围
             </PopoverTitle>
-            {item.scope.documentIds.map((id) => {
-              const doc = documents.find((doc) => doc.id === id);
-              return (
-                <div key={id} className="py-2 text-sm break-words">
-                  {doc?.title ?? "已移除的论文"}
-                </div>
-              );
-            })}
+            {scopeOpen && <ScopePapers ids={item.scope.documentIds} />}
           </PopoverContent>
         </Popover>
         {scopeChanged && (
@@ -440,6 +575,23 @@ function LibraryConversation({
           )}
         </div>
       </div>
+    </>
+  );
+}
+
+function ScopePapers({ ids }: { ids: string[] }) {
+  const documents = useReaderStore((state) => state.documents);
+  const byId = useMemo(
+    () => new Map(documents.map((doc) => [doc.id, doc.title])),
+    [documents],
+  );
+  return (
+    <>
+      {ids.map((id) => (
+        <div key={id} className="py-2 text-sm break-words">
+          {byId.get(id) ?? "已移除的论文"}
+        </div>
+      ))}
     </>
   );
 }

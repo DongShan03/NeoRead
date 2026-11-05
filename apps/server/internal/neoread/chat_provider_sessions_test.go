@@ -793,7 +793,7 @@ func TestManagedCodexSessionsKeepSeparateNativeThreads(t *testing.T) {
 
 func createLibrarySessionTest(t *testing.T, s *Server, ids ...string) libraryChatSession {
 	t.Helper()
-	body := jsonText(map[string]any{"provider": "codex", "scope": libraryChatScope{Category: "研究", DocumentIDs: ids}})
+	body := jsonText(map[string]any{"provider": "codex", "scope": libraryChatScope{Category: "研究", CategoryKey: "folder:研究", DocumentIDs: ids}})
 	out := request(t, s, "POST", "/api/library/chat-sessions", strings.NewReader(body))
 	if out.Code != 201 {
 		t.Fatal(out.Code, out.Body.String())
@@ -905,6 +905,11 @@ func TestLibraryChatManagedCodexStreamsAndContinuesWithoutCreatingPaperRows(t *t
 	var count int
 	if err = s.Store.DB.QueryRow("SELECT count(*) FROM documents").Scan(&count); err != nil || count != 1 {
 		t.Fatal("chat created a synthetic library paper", count, err)
+	}
+	listed := request(t, s, "GET", "/api/library/chat-sessions", nil)
+	var sessions []libraryChatSession
+	if listed.Code != 200 || json.Unmarshal(listed.Body.Bytes(), &sessions) != nil || len(sessions) != 1 || sessions[0].Scope.CategoryKey != "folder:研究" || sessions[0].LatestRun == nil || sessions[0].LatestRun.Status != "completed" || strings.Contains(listed.Body.String(), `"events"`) {
+		t.Fatal("session list lost its category or lightweight run summary", listed.Code, listed.Body.String())
 	}
 	out := request(t, s, "DELETE", "/api/library/chat-sessions/"+item.ID+"/messages/"+history[2].ID, strings.NewReader(jsonText(chatMessageChange{ExpectedLastMessageID: history[3].ID, ExpectedContent: history[2].Content})))
 	if out.Code != 200 {

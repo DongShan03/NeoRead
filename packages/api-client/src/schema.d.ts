@@ -6231,6 +6231,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         LibraryChatScope: {
+            categoryKey?: string;
             category: string;
             documentIds: string[];
         };

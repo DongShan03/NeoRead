@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -40,6 +41,7 @@ func chatRunTable(session string) string {
 
 type libraryChatScope struct {
 	Category    string   `json:"category"`
+	CategoryKey string   `json:"categoryKey,omitempty"`
 	DocumentIDs []string `json:"documentIds"`
 }
 type libraryChatSession struct {
@@ -90,7 +92,9 @@ func (s *Server) registerLibraryChat(mux *http.ServeMux) {
 }
 
 func (s *Server) listLibraryChatSessions(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.DB.QueryContext(r.Context(), "SELECT id,document_id,title,provider,created_at,updated_at,scope FROM library_chat_sessions ORDER BY rowid DESC")
+	rows, err := s.Store.DB.QueryContext(r.Context(), `SELECT s.id,s.document_id,s.title,s.provider,s.created_at,s.updated_at,s.scope,
+    (SELECT json_remove(r.body,'$.events') FROM library_chat_runs r WHERE r.session_id=s.id ORDER BY r.rowid DESC LIMIT 1)
+    FROM library_chat_sessions s ORDER BY s.rowid DESC`)
 	if err != nil {
 		fail(w, 500, "无法读取书库对话")
 		return
@@ -99,11 +103,18 @@ func (s *Server) listLibraryChatSessions(w http.ResponseWriter, r *http.Request)
 	for rows.Next() {
 		var item libraryChatSession
 		var scope string
-		if err = rows.Scan(&item.ID, &item.DocumentID, &item.Title, &item.Provider, &item.CreatedAt, &item.UpdatedAt, &scope); err != nil {
+		var run sql.NullString
+		if err = rows.Scan(&item.ID, &item.DocumentID, &item.Title, &item.Provider, &item.CreatedAt, &item.UpdatedAt, &scope, &run); err != nil {
 			break
 		}
 		if err = json.Unmarshal([]byte(scope), &item.Scope); err != nil {
 			break
+		}
+		if run.Valid {
+			item.LatestRun = &ChatRun{}
+			if err = json.Unmarshal([]byte(run.String), item.LatestRun); err != nil {
+				break
+			}
 		}
 		items = append(items, item)
 	}
@@ -112,15 +123,6 @@ func (s *Server) listLibraryChatSessions(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		fail(w, 500, "无法读取书库对话")
 		return
-	}
-	for i := range items {
-		run, e := s.Store.latestChatRun(items[i].ID)
-		if e == nil {
-			items[i].LatestRun = &run
-		} else if !errors.Is(e, sql.ErrNoRows) {
-			fail(w, 500, "无法读取对话运行状态")
-			return
-		}
 	}
 	respond(w, 200, items)
 }
@@ -133,7 +135,7 @@ func (s *Server) createLibraryChatSession(w http.ResponseWriter, r *http.Request
 	if !decode(w, r, &req) {
 		return
 	}
-	if !validAgent(req.Provider) || strings.TrimSpace(req.Scope.Category) == "" || utf8.RuneCountInString(req.Scope.Category) > 256 || len(req.Scope.DocumentIDs) == 0 {
+	if !validAgent(req.Provider) || strings.TrimSpace(req.Scope.Category) == "" || utf8.RuneCountInString(req.Scope.Category) > 256 || utf8.RuneCountInString(req.Scope.CategoryKey) > 1024 || strings.ContainsFunc(req.Scope.CategoryKey, unicode.IsControl) || len(req.Scope.DocumentIDs) == 0 {
 		fail(w, 400, "请选择分类中的论文及可用 Agent")
 		return
 	}

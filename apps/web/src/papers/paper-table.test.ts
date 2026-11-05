@@ -141,7 +141,7 @@ describe("resize", () => {
   it("keeps the detail panel within its range", () => {
     expect(clampDetailWidth(100)).toBe(280);
     expect(clampDetailWidth(455.6)).toBe(456);
-    expect(clampDetailWidth(2000)).toBe(720);
+    expect(clampDetailWidth(2000)).toBe(1080);
   });
 
   it("resizes a reordered boundary with the title on the right", () => {

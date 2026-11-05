@@ -3,7 +3,7 @@ import type { PaperColumn } from "@neoread/core";
 
 /** Keyboard step for resize separators, in CSS pixels. */
 export const resizeStep = 16;
-export const detailWidthRange = { min: 280, max: 720 };
+export const detailWidthRange = { min: 280, max: 1080 };
 type ColumnWidths = Partial<Record<"title" | PaperColumn, number>>;
 
 /** Fit saved widths to this pane without changing preferences or hiding columns. */

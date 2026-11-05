@@ -12,6 +12,7 @@ const { chat, saved } = vi.hoisted(() => {
     chat: {
       subscribe: () => () => {},
       getSummary: () => summary,
+      getSnapshot: vi.fn(() => summary),
       activate: vi.fn(),
       load: vi.fn(async () => {}),
       send: vi.fn(async () => {}),
@@ -25,7 +26,11 @@ const { chat, saved } = vi.hoisted(() => {
       provider: "codex",
       createdAt: "now",
       updatedAt: "now",
-      scope: { category: "模型安全", documentIds: ["alpha", "beta"] },
+      scope: {
+        category: "模型安全",
+        categoryKey: "folder:模型安全",
+        documentIds: ["alpha", "beta"],
+      },
     },
   };
 });
@@ -49,12 +54,26 @@ vi.mock("../chat/SessionPicker", () => ({
   SessionPicker: ({
     current,
     onCreate,
+    sessions,
+    onChange,
   }: {
-    current?: { title: string };
+    current?: { id: string; title: string };
+    sessions: { id: string; title: string }[];
+    onChange: (id: string) => void;
     onCreate: () => void;
   }) => (
     <div>
-      <span>{current?.title}</span>
+      <select
+        aria-label="选择会话"
+        value={current?.id ?? ""}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {sessions.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.title}
+          </option>
+        ))}
+      </select>
       <button onClick={onCreate}>新建会话</button>
     </div>
   ),
@@ -69,9 +88,21 @@ vi.mock("../chat/AssistantPanel", () => ({
   ),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
-let root: Root, host: HTMLDivElement;
+let root: Root,
+  host: HTMLDivElement,
+  serial = 0;
 beforeEach(() => {
   vi.clearAllMocks();
+  saved.id = `library-existing-${++serial}`;
+  vi.mocked(api.libraryChatSessions).mockResolvedValue([saved]);
+  vi.mocked(api.createLibraryChatSession).mockImplementation(
+    async (provider, scope) => ({
+      ...saved,
+      id: `library-created-${++serial}`,
+      provider,
+      scope,
+    }),
+  );
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const storage = new Map<string, string>();
   vi.stubGlobal("localStorage", {
@@ -94,11 +125,15 @@ afterEach(async () => {
   host.remove();
   vi.unstubAllGlobals();
 });
-const render = (category = "模型安全", documentIds = ["alpha", "beta"]) =>
+const render = (
+  category = "模型安全",
+  documentIds = ["alpha", "beta"],
+  categoryKey = `folder:${category}`,
+) =>
   act(async () => {
     root.render(
       <LibraryAgentPanel
-        scope={{ category, documentIds }}
+        scope={{ category, categoryKey, documentIds }}
         onClose={() => {}}
         onSettings={() => {}}
       />,
@@ -117,21 +152,99 @@ const type = (text: string) =>
     area.dispatchEvent(new Event("input", { bubbles: true }));
   });
 
-it("keeps the existing paper scope until a new conversation is explicitly created", async () => {
+const selected = () =>
+  host.querySelector<HTMLSelectElement>('select[aria-label="选择会话"]')!;
+const choose = (id: string) =>
+  act(async () => {
+    selected().value = id;
+    selected().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+it("switches conversations and preserves drafts by category, with multiple conversations in each category", async () => {
+  chat.getSnapshot.mockReturnValueOnce({ busy: false, loaded: false });
   await render();
-  expect(api.createLibraryChatSession).not.toHaveBeenCalled();
+  expect(chat.load).toHaveBeenCalledTimes(1);
+  await type("保留模型安全草稿");
   await render("视觉攻击", ["gamma"]);
-  expect(host.textContent).toContain("模型安全");
-  expect(host.textContent).toContain("2 篇");
-  expect(host.textContent).toContain("使用当前分类新建");
-  await type("保留这段草稿");
-  await click("使用当前分类新建");
   expect(api.createLibraryChatSession).toHaveBeenCalledWith("codex", {
     category: "视觉攻击",
+    categoryKey: "folder:视觉攻击",
     documentIds: ["gamma"],
   });
   expect(host.textContent).toContain("视觉攻击");
-  expect(host.textContent).toContain("1 篇");
+  expect(selected().options).toHaveLength(1);
+  await type("视觉攻击的草稿");
+  await render();
+  expect(selected().value).toBe(saved.id);
+  expect(host.querySelector("textarea")?.value).toBe("保留模型安全草稿");
+  expect(chat.load).toHaveBeenCalledTimes(1);
+  await click("新建会话");
+  expect(selected().options).toHaveLength(2);
+  expect(selected().value).not.toBe(saved.id);
+  expect(host.querySelector("textarea")?.value).toBe("");
+  await choose(saved.id);
+  expect(host.querySelector("textarea")?.value).toBe("保留模型安全草稿");
+  await render("视觉攻击", ["gamma"]);
+  expect(host.querySelector("textarea")?.value).toBe("视觉攻击的草稿");
+  expect(api.createLibraryChatSession).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a conversation's paper scope fixed when the category membership changes", async () => {
+  await render();
+  await render("模型安全", ["alpha", "beta", "gamma"]);
+  expect(api.createLibraryChatSession).not.toHaveBeenCalled();
+  expect(host.textContent).toContain("2 篇");
+  await click("使用当前分类新建");
+  expect(api.createLibraryChatSession).toHaveBeenCalledWith(
+    "codex",
+    expect.objectContaining({ documentIds: ["alpha", "beta", "gamma"] }),
+  );
+  expect(host.textContent).toContain("3 篇");
+});
+
+it("separates categories with the same display name and never switches back after a delayed creation", async () => {
+  await render();
+  let resolve!: (item: typeof saved) => void;
+  vi.mocked(api.createLibraryChatSession).mockImplementationOnce(
+    (_provider, scope) =>
+      new Promise((done) => {
+        resolve = done as typeof resolve;
+      }),
+  );
+  await render("模型安全", ["gamma"], "tag:模型安全");
+  await click("新建会话");
+  expect(api.createLibraryChatSession).toHaveBeenCalledTimes(1);
+  await render("新分类", ["delta"]);
+  const active = selected().value;
+  await act(async () =>
+    resolve({
+      ...saved,
+      id: "library-delayed",
+      scope: {
+        category: "模型安全",
+        categoryKey: "tag:模型安全",
+        documentIds: ["gamma"],
+      },
+    }),
+  );
+  expect(selected().value).toBe(active);
+  expect(host.textContent).toContain("新分类");
+  await render("模型安全", ["gamma"], "tag:模型安全");
+  expect(selected().value).toBe("library-delayed");
+  expect(api.createLibraryChatSession).toHaveBeenCalledTimes(2);
+});
+
+it("does not let a failed creation in one category block another category", async () => {
+  await render();
+  vi.mocked(api.createLibraryChatSession).mockRejectedValueOnce(
+    new Error("暂时无法创建"),
+  );
+  await render("失败分类", ["gamma"]);
+  expect(host.textContent).toContain("暂时无法创建");
+  await render("其他分类", ["delta"]);
+  expect(host.textContent).toContain("其他分类");
+  expect(host.querySelector("textarea")).not.toBeNull();
+  expect(host.textContent).not.toContain("暂时无法创建");
 });
 
 it("keeps Chinese composition and quotes separate from native draft text", async () => {
