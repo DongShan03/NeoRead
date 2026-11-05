@@ -225,3 +225,10 @@ it("keeps batch results and exits editing when recent-visit writes fail", async 
   await act(async () => fixture.tabs!.onLibrary());
   expect(fixture.library!.editing).toBe(false);
 });
+it("leaves batch editing when switching an already open tab", async () => {
+  await act(async () => button("批量").click());
+  expect(fixture.library!.editing).toBe(true);
+  await act(async () => fixture.tabs!.onSelect(fixture.documents[0]));
+  await act(async () => fixture.tabs!.onLibrary());
+  expect(fixture.library!.editing).toBe(false);
+});

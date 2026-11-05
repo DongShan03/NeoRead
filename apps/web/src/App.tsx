@@ -462,6 +462,7 @@ export function App() {
   };
   const selectDocumentTab = useCallback((doc: Document) => {
     open(doc);
+    setEditingLibrary(false);
     void api.update(doc.id, {}).catch((e) => toast.error(e.message));
   }, [open]);
   const tabsShown = documentTabsShown({ theme, tabIds, closedTabGroups });
