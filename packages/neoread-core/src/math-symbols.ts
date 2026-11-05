@@ -46,10 +46,11 @@ const latexGreek = Object.fromEntries(
   Object.entries(greekLatex).map(([symbol, name]) => [name, symbol]),
 );
 export function latexGreekText(text: string) {
-  return text.replace(
-    /\\([A-Za-z]+)/g,
-    (match, name: string) => latexGreek[name] ?? match,
-  );
+  // Unlike µ and Ω, the PDF compatibility glyph ∆ is unchanged by NFKD.
+  // Normalize it only in the comparison text, retaining native PDF offsets.
+  return text
+    .replace(/∆/g, "Δ")
+    .replace(/\\([A-Za-z]+)/g, (match, name: string) => latexGreek[name] ?? match);
 }
 
 // Mathematical Greek alphabets have the same 58 slots, including the variants.

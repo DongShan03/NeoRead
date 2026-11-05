@@ -359,3 +359,29 @@ it("maps LaTeX tau to native mathematical tau without treating it as Latin t", (
     sentenceTextRanges(plain.replace("𝜏", "t"), first + second, [first]),
   ).toEqual([]);
 });
+
+it.each([
+  ["increment U+2206", "\u2206", String.raw`\Delta`],
+  ["micro U+00B5", "\u00b5", String.raw`\mu`],
+  ["ohm U+2126", "\u2126", String.raw`\Omega`],
+])(
+  "locates %s for sentence hover and annotation ranges",
+  async (_name, glyph, latex) => {
+    const source = `The measured change is $${latex}$ and the remaining response is unchanged.`;
+    const native = `The measured change is ${glyph} and the remaining response is unchanged.`;
+    currentBlock = { ...block, text: source };
+    page.querySelector(".textLayer span")!.textContent = native;
+    page.querySelectorAll(".textLayer span").forEach((span, i) => {
+      if (i > 0) span.remove();
+    });
+    const passages = [{ blockId: block.id, sources: [source] }];
+    expect(
+      nav
+        .sentenceRanges(passages)
+        .map((r) => r.toString())
+        .join(""),
+    ).toBe(native);
+    await nav.focusPassages(passages);
+    expect(markedText().join("")).toBe(native);
+  },
+);
