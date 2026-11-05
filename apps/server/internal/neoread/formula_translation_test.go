@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -634,7 +635,7 @@ func TestTranslationMathRecoveryPreservesVerifiedFormulasAndOriginalAnchors(t *t
 				for _, part := range translationSentenceParts(para.Source) {
 					target := `错误：$a_n$ 和 $t$。`
 					if strings.Contains(part, "NEOREAD_MATH_") {
-						token := regexp.MustCompile(`NEOREAD_MATH_[a-f0-9]+_[0-9]+`).FindString(part)
+						token := regexp.MustCompile(`NEOREAD_MATH_[a-f0-9]+_[0-9]+_END`).FindString(part)
 						target = "译文 " + token + "。"
 						if mode == "missing_token" {
 							target = "公式已丢失。"
@@ -824,7 +825,7 @@ func TestTranslationMathRecoveryRestoresDroppedCompatibilityGlyphs(t *testing.T)
 					// it along with any existing delimited formulas.
 					target := strings.ReplaceAll(part, tt.glyph, "")
 					if strings.Contains(para.Source, "NEOREAD_MATH_") {
-						tokens := regexp.MustCompile(`NEOREAD_MATH_[a-f0-9]+_[0-9]+`).FindAllString(part, -1)
+						tokens := regexp.MustCompile(`NEOREAD_MATH_[a-f0-9]+_[0-9]+_END`).FindAllString(part, -1)
 						target = "译文 " + strings.Join(tokens, " ") + "。"
 					}
 					pairs = append(pairs, TranslationSentence{Source: part, Target: target})
@@ -943,8 +944,10 @@ func TestTranslationMathRecoverySkipsAreDiagnosed(t *testing.T) {
 	}
 }
 
-func TestTranslationUnitGlyphsDoNotRequireMathRecovery(t *testing.T) {
+func TestTranslationAcceptsMathAndUnitsWithoutRecovery(t *testing.T) {
 	for _, tt := range []struct{ name, source, target string }{
+		{"real_apposition", refusalSetSource, refusalSetTarget},
+		{"real_causal_effect", causalEffectSource, causalEffectTarget},
 		{"micro", "The distance is 5 \u00b5m.", "距离为 5 微米。"},
 		{"ohm", "The resistance is 10 \u2126.", "电阻为 10 欧姆。"},
 		{"kiloohm", "The resistance is 10 k\u2126.", "电阻为 10 千欧。"},
@@ -974,11 +977,122 @@ func TestTranslationUnitGlyphsDoNotRequireMathRecovery(t *testing.T) {
 			}
 			items, err := s.translations("doc", m)
 			if err != nil || len(items) != 1 || items[0].Status != "complete" || len(items[0].Sentences) != 1 {
-				t.Fatal("unit translation required recovery", items, err)
+				t.Fatal("valid translation required recovery", items, err)
 			}
 			pair := items[0].Sentences[0]
 			if texts.Load() != 1 || pair.Source != tt.source || pair.Target != tt.target {
-				t.Fatal("unit translation retried or changed text", texts.Load(), pair)
+				t.Fatal("valid translation retried or changed text", texts.Load(), pair)
+			}
+		})
+	}
+}
+
+func TestTranslationMathRecoveryAllowsVariablesAndRepeatedTokens(t *testing.T) {
+	manyFormulas, manySource, manyTarget := []string{}, []string{}, []string{}
+	for i := range 12 {
+		formula := fmt.Sprintf("x_{%d}", i)
+		manyFormulas = append(manyFormulas, formula)
+		manySource = append(manySource, "$"+formula+"$")
+		manyTarget = append(manyTarget, fmt.Sprintf("@%d@", i))
+	}
+	for _, tt := range []struct {
+		name, source      string
+		formulas, targets []string
+		wantError         string
+	}{
+		{"bare_variables", causalEffectSource, []string{`a_n`, `\hat{a}_n`, `\Delta`, `P_n^q=P_{\mathrm{refuse}}^{\mathrm{clean}}(q)-P_{\mathrm{refuse}}^{\mathrm{patch}}(q)`}, []string{`在有害查询 $q$ 上修补神经元 $n$ 的因果效应，是将 @0@ 钳制为 @1@ 时该分数的下降量：@2@ @3@。`}, ""},
+		{"repeat_token", `The reference set is $\mathcal{K}$.`, []string{`\mathcal{K}`}, []string{`参考集合是 @0@，其中 @0@ 是首词元集合。`}, ""},
+		{"repeat_in_other_sentence", `The reference set is $\mathcal{K}$. The threshold is $\tau$.`, []string{`\mathcal{K}`, `\tau`}, []string{`参考集合是 @0@，阈值是 @1@。`, `阈值 @1@ 用于集合 @0@。`}, ""},
+		{"twelve_formulas", "The variables are " + strings.Join(manySource, ", ") + ".", manyFormulas, []string{"变量为 " + strings.Join(manyTarget, "、") + "。"}, ""},
+		{"word_boundary_and_number", `The p -values for q1 are $\hat{a}$.`, []string{`\hat{a}`}, []string{`$p$ 值和 $q1$ 对应 @0@。`}, ""},
+		{"placeholder_inside_math", `The value is $\alpha$.`, []string{`\alpha`}, []string{`数值为 $@0@=0.05$。`}, "译文另行改写了已识别的公式"},
+		{"variable_not_a_word", `The neuron response is $\hat{a}$.`, []string{`\hat{a}`}, []string{`神经元 $n$ 的响应是 @0@。`}, "译文另行改写了已识别的公式"},
+		{"structured_inline_math", `The query q has $\hat{a}$.`, []string{`\hat{a}`}, []string{`查询 $q+1$ 对应 @0@。`}, "译文另行改写了已识别的公式"},
+		{"extra_glyph", `The response is $a_n$.`, []string{`a_n`}, []string{`响应为 @0@ 和 α。`}, "公式修复后的译文未完整逐句对应：" + errTranslationMath.Error()},
+		{"missing_own_token", `The reference set is $\mathcal{K}$. The threshold is $\tau$.`, []string{`\mathcal{K}`, `\tau`}, []string{`参考集合略去。`, `阈值 @1@ 用于 @0@。`}, "译文未完整保留已识别的公式"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _, m := translationFixture(t)
+			m.Blocks = m.Blocks[:1]
+			m.Blocks[0].Text = tt.source
+			if err := atomicFile(filepath.Join(s.analysisDir("doc"), "manifest.json"), []byte(jsonText(m))); err != nil {
+				t.Fatal(err)
+			}
+			fakeTranslationMathCrop(t)
+			var texts, images atomic.Int32
+			imageAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				images.Add(1)
+				output := []map[string]any{}
+				for i, formula := range tt.formulas {
+					output = append(output, map[string]any{"index": i, "latex": formula})
+				}
+				writeAPIReply(w, jsonText(map[string]any{"formulas": output}))
+			}))
+			defer imageAPI.Close()
+			textAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				texts.Add(1)
+				para := readTranslationInput(t, r).Batch.Paragraphs[0]
+				tokens := regexp.MustCompile(`NEOREAD_MATH_[a-f0-9]+_[0-9]+_END`).FindAllString(para.Source, -1)
+				if len(tokens) != len(tt.formulas) {
+					t.Error("wrong token count", tokens)
+					return
+				}
+				parts := translationSentenceParts(para.Source)
+				if len(parts) != len(tt.targets) {
+					t.Error("wrong sentence count", parts)
+					return
+				}
+				pairs := []TranslationSentence{}
+				for i, part := range parts {
+					target := tt.targets[i]
+					for j, token := range tokens {
+						target = strings.ReplaceAll(target, fmt.Sprintf("@%d@", j), token)
+					}
+					pairs = append(pairs, TranslationSentence{Source: strings.TrimSpace(part), Target: target})
+				}
+				writeAPIReply(w, jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": para.SourceHash, "sentences": pairs})+"\n")
+			}))
+			defer textAPI.Close()
+			configureFormulaTest(t, s, textAPI.URL, imageAPI.URL)
+			doc, err := s.Store.Document("doc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := s.taskGenerationService(s.aiConfig(), taskTranslation)
+			paragraph := m.translationParagraphs()[0]
+			item, err := s.recoverTranslationMath(t.Context(), doc, m, paragraph, service)
+			if tt.wantError != "" {
+				if err == nil || errorKind(err) != ErrorProtocol || err.Error() != tt.wantError {
+					t.Fatal("invalid recovery accepted or failure reason changed", item, err)
+				}
+				return
+			}
+			if err != nil || item.Status != "complete" || len(item.Sentences) != len(tt.targets) {
+				t.Fatal("valid math recovery rejected", item, err)
+			}
+			parts := translationSentenceParts(tt.source)
+			for i, pair := range item.Sentences {
+				want := tt.targets[i]
+				for j, formula := range tt.formulas {
+					want = strings.ReplaceAll(want, fmt.Sprintf("@%d@", j), "$"+formula+"$")
+				}
+				if pair.Target != want {
+					t.Fatal("formula or repeated token restored incorrectly", pair.Target, want)
+				}
+				anchor := pair.Anchor
+				if anchor == "" {
+					anchor = pair.Source
+				}
+				if anchor != strings.TrimSpace(parts[i]) {
+					t.Fatal("changed native anchor", pair)
+				}
+			}
+			if texts.Load() != 1 || images.Load() != 1 {
+				t.Fatal("unexpected recovery calls", texts.Load(), images.Load())
+			}
+			saved, err := s.translations("doc", m)
+			if err != nil || len(saved) != 1 || jsonText(saved[0]) != jsonText(item) {
+				t.Fatal("reading saved recovery changed formulas or anchors", saved, err)
 			}
 		})
 	}
