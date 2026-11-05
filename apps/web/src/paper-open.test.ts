@@ -252,3 +252,18 @@ it("preserves receiving papers' existing opening permission", async () => {
   vi.mocked(api.processing).mockResolvedValue([job({ receiving: true })]);
   expect(await openLibraryDocument(doc)).toBe(true);
 });
+
+it("keeps Open With waiting for the learning phase before reporting incomplete text", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(api.processing).mockResolvedValueOnce([job({ incomplete: true })])
+      .mockResolvedValue([job({ incomplete: true, phase: "ready" })]);
+    const onWaiting = vi.fn();
+    const pending = openWhenParsed(doc.id, onWaiting);
+    const rejection = expect(pending).rejects.toThrow("论文正文不完整，无法打开");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onWaiting).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1200);
+    await rejection;
+  } finally { vi.useRealTimers(); }
+});

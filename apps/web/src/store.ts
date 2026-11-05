@@ -424,7 +424,7 @@ export async function openWhenParsed(id: string, onWaiting: () => void) {
     if (revision !== openRevision) return true;
     if (!useReaderStore.getState().documents.some((item) => item.id === id))
       return false;
-    if (!job || job.incomplete ||
+    if (!job || (job.phase !== "learning" && job.incomplete) ||
       (job.phase === "learning" && ["failed", "waiting", "paused"].includes(job.status)))
       throw new Error(paperOpenReason(job));
     if (job.phase !== "learning") break;
