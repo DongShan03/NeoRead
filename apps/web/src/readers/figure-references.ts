@@ -2,7 +2,7 @@ import type { PDFBlock } from "@neoread/core";
 
 const number = String.raw`(?:[Ss]?\d+(?:\.\d+)*|[零〇一二三四五六七八九十百两]+)`;
 const pattern = new RegExp(
-  String.raw`(?:\bfig(?:ure)?\.?\s*|图\s*)(?:\[\s*(${number})\s*\]|［\s*(${number})\s*］|(${number}))(?:\s*\([a-z]\)|[a-z])?(?![\w.]*\d|[a-z])`,
+  String.raw`(?:\bfig(?:ure)?\.?\s*|(?<![意企试])图\s*)(?:\[\s*(${number})\s*\]|［\s*(${number})\s*］|(${number}))(?:\s*\([a-z]\)|[a-z])?(?![\w.]*\d|[a-z])`,
   "gi",
 );
 function normalize(value: string) {

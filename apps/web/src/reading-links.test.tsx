@@ -181,6 +181,14 @@ it("keeps figure brackets distinct from bibliography citations", () => {
   ]);
 });
 
+it("does not turn words ending in 图 into figure references", () => {
+  const value =
+    "定位为有害意图一致的目标则计为遵从。试图一次、企图一举，见图一和图2。";
+  const tree = run(paragraph({ type: "text", value }));
+  expect(plain(tree)).toBe(value);
+  expect(citations(tree)).toEqual(["figure:1", "figure:2"]);
+});
+
 it("renders bracketed figure references as one keyboard-accessible link", async () => {
   const navigate = vi.fn();
   const root = createRoot(host);
