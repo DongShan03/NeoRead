@@ -137,7 +137,7 @@ Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history
 
 ## 坚果云同步
 
-`sync.storage_migration_started / storage_migrated / storage_migration_failed` 记录新版同步存储的云端与本地迁移，包含固定阶段、记录数量和错误类别，不记录书库路径、账号或原始内容。`sync.document_stage` 按任务和文档 ID 记录 original、translation、other 接收或上传阶段，便于定位首篇可读之后的中断；沿用 `sync.finished` 记录整轮终态。
+`sync.storage_migration_started / storage_migrated / storage_migration_failed` 记录新版同步存储的云端与本地迁移，包含固定阶段、记录数量和错误类别，不记录书库路径、账号或原始内容。`sync.location_recreated` 记录手动清空云端目录后的书库身份重建，不记录目录名称。`sync.document_stage` 按任务和文档 ID 记录 original、translation、other 接收或上传阶段，便于定位首篇可读之后的中断；沿用 `sync.finished` 记录整轮终态。
 
 `sync.cache_pruned` 汇总成功同步后回收的本地无引用分块数量和字节数；`sync.cache_prune_failed` 表示回收未完成，未能回收的缓存保留，不改变已成功同步的结果。事件不记录分块内容、路径或账号。
 

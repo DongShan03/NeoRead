@@ -1966,3 +1966,46 @@ func TestWebDAVV2SyncsLibraryConversationsAsSeparateSessionRecords(t *testing.T)
 		t.Fatal(items, err)
 	}
 }
+
+func TestWebDAVRecreatesExternallyClearedCloudWithoutLosingLocalData(t *testing.T) {
+	for _, part := range []string{"all", "library", "devices"} {
+		t.Run(part, func(t *testing.T) {
+			remote, directory := testDAV(t)
+			a, b := syncFixture(t, remote, "Mac"), syncFixture(t, remote, "Windows")
+			syncDocumentFixture(t, a.Store, "paper", "研究")
+			runSync(t, a)
+			config, _ := a.readSyncConfig()
+			before, err := a.loadSyncState(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(directory, "NeoRead")
+			if part != "all" {
+				target = filepath.Join(target, "论文库")
+			}
+			if part == "devices" {
+				target = filepath.Join(target, "devices")
+			}
+			if err = os.RemoveAll(target); err != nil {
+				t.Fatal(err)
+			}
+			runSync(t, a)
+			after, err := a.loadSyncState(config)
+			if err != nil || after.Device != before.Device {
+				t.Fatal("cloud reset changed local identity", err)
+			}
+			runSync(t, b)
+			if _, err = b.Store.Document("paper"); err != nil {
+				t.Fatal("new device could not receive the recovered paper", err)
+			}
+			want, err := os.ReadFile(a.Store.File(Document{ID: "paper", Type: "pdf"}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(b.Store.File(Document{ID: "paper", Type: "pdf"}))
+			if err != nil || !bytes.Equal(got, want) {
+				t.Fatal("recreated index referenced missing chunks", err)
+			}
+		})
+	}
+}

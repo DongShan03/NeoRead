@@ -218,6 +218,15 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 
 	s.setSyncPhase("downloading")
 	devices, err := dav.devices(ctx)
+	if davNotFound(err) {
+		if err = dav.prepare(ctx); err != nil {
+			return err
+		}
+		if err = ensureSyncLocationMarker(ctx, dav, syncLocation{ID: config.RemoteID, Folder: config.Folder}); err != nil {
+			return err
+		}
+		devices, err = dav.devices(ctx)
+	}
 	if err != nil {
 		return err
 	}
@@ -255,6 +264,33 @@ func (s *Server) runWebDAV(ctx context.Context, config webdavConfig) error {
 			return err
 		}
 		state.Remotes[device.Name] = syncRemoteCache{ETag: device.ETag}
+	}
+	present := map[string]bool{}
+	for _, device := range devices {
+		present[device.Name] = true
+	}
+	_, ownCacheErr := os.Stat(filepath.Join(filepath.Dir(s.syncStatePath(config)), "remotes", state.Device+".json"))
+	if !present[state.Device+".json"] && (state.LastSync != "" || ownCacheErr == nil) {
+		// The directory may have been cleared outside NeoRead. Upload receipts
+		// from the previous cloud contents cannot prove that chunks still exist.
+		state.Uploaded = map[string]bool{}
+		if err = os.Remove(s.syncUploadPath(config)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	remotesDirectory := filepath.Join(filepath.Dir(s.syncStatePath(config)), "remotes")
+	cached, err := os.ReadDir(remotesDirectory)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, remote := range cached {
+		device := strings.TrimSuffix(remote.Name(), ".json")
+		if strings.HasSuffix(remote.Name(), ".json") && syncID(device) && !present[remote.Name()] {
+			if err = os.Remove(filepath.Join(remotesDirectory, remote.Name())); err != nil {
+				return err
+			}
+			delete(state.Remotes, remote.Name())
+		}
 	}
 	ownCatalog.Index.Name = config.DeviceName
 	priorOwn := maps.Clone(state.Own)

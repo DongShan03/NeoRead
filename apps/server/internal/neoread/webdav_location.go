@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -116,7 +117,25 @@ func (s *Server) resolveSyncLocation(ctx context.Context, config webdavConfig) (
 		}
 	} else {
 		registered, err := readSyncLocation(ctx, root, ".libraries/"+location.ID+".json")
-		if err != nil {
+		if davNotFound(err) {
+			// A missing catalog is different from NeoRead's explicit deletion
+			// marker. Recreate an externally cleared folder using the same ID.
+			if err = dav.prepare(ctx); err != nil {
+				return config, nil, err
+			}
+			if err = ensureSyncLocationMarker(ctx, dav, location); err != nil {
+				return config, nil, err
+			}
+			if err = root.mkdir(ctx, ".libraries"); err != nil {
+				return config, nil, err
+			}
+			body, _ := json.Marshal(location)
+			if err = root.put(ctx, ".libraries/"+location.ID+".json", body); err != nil {
+				return config, nil, err
+			}
+			registered = location
+			s.diagnosticEvent(slog.LevelInfo, "sync.location_recreated", "taskId", s.webdav.taskID)
+		} else if err != nil {
 			return config, nil, err
 		}
 		if registered.ID != location.ID {
@@ -131,6 +150,20 @@ func (s *Server) resolveSyncLocation(ctx context.Context, config webdavConfig) (
 	config.RemoteID = location.ID
 	config.Folder = location.Folder
 	return config, dav, nil
+}
+
+func ensureSyncLocationMarker(ctx context.Context, dav *davClient, location syncLocation) error {
+	existing, err := readSyncLocation(ctx, dav, "library.json")
+	if err == nil {
+		if existing.ID != location.ID || existing.Folder != location.Folder || existing.Deleted {
+			return errors.New("云端已有其他书库，未覆盖其数据")
+		}
+		return nil
+	}
+	if !davNotFound(err) {
+		return err
+	}
+	return dav.put(ctx, "library.json", []byte(jsonText(location)))
 }
 
 func (s *Server) prepareSyncLocation(ctx context.Context, config webdavConfig) (webdavConfig, *davClient, error) {
