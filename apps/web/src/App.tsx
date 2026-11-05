@@ -605,7 +605,7 @@ export function App() {
                   {[
                     {
                       id: "all",
-                      label: papers ? "全部论文" : "全部图书",
+                      label: "全部图书",
                       icon: Library,
                       count: documents.length,
                     },
@@ -636,6 +636,7 @@ export function App() {
                       key={item.id}
                       variant="ghost"
                       className={`nav-item ${filter === item.id ? "active" : ""}`}
+                      aria-current={filter === item.id ? "page" : undefined}
                       onClick={() => {
                         setFilter(item.id);
                         setEditingLibrary(false);
@@ -753,9 +754,7 @@ export function App() {
                           ? "回收站"
                           : filter === "favorites"
                             ? "收藏"
-                            : papers
-                              ? "全部论文"
-                              : "全部图书"}
+                            : "全部图书"}
                     </h1>
                   </div>
                   {filter === "tags" ? (
@@ -835,6 +834,8 @@ export function App() {
                         <TagBoards
                           documents={documents}
                           query={query}
+                          onMove={moveDocument}
+                          openDocuments={theme.documentTabs ? openDocuments : undefined}
                           jobs={jobs}
                           processingError={processingError}
                           openDocument={openDocument}
@@ -877,15 +878,13 @@ export function App() {
                             </span>
                           </div>
                           <h2>
-                            {documents.length
-                              ? "没有符合筛选条件的文档"
-                              : filter === "favorites"
-                                ? "暂无收藏"
-                                : papers
-                                  ? "暂无论文"
-                                  : "暂无文档"}
+                            {filter === "favorites" && !documents.some((doc) => doc.favorite)
+                              ? "暂无收藏"
+                              : documents.length
+                                ? "没有符合筛选条件的文档"
+                                : "暂无文档"}
                           </h2>
-                          {!!documents.length && (
+                          {(!!documents.length || filter === "favorites") && (
                             <Button
                               variant="outline"
                               onClick={() => {
@@ -897,7 +896,7 @@ export function App() {
                               显示全部图书
                             </Button>
                           )}
-                          {!documents.length && !papers && (
+                          {!documents.length && filter !== "favorites" && (
                             <Button
                               variant="link"
                               onClick={() => void sample()}
