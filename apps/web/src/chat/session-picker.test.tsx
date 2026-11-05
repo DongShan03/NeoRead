@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(),
   forget: vi.fn(),
   busy: vi.fn(() => false),
+  started: vi.fn(async () => true),
 }));
 vi.mock("@neoread/api", () => ({
   api: {
@@ -21,6 +22,7 @@ vi.mock("@neoread/api", () => ({
 }));
 vi.mock("./session-registry", () => ({
   chatSessionBusy: mocks.busy,
+  chatSessionHasStarted: mocks.started,
   chatSessionRecordId: (_owner: string, id: string) =>
     id.startsWith("draft-") ? undefined : id,
   forgetChatSession: mocks.forget,
@@ -30,6 +32,7 @@ let root: Root, host: HTMLDivElement;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.clearAllMocks();
+  mocks.started.mockResolvedValue(true);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -177,13 +180,19 @@ it.each(["doc", "library"])(
     expect(onChange).not.toHaveBeenCalled();
   },
 );
-it.each(["doc", "library"])(
-  "reuses the current unsent draft on new and can discard it locally for %s",
-  async (documentId) => {
+it.each([
+  ["doc", "draft-local"],
+  ["library", "draft-local"],
+  ["doc", "saved-empty-default"],
+  ["library", "library-saved-empty"],
+])(
+  "reuses the current empty conversation on new and allows its deletion: %s / %s",
+  async (documentId, sessionId) => {
+    mocks.started.mockResolvedValue(false);
     const draft: DocumentChatSession = {
-      id: "draft-local",
+      id: sessionId,
       documentId,
-      title: "新会话",
+      title: sessionId.startsWith("draft-") ? "新会话" : "默认会话",
       provider: "api",
       createdAt: "now",
       updatedAt: "now",
@@ -214,6 +223,7 @@ it.each(["doc", "library"])(
     });
     expect(onCreate).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.started).toHaveBeenCalledWith(documentId, sessionId);
     await act(async () =>
       host.querySelector<HTMLButtonElement>('[aria-label="选择会话"]')!.click(),
     );
@@ -223,12 +233,77 @@ it.each(["doc", "library"])(
     ).not.toContain("未发送");
     await act(async () =>
       document
-        .querySelector<HTMLElement>('[aria-label="删除会话：新会话"]')!
+        .querySelector<HTMLElement>(`[aria-label="删除会话：${draft.title}"]`)!
         .click(),
     );
-    expect(mocks.remove).not.toHaveBeenCalled();
-    expect(mocks.forget).toHaveBeenCalledWith(documentId, "draft-local");
-    expect(onDeleted).toHaveBeenCalledWith("draft-local");
+    if (sessionId.startsWith("draft-")) {
+      expect(mocks.remove).not.toHaveBeenCalled();
+    } else {
+      await act(async () =>
+        document
+          .querySelector<HTMLButtonElement>(
+            '[data-slot="alert-dialog-action"]',
+          )!
+          .click(),
+      );
+      expect(mocks.remove).toHaveBeenCalledWith(documentId, sessionId);
+    }
+    expect(mocks.forget).toHaveBeenCalledWith(documentId, sessionId);
+    expect(onDeleted).toHaveBeenCalledWith(sessionId);
     expect(onChange).toHaveBeenCalledWith("saved");
   },
 );
+
+it("does not create a conversation in a category or document that was left while history was loading", async () => {
+  let ready!: (started: boolean) => void;
+  let currentReady!: (started: boolean) => void;
+  mocks.started.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        ready = resolve;
+      }),
+  );
+  mocks.started.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        currentReady = resolve;
+      }),
+  );
+  const onCreate = vi.fn(async () => {});
+  const render = (id: string) =>
+    act(async () =>
+      root.render(
+        <SessionPicker
+          documentId="doc"
+          sessions={[]}
+          current={{
+            id,
+            documentId: "doc",
+            title: "会话",
+            provider: "api",
+            createdAt: "now",
+            updatedAt: "now",
+          }}
+          onCreate={onCreate}
+          onChange={() => {}}
+          onDeleted={() => {}}
+          onRefresh={async () => {}}
+        />,
+      ),
+    );
+  await render("previous");
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>('[aria-label="新建会话"]')!.click(),
+  );
+  await render("current");
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>('[aria-label="新建会话"]')!.click(),
+  );
+  await act(async () => ready(true));
+  expect(onCreate).not.toHaveBeenCalled();
+  expect(
+    host.querySelector<HTMLButtonElement>('[aria-label="新建会话"]')!.disabled,
+  ).toBe(true);
+  await act(async () => currentReady(true));
+  expect(onCreate).toHaveBeenCalledTimes(1);
+});

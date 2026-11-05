@@ -10,6 +10,7 @@ import {
   forgetChatSession,
   chatCreatedEvent,
   chatSessionRecordId,
+  chatSessionHasStarted,
   recoverCreatedChatDrafts,
 } from "./session-registry";
 vi.mock("../store", () => ({ refreshAIConfig: vi.fn(async () => {}) }));
@@ -103,6 +104,36 @@ const input = {
   references: [],
   attachments: [],
 };
+it.each(["doc", "library"])(
+  "checks actual history before treating a saved default session as started: %s",
+  async (owner) => {
+    const id = (owner === "library" ? "library-" : "") + crypto.randomUUID();
+    cleanup.push({ owner, id });
+    const session = getChatSession(owner, id);
+    expect(await chatSessionHasStarted(owner, id)).toBe(false);
+    expect(api.sessionMessages).toHaveBeenCalledWith(
+      owner,
+      id,
+      expect.any(AbortSignal),
+    );
+    await session.load();
+    vi.mocked(api.sessionMessages).mockClear();
+    expect(await chatSessionHasStarted(owner, id)).toBe(false);
+    expect(api.sessionMessages).not.toHaveBeenCalled();
+    history = [
+      {
+        id: "first-question",
+        documentId: owner,
+        sessionId: id,
+        role: "user",
+        content: "实际发过的问题",
+        createdAt: "now",
+      },
+    ];
+    await session.load();
+    expect(await chatSessionHasStarted(owner, id)).toBe(true);
+  },
+);
 it.each([false, true])(
   "persists a draft only on first send, names it, and preserves the live store: library=%s",
   async (library) => {

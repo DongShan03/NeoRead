@@ -49,6 +49,22 @@ export function listChatDrafts(documentId: string) {
 export function chatSessionBusy(documentId: string, id: string) {
   return sessions.get(documentId + ":" + id)?.getSnapshot().busy ?? false;
 }
+/** Old versions persisted empty default sessions; IDs do not imply a conversation. */
+export async function chatSessionHasStarted(documentId: string, id: string) {
+  const snapshot = sessions.get(documentId + ":" + id)?.getSnapshot();
+  if (
+    snapshot?.busy ||
+    snapshot?.pending ||
+    snapshot?.messages.length ||
+    snapshot?.archived.length
+  )
+    return true;
+  if (isDraftSession(id) || snapshot?.loaded) return false;
+  return (
+    (await api.sessionMessages(documentId, id, AbortSignal.timeout(15_000)))
+      .length > 0
+  );
+}
 /** A failed first send may have created a record before its response was lost. */
 export function chatSessionRecordId(documentId: string, id: string) {
   if (!isDraftSession(id)) return id;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Plus, Pencil, Trash2, ChevronDown, Check } from "lucide-react";
 import { api } from "@neoread/api";
 import type { DocumentChatSession } from "@neoread/core";
@@ -21,6 +21,7 @@ import {
 } from "@neoread/ui/components/alert-dialog";
 import {
   chatSessionBusy,
+  chatSessionHasStarted,
   chatSessionRecordId,
   forgetChatSession,
   isDraftSession,
@@ -65,24 +66,24 @@ export function SessionPicker({
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState<DocumentChatSession>();
+  const selection = `${documentId}:${current?.id ?? ""}`;
+  const activeSelection = useRef(selection);
+  activeSelection.current = selection;
   useEffect(() => {
     setRenaming(false);
     setSaving(false);
   }, [current?.id]);
   const create = async () => {
-    if (
-      current &&
-      isDraftSession(current.id) &&
-      !chatSessionRecordId(documentId, current.id)
-    )
-      return;
     setSaving(true);
     try {
+      if (current && !(await chatSessionHasStarted(documentId, current.id)))
+        return;
+      if (activeSelection.current !== selection) return;
       await onCreate();
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
-      setSaving(false);
+      if (activeSelection.current === selection) setSaving(false);
     }
   };
   const remove = async (item: DocumentChatSession) => {
