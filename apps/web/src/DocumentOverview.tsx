@@ -1,3 +1,4 @@
+import { useJobPolling } from "./useJobPolling";
 import { useEffect, useState } from "react";
 import { BookOpen, RefreshCw, Square, ArrowUpRight } from "lucide-react";
 import type {
@@ -28,27 +29,7 @@ const labels: Record<OverviewJob["status"], string> = {
   stale: "原文已更新，概要需要重新生成",
 };
 export function useOverviewJobs() {
-  const [jobs, setJobs] = useState<OverviewJob[]>([]);
-  useEffect(() => {
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const next = await api.overviewJobs();
-        if (!stopped) setJobs(next);
-      } catch {
-        /* The overview panel exposes actionable errors on demand. */
-      } finally {
-        if (!stopped) timer = setTimeout(poll, 2000);
-      }
-    };
-    void poll();
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-    };
-  }, []);
-  return jobs;
+  return useJobPolling(api.overviewJobs, 2000).jobs;
 }
 export function CoverOverview({
   job,

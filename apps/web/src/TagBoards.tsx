@@ -460,7 +460,7 @@ export function TagBoards({
           </p>
         ) : filtered.length ? (
           <LibraryDocuments
-            key={JSON.stringify([activeId, tags, match, query])}
+            key={JSON.stringify([activeId, tags, match])}
             documents={filtered}
             libraryView={view}
             jobs={jobs}

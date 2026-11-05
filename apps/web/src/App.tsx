@@ -107,7 +107,7 @@ export function App() {
   } = useReaderStore();
   const mode = libraryMode(libraryPreferences);
   const papers = mode === "papers";
-  const documents = allDocuments.filter((d) => d.library === mode);
+  const documents = useMemo(() => allDocuments.filter((d) => d.library === mode), [allDocuments, mode]);
   const resolvedTheme = useResolvedTheme(theme);
   const { jobs, error: processingError } = useProcessing();
   useUpdateProgress();
@@ -465,18 +465,18 @@ export function App() {
       }
     }).catch((e) => toast.error(e.message));
   };
-  const filtered = filterDocuments(
+  const filtered = useMemo(() => filterDocuments(
     documents,
     filter,
     filter === "all" ? "" : query,
     filters,
-  );
-  const searchResults = filterDocuments(
+  ), [documents, filter, query, filters]);
+  const searchResults = useMemo(() => command ? filterDocuments(
     documents,
     "all",
     commandQuery,
     initialFilters,
-  );
+  ) : [], [command, documents, commandQuery]);
   const awaitingClassification = documents.some(
     (d) =>
       d.classificationStatus === "pending" ||
@@ -851,7 +851,7 @@ export function App() {
                           openDocuments={
                             theme.documentTabs ? openDocuments : undefined
                           }
-                          key={JSON.stringify([filter, query, filters])}
+                          key={JSON.stringify([filter, filters])}
                           documents={filtered}
                           libraryView={libraryView}
                           editing={editingLibrary}

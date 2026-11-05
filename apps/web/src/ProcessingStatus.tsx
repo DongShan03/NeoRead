@@ -1,3 +1,4 @@
+import { useJobPolling } from "./useJobPolling";
 import { useEffect, useState } from "react";
 import { Check, ScanLine, RefreshCw, Languages } from "lucide-react";
 import type { Processing } from "@neoread/core";
@@ -7,45 +8,7 @@ import { Button } from "@neoread/ui/components/button";
 import { toast } from "sonner";
 
 export function useProcessing() {
-  const [jobs, setJobs] = useState<Processing[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const next = await api.processing();
-        if (!stopped) {
-          setJobs((current) => {
-            const previous = new Map(
-              current.map((job) => [job.documentId, job]),
-            );
-            const shared = next.map((job) => {
-              const old = previous.get(job.documentId);
-              return old && JSON.stringify(old) === JSON.stringify(job)
-                ? old
-                : job;
-            });
-            return shared.length === current.length &&
-              shared.every((job, i) => job === current[i])
-              ? current
-              : shared;
-          });
-          setError("");
-        }
-      } catch (e) {
-        if (!stopped) setError((e as Error).message);
-      } finally {
-        if (!stopped) timer = setTimeout(poll, 1200);
-      }
-    };
-    void poll();
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-    };
-  }, []);
-  return { jobs, error };
+  return useJobPolling(api.processing, 1200);
 }
 export function processingStages(job: Processing) {
   const learned = job.phase !== "learning";
