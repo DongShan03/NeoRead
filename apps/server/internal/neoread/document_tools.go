@@ -50,6 +50,7 @@ type documentToolTrace struct {
 }
 type documentAgent struct {
 	chat                  *chatInput
+	claudeNative          *claudeNativeAttempt
 	sessionID             string
 	codexCache            *documentCodexCache
 	canViewPages          bool
@@ -118,6 +119,7 @@ func (a *documentAgent) resetAttempt(provider string) {
 	a.contextTokens = 0
 	a.providedSources = false
 	a.conversation = nil
+	a.claudeNative = nil
 	a.conversationEvents = nil
 	a.checkpoints = nil
 	a.continuous = false

@@ -248,7 +248,7 @@ it("groups proxy settings and log export under diagnostics without a network tab
   await act(async () => exportButton.click());
   expect(exportLogs).toHaveBeenCalledOnce();
 });
-it("keeps Codex history visible by default and toggles recoverable hiding in diagnostics", async () => {
+it("keeps provider history visible by default and toggles recoverable hiding in diagnostics", async () => {
   const previous = useReaderStore.getState().theme;
   useReaderStore.setState({
     theme: { ...previous, hideCodexHistory: undefined },
@@ -262,7 +262,7 @@ it("keeps Codex history visible by default and toggles recoverable hiding in dia
     ].find((tab) => tab.textContent === "诊断")!;
     await act(async () => diagnostics.click());
     const toggle = host.querySelector<HTMLButtonElement>(
-      '[role="switch"][aria-label="在 Codex 历史中隐藏阅读对话"]',
+      '[role="switch"][aria-label="在 Codex/Claude 中隐藏会话"]',
     )!;
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(toggle.closest("section")?.textContent).toContain("恢复同一对话");

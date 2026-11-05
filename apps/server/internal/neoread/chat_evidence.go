@@ -28,6 +28,9 @@ func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, 
 	if e != nil {
 		return e
 	}
+	if e = a.prepareClaudeNativeCommit(); e != nil {
+		return e
+	}
 	tx, e := s.Store.DB.BeginTx(ctx, nil)
 	if e != nil {
 		return generationError(ErrorSave, "无法保存回答与来源")
@@ -60,6 +63,7 @@ func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, 
 	if e = tx.Commit(); e != nil {
 		return generationError(ErrorSave, "无法保存回答与来源")
 	}
+	a.finishClaudeNativeCommit()
 	return nil
 }
 func (s *Server) saveFailedDocumentRun(a *documentAgent, provider string, cause error) {

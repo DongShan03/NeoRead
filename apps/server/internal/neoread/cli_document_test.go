@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -66,6 +70,53 @@ func runFakeClaudeDocument(mode, input string, emit func(any), gate func()) bool
 	}
 	if config == "" {
 		return false
+	}
+	sessionID, transcript, previous := "", "", ""
+	for i, arg := range os.Args {
+		if i+1 == len(os.Args) {
+			continue
+		}
+		if arg == "--session-id" {
+			sessionID = os.Args[i+1]
+			transcript = filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "projects", "synthetic-document", sessionID+".jsonl")
+		}
+		if arg == "--resume" {
+			transcript = os.Args[i+1]
+			sessionID = strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
+			data, err := os.ReadFile(transcript)
+			if err != nil {
+				os.Exit(54)
+			}
+			previous = string(data)
+		}
+	}
+	if transcript == "" || sessionID == "" {
+		os.Exit(55)
+	}
+	if path := os.Getenv("NEOREAD_CLAUDE_NATIVE_CAPTURE"); path != "" {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			os.Exit(56)
+		}
+		_ = json.NewEncoder(file).Encode(map[string]string{"sessionId": sessionID, "resume": transcript, "previous": previous, "input": input})
+		_ = file.Close()
+	}
+	if err := os.MkdirAll(filepath.Dir(transcript), 0700); err != nil {
+		os.Exit(57)
+	}
+	file, err := os.OpenFile(transcript, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		os.Exit(58)
+	}
+	defer file.Close()
+	_ = json.NewEncoder(file).Encode(map[string]string{"input": input})
+	send := emit
+	emit = func(value any) {
+		if event, ok := value.(map[string]any); ok && (event["type"] == "system" || event["type"] == "result") {
+			event["session_id"] = sessionID
+		}
+		_ = json.NewEncoder(file).Encode(value)
+		send(value)
 	}
 	captureFakeDocumentPrompt(input)
 	stat, err := os.Stat(config)
@@ -237,7 +288,8 @@ func runFakeKimiDocument(mode string, emit func(any)) {
 
 func TestCLIDocumentParametersAndInventory(t *testing.T) {
 	args := strings.Join(claudeDocumentArgs("/synthetic/config.json", false), " ")
-	if strings.Contains(args, "--safe-mode") || !strings.Contains(strings.Join(claudeArgs(), " "), "--safe-mode") || !strings.Contains(args, "disableAllHooks") || !strings.Contains(args, "claudeMdExcludes") || strings.Contains(args, "--tools Web") {
+	stateless := strings.Join(claudeArgs(), " ")
+	if strings.Contains(args, "--safe-mode") || strings.Contains(args, "--no-session-persistence") || !strings.Contains(stateless, "--safe-mode") || !strings.Contains(stateless, "--no-session-persistence") || !strings.Contains(args, "disableAllHooks") || !strings.Contains(args, "claudeMdExcludes") || strings.Contains(args, "--tools Web") {
 		t.Fatal(args)
 	}
 	work := t.TempDir()
@@ -401,4 +453,108 @@ func TestLiveClaudeDocumentWebTools(t *testing.T) {
 	if len(names) < 2 {
 		t.Fatal("native web tools were not both exercised")
 	}
+}
+
+// Uses the installed CLI with a loopback model and synthetic document.
+// No provider credentials or paid model requests are needed.
+func TestClaudeNativeHistoryInstalledCLI(t *testing.T) {
+	if os.Getenv("NEOREAD_CLAUDE_HISTORY_INSTALLED") != "1" {
+		t.Skip("opt-in installed Claude CLI with a synthetic loopback model")
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "neoread-synthetic-key")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+	t.Setenv("CLAUDE_CODE_SKIP_PROMPT_HISTORY", "1") // Agent chat must override this.
+	s, a := prepareConversationFixture(t)
+	passage := a.corpus.Passages[0]
+	var mu sync.Mutex
+	seenOriginalAfterRestart, secondTurnCalls, requests := false, 0, 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "count_tokens") {
+			respond(w, 200, map[string]int{"input_tokens": 100})
+			return
+		}
+		var body struct {
+			Model    string            `json:"model"`
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.Messages) == 0 {
+			t.Error("invalid native model request")
+			fail(w, 400, "synthetic request")
+			return
+		}
+		messages := jsonText(body.Messages)
+		// The original passage is present only in the first tool result. Neither
+		// the user's question nor the short saved answer includes its wording.
+		read := strings.Contains(messages, passage.Text)
+		mu.Lock()
+		requests++
+		if strings.Contains(messages, "SECOND_NATIVE_REQUEST") {
+			secondTurnCalls++
+			seenOriginalAfterRestart = read
+		}
+		mu.Unlock()
+		block := map[string]any{"type": "text", "text": ""}
+		delta := map[string]any{"type": "text_delta", "text": "已读取合成原文 [S1]"}
+		stop := "end_turn"
+		if !read {
+			block = map[string]any{"type": "tool_use", "id": "toolu_" + id(), "name": "mcp__neoread_document__read_passage", "input": map[string]any{}}
+			delta = map[string]any{"type": "input_json_delta", "partial_json": jsonText(map[string]string{"blockId": passage.ID})}
+			stop = "tool_use"
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		emit := func(name string, value any) {
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, jsonText(value))
+		}
+		emit("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg_" + id(), "type": "message", "role": "assistant", "model": body.Model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": map[string]int{"input_tokens": 100, "output_tokens": 0}}})
+		emit("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": block})
+		emit("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": delta})
+		emit("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+		emit("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop, "stop_sequence": nil}, "usage": map[string]int{"output_tokens": 20}})
+		emit("message_stop", map[string]any{"type": "message_stop"})
+	}))
+	defer api.Close()
+	t.Setenv("ANTHROPIC_BASE_URL", api.URL)
+	setReadingHistoryHidden(t, s, true)
+	a.chat = &chatInput{Agent: a, DocumentID: "doc", Question: "FIRST_NATIVE_REQUEST"}
+	if err := s.Store.saveMessage(Message{ID: id(), DocumentID: "doc", Role: "user", Content: a.chat.Question}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	result, err := streamCLIDocumentChat(ctx, cliAdapter{s.Store.Root, "claude", "claude-sonnet-4-6"}, AIInput{Chat: a.chat}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.saveDocumentAgentAnswer(ctx, a, result.Text, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	first, item := readClaudeSession(t, s, "doc", "")
+	if _, err := os.Stat(item.VisiblePath); !os.IsNotExist(err) {
+		t.Fatal("installed CLI left a hidden session in ordinary history", err)
+	}
+	s = reopenCLIDocumentServer(t, s)
+	chat, a := prepareNativeAgentAfterRestart(t, s)
+	chat.History, _ = s.Store.chatHistory("doc")
+	chat.Question = "SECOND_NATIVE_REQUEST"
+	result, err = streamCLIDocumentChat(ctx, cliAdapter{s.Store.Root, "claude", "claude-sonnet-4-6"}, AIInput{Chat: chat}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.saveDocumentAgentAnswer(ctx, a, result.Text, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := readClaudeSession(t, s, "doc", "")
+	mu.Lock()
+	passed, count, total := seenOriginalAfterRestart, secondTurnCalls, requests
+	mu.Unlock()
+	if !passed || count != 1 || first.NativeThread != second.NativeThread {
+		t.Fatal("installed CLI failed to resume native tool context", passed, count, total)
+	}
+	setReadingHistoryHidden(t, s, false)
+	if _, err := os.Stat(item.VisiblePath); err != nil {
+		t.Fatal("disabling hiding did not restore the native transcript", err)
+	}
+	t.Logf("same native session, tool context after restart, ordinary history restored; model requests=%d", total)
 }

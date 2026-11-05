@@ -208,6 +208,8 @@ func (s *Server) Close() {
 	}
 	s.codexHistoryMu.Lock()
 	s.codexHistoryMu.Unlock()
+	s.claudeHistoryMu.Lock()
+	s.claudeHistoryMu.Unlock()
 }
 
 func (c *codexChatCache) deleteDocument(document string) {

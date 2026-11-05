@@ -34,7 +34,7 @@ func claudeDocumentArgs(config string, web bool) []string {
 		"--tools", tools, "--strict-mcp-config", "--mcp-config", config,
 		"--allowedTools", strings.Join(allowed, ","), "--permission-mode", "dontAsk", "--permission-prompts", "none",
 		"--setting-sources", "user", "--settings", `{"disableAllHooks":true,"autoMemoryEnabled":false,"claudeMdExcludes":["**"]}`,
-		"--disable-slash-commands", "--no-session-persistence",
+		"--disable-slash-commands", "--system-prompt-snapshot", "off",
 		"--system-prompt", webInstructions(documentReadingInstructions, web)}
 }
 
@@ -80,6 +80,7 @@ func streamClaudeDocument(ctx context.Context, work, model, url, token string, i
 		return GenerateResult{}, err
 	}
 	args := claudeDocumentArgs(config, in.Chat.WebSearch)
+	args = append(args, in.Chat.Agent.claudeNativeArgs()...)
 	if model != "" {
 		args = append(args, "--model", model)
 	}
@@ -99,6 +100,7 @@ func streamClaudeDocument(ctx context.Context, work, model, url, token string, i
 	child, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := runtimeenv.CommandContext(child, "claude", args...)
+	cmd.Env = append(os.Environ(), "CLAUDE_CODE_SKIP_PROMPT_HISTORY=0")
 	cmd.Dir, cmd.Stdin, cmd.Stderr = work, input, io.Discard
 	cmd.WaitDelay = 400 * time.Millisecond
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
@@ -112,6 +114,9 @@ func streamClaudeDocument(ctx context.Context, work, model, url, token string, i
 	stop := context.AfterFunc(child, func() { time.AfterFunc(450*time.Millisecond, func() { _ = stdout.Close() }) })
 	defer stop()
 	state := claudeDocumentStream{chat: in.Chat, draft: cliDocumentDraft{emit: emit}}
+	if in.Chat.Agent.claudeNative != nil {
+		state.sessionID = in.Chat.Agent.claudeNative.item.ID
+	}
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 4096), maxProviderFrame)
 	for scanner.Scan() {
@@ -150,11 +155,15 @@ func streamClaudeDocument(ctx context.Context, work, model, url, token string, i
 	if exit != nil || !state.completed || !state.initialized || state.stop != "end_turn" {
 		return GenerateResult{}, generationError(ErrorProtocol, "Claude 未完成文档回答")
 	}
+	if err := in.Chat.Agent.captureClaudeTranscript(ctx); err != nil {
+		return GenerateResult{}, err
+	}
 	return state.draft.finish(ctx)
 }
 
 type claudeDocumentStream struct {
 	chat        *chatInput
+	sessionID   string
 	draft       cliDocumentDraft
 	initialized bool
 	completed   bool
@@ -165,23 +174,13 @@ func (s *claudeDocumentStream) consume(raw []byte) error {
 	var event struct {
 		Type       string          `json:"type"`
 		Subtype    string          `json:"subtype"`
+		SessionID  string          `json:"session_id"`
 		Parent     string          `json:"parent_tool_use_id"`
 		IsError    bool            `json:"is_error"`
 		Result     string          `json:"result"`
 		ToolResult json.RawMessage `json:"tool_use_result"`
-		Event      struct {
-			Type  string `json:"type"`
-			Delta struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-				Stop string `json:"stop_reason"`
-			} `json:"delta"`
-			Block struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content_block"`
-		} `json:"event"`
-		Message struct {
+		Event      json.RawMessage `json:"event"`
+		Message    struct {
 			Content []claudeToolBlock `json:"content"`
 		} `json:"message"`
 	}
@@ -195,6 +194,9 @@ func (s *claudeDocumentStream) consume(raw []byte) error {
 		return generationError(ErrorUpstream, "Claude 文档请求失败")
 	}
 	if event.Type == "system" && event.Subtype == "init" {
+		if s.sessionID != "" && event.SessionID != s.sessionID {
+			return generationError(ErrorProtocol, "Claude 恢复了不同的原生会话")
+		}
 		status := claudeDocumentInventory(raw, s.chat.WebSearch)
 		level := slog.LevelInfo
 		if status != "passed" {
@@ -212,20 +214,37 @@ func (s *claudeDocumentStream) consume(raw []byte) error {
 	}
 	switch event.Type {
 	case "stream_event":
-		switch event.Event.Type {
+		// System UI metadata can also carry an event string. Only model stream
+		// envelopes have the content-block object consumed below.
+		var stream struct {
+			Type  string `json:"type"`
+			Delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+				Stop string `json:"stop_reason"`
+			} `json:"delta"`
+			Block struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content_block"`
+		}
+		if json.Unmarshal(event.Event, &stream) != nil {
+			return generationError(ErrorProtocol, "Claude 文档流格式无效")
+		}
+		switch stream.Type {
 		case "message_start":
 			s.stop = ""
 		case "content_block_start":
-			if event.Event.Block.Type == "text" {
-				return s.draft.add(event.Event.Block.Text)
+			if stream.Block.Type == "text" {
+				return s.draft.add(stream.Block.Text)
 			}
 		case "content_block_delta":
-			if event.Event.Delta.Type == "text_delta" {
-				return s.draft.add(event.Event.Delta.Text)
+			if stream.Delta.Type == "text_delta" {
+				return s.draft.add(stream.Delta.Text)
 			}
 		case "message_delta":
-			if event.Event.Delta.Stop != "" {
-				s.stop = event.Event.Delta.Stop
+			if stream.Delta.Stop != "" {
+				s.stop = stream.Delta.Stop
 				if s.stop == "tool_use" {
 					return s.draft.reset()
 				}
@@ -241,7 +260,7 @@ func (s *claudeDocumentStream) consume(raw []byte) error {
 			}
 		}
 	case "result":
-		if s.stop != "end_turn" || event.Result != s.draft.text {
+		if s.stop != "end_turn" || event.Result != s.draft.text || s.sessionID != "" && event.SessionID != s.sessionID {
 			return generationError(ErrorProtocol, "Claude 最终回答与流式内容不一致")
 		}
 		s.completed = true

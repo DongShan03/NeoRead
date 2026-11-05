@@ -207,7 +207,7 @@ func exportLibraryArchive(ctx context.Context, source, destination string, optio
 	}
 	// Reading preferences travel with the library. Provider keys, connection
 	// credentials and machine-specific integration state do not.
-	if _, err = tx.Exec("DROP TABLE IF EXISTS codex_history_threads"); err != nil {
+	if _, err = tx.Exec("DROP TABLE IF EXISTS codex_history_threads; DROP TABLE IF EXISTS claude_history_sessions"); err != nil {
 		return err
 	}
 	// An archive contains the received files, not the source device's pending
@@ -522,7 +522,7 @@ func importLibraryArchive(ctx context.Context, archivePath, destination, mergeSo
 		// Codex native threads live outside the library on the source machine.
 		// Rebuild them from the preserved transcript on the next question rather
 		// than resuming a missing thread or sharing the original library's writer.
-		_, err = incomingStore.DB.Exec("DELETE FROM codex_history_threads; DELETE FROM library_document_conversations; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'")
+		_, err = incomingStore.DB.Exec("DELETE FROM codex_history_threads; DELETE FROM claude_history_sessions; DELETE FROM library_document_conversations; DELETE FROM document_conversations WHERE provider IN ('codex','claude') OR substr(provider,-6)=':codex' OR substr(provider,-7)=':claude'")
 	}
 	incomingStore.DB.Close()
 	if err != nil {
@@ -548,7 +548,7 @@ func importLibraryArchive(ctx context.Context, archivePath, destination, mergeSo
 		}
 		// Retained documents also belong to this new independent library.
 		// Keep their transcripts, but never share the source's native Codex writer.
-		if _, e = base.DB.ExecContext(ctx, "DELETE FROM codex_history_threads; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex'"); e != nil {
+		if _, e = base.DB.ExecContext(ctx, "DELETE FROM codex_history_threads; DELETE FROM claude_history_sessions; DELETE FROM document_conversations WHERE provider IN ('codex','claude') OR substr(provider,-6)=':codex' OR substr(provider,-7)=':claude'"); e != nil {
 			base.DB.Close()
 			return e
 		}

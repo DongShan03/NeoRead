@@ -32,6 +32,8 @@ import (
 
 type Server struct {
 	codexHistoryMu          sync.Mutex
+	claudeHistoryMu         sync.Mutex
+	claudeActive            map[string]bool
 	webdav                  webdavState
 	libraryArchiveMu        sync.RWMutex
 	startupSettings         json.RawMessage
@@ -273,7 +275,7 @@ func (s *Server) Handler() http.Handler {
 		beforeHide := s.hideCodexHistory()
 		if value, exists := v["hideCodexHistory"]; exists {
 			if _, ok := value.(bool); !ok {
-				fail(w, 400, "Codex 历史可见性设置必须为布尔值")
+				fail(w, 400, "阅读会话历史可见性设置必须为布尔值")
 				return
 			}
 		}
@@ -310,7 +312,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		if beforeHide != s.hideCodexHistory() {
 			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-			err = s.applyCodexHistoryVisibility(ctx)
+			err = s.applyAgentHistoryVisibility(ctx)
 			cancel()
 			if err != nil {
 				fail(w, 502, err.Error())

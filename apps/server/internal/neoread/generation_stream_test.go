@@ -621,6 +621,9 @@ func fakeAgent(t *testing.T, provider, mode string) string {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("NEOREAD_AGENT_HELPER", provider)
 	t.Setenv("NEOREAD_AGENT_MODE", mode)
+	if provider == "claude" {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	}
 	ack := filepath.Join(dir, "received")
 	t.Setenv("NEOREAD_AGENT_ACK", ack)
 	return ack

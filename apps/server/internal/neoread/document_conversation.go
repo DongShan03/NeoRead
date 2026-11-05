@@ -10,7 +10,7 @@ import (
 )
 
 // One logical conversation per document and provider. Native history belongs to
-// Codex; Messages is the active, possibly compacted Chat Completions window.
+// Codex and Claude; Messages is the active, possibly compacted Chat Completions window.
 // The UI transcript and per-turn protocol events remain in messages/agent_runs.
 type documentConversation struct {
 	PiEntries       json.RawMessage         `json:"piEntries,omitempty"`
@@ -27,6 +27,7 @@ type documentConversation struct {
 	Messages        []toolCompletionMessage `json:"messages,omitempty"`
 	Compactions     int                     `json:"compactions"`
 	NativeThread    string                  `json:"nativeThread,omitempty"`
+	NativeSnapshot  string                  `json:"nativeSnapshot,omitempty"`
 	NativePending   string                  `json:"nativePendingTurn,omitempty"`
 	NativeCommitted string                  `json:"nativeCommittedTurn,omitempty"`
 	NativeDirty     bool                    `json:"nativeDirty"`

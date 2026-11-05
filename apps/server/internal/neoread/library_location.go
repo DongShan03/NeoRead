@@ -87,7 +87,7 @@ func CopyLibrary(source, destination string) (err error) {
 		if err != nil || relative == "." {
 			return err
 		}
-		if relative == "ai-work" {
+		if relative == "ai-work" || relative == "claude-history" {
 			return filepath.SkipDir
 		}
 		if relative == "neoread.lock" || relative == "server.json" {
@@ -109,9 +109,28 @@ func CopyLibrary(source, destination string) (err error) {
 	if err != nil {
 		return err
 	}
+	// This is an independent library writer. Native Claude files and ownership
+	// stay with the source; visible NeoRead history is replayed on first use.
+	if err = clearCopiedClaudeSessions(destinationRoot); err != nil {
+		return err
+	}
 	// Validate the copied SQLite database (including any recovered WAL) without
 	// running migrations or modifying the source database.
 	return checkLibraryDatabase(sourceRoot, destinationRoot)
+}
+
+func clearCopiedClaudeSessions(root string) error {
+	db, err := sql.Open("sqlite", libraryDatabaseURI(filepath.Join(root, "neoread.sqlite")))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var exists int
+	if err = db.QueryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='claude_history_sessions'").Scan(&exists); err != nil || exists == 0 {
+		return err
+	}
+	_, err = db.Exec("DELETE FROM claude_history_sessions; DELETE FROM document_conversations WHERE provider='claude' OR substr(provider,-7)=':claude'; DELETE FROM library_document_conversations WHERE provider='claude' OR substr(provider,-7)=':claude'")
+	return err
 }
 func copyLibraryFile(source, destination string) error {
 	in, err := os.Open(source)

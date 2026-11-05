@@ -95,9 +95,9 @@ func (s *Server) applyCodexHistoryVisibility(ctx context.Context) error {
 	hide := s.hideCodexHistory()
 	if _, err := s.Store.DB.ExecContext(ctx, `INSERT OR IGNORE INTO codex_history_threads(thread_id,document_id,hidden)
  SELECT json_extract(body,'$.nativeThread'),document_id,0 FROM document_conversations
- WHERE COALESCE(json_extract(body,'$.nativeThread'),'')<>''
+ WHERE COALESCE(json_extract(body,'$.nativeThread'),'')<>'' AND (provider='codex' OR substr(provider,-6)=':codex')
  UNION ALL SELECT json_extract(body,'$.nativeThread'),document_id,0 FROM library_document_conversations
- WHERE COALESCE(json_extract(body,'$.nativeThread'),'')<>''`); err != nil {
+ WHERE COALESCE(json_extract(body,'$.nativeThread'),'')<>'' AND (provider='codex' OR substr(provider,-6)=':codex')`); err != nil {
 		return err
 	}
 	rows, err := s.Store.DB.QueryContext(ctx, "SELECT thread_id,document_id,hidden FROM codex_history_threads")
@@ -178,8 +178,8 @@ func (s *Server) StartCodexHistory(ctx context.Context) {
 	go func() {
 		work, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		if err := s.applyCodexHistoryVisibility(work); err != nil && !errors.Is(err, context.Canceled) {
-			s.diagnosticEvent(slog.LevelError, "codex.history.visibility_failed", "errorCode", string(errorKind(err)))
+		if err := s.applyAgentHistoryVisibility(work); err != nil && !errors.Is(err, context.Canceled) {
+			s.diagnosticEvent(slog.LevelError, "agent.history.visibility_failed", "errorCode", string(errorKind(err)))
 		}
 	}()
 }

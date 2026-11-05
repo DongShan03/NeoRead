@@ -18,6 +18,16 @@ func streamCLIDocumentChat(ctx context.Context, cli cliAdapter, in AIInput, emit
 	if err := a.prepareReading(ctx, in); err != nil {
 		return GenerateResult{}, err
 	}
+	if cli.provider == "claude" {
+		in.Prompt, err = a.beginClaudeConversation(ctx, in)
+		if err != nil {
+			a.server.diagnosticEvent(slog.LevelError, "claude.session.failed", "phase", "prepare", "errorCode", string(errorKind(err)))
+			return GenerateResult{}, err
+		}
+		defer a.finishClaudeNativeAttempt()
+	} else {
+		in.Prompt = a.cliDocumentPrompt(in)
+	}
 	work, err := os.MkdirTemp(filepath.Join(cli.root, "ai-work"), "document-")
 	if err != nil {
 		return GenerateResult{}, generationError(ErrorConfiguration, "无法创建隔离的 Agent 工作目录")
@@ -34,7 +44,6 @@ func streamCLIDocumentChat(ctx context.Context, cli cliAdapter, in AIInput, emit
 		return GenerateResult{}, err
 	}
 	defer closeMCP()
-	in.Prompt = a.cliDocumentPrompt(in)
 	if cli.provider == "claude" {
 		result, err = streamClaudeDocument(child, work, cli.model, url, token, in, emit)
 	} else {
