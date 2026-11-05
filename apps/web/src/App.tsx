@@ -1,6 +1,7 @@
 import { useShortcut, loadBindings, isMac } from "./shortcuts/shortcuts";
+import { libraryShortcut } from "./library-shortcuts";
 import { useSaveReaderSettings } from "./neoread-settings";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Library,
@@ -116,11 +117,12 @@ export function App() {
   );
   const [settings, setSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"agent" | "papers">("agent");
+  const openSettings = useCallback((tab: "agent" | "papers" = "agent") => {
+    setSettingsTab(tab);
+    setSettings(true);
+  }, []);
   useEffect(() => {
-    const openSync = () => {
-      setSettingsTab("papers");
-      setSettings(true);
-    };
+    const openSync = () => openSettings("papers");
     window.addEventListener("neoread:open-sync-settings", openSync);
     return () =>
       window.removeEventListener("neoread:open-sync-settings", openSync);
@@ -212,12 +214,12 @@ export function App() {
   ]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      const action = libraryShortcut(e);
+      if (action === "find") {
         e.preventDefault();
         setCommand((v) => !v);
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+      if (action === "import") {
         e.preventDefault();
         chooseFiles();
       }
@@ -414,8 +416,14 @@ export function App() {
       toast.error(e.message),
     );
   };
-  const openLibrary = (next: LibraryMode) => {
+  const showLibrary = useCallback(() => {
     open(null);
+    void flushProgress()
+      .then(refreshLibrary)
+      .catch((e) => toast.error(e.message));
+  }, [open]);
+  const openLibrary = (next: LibraryMode) => {
+    showLibrary();
     switchMode(next);
   };
   const primaryMode = primaryLibraryMode(libraryPreferences);
@@ -443,12 +451,10 @@ export function App() {
       })
       .catch((e) => toast.error(e.message));
   };
-  const showLibrary = () => {
-    open(null);
-    void flushProgress()
-      .then(refreshLibrary)
-      .catch((e) => toast.error(e.message));
-  };
+  const selectDocumentTab = useCallback((doc: Document) => {
+    open(doc);
+    void api.update(doc.id, {}).catch((e) => toast.error(e.message));
+  }, [open]);
   const tabsShown = documentTabsShown({ theme, tabIds, closedTabGroups });
   const openDocuments = (docs: Document[]) => {
     void openLibraryDocuments(docs).then(({ opened, skipped }) => {
@@ -542,7 +548,8 @@ export function App() {
           }}
         />
         <DocumentTabs
-          onSelect={openDocument}
+          onSelect={selectDocumentTab}
+          onReopen={openDocument}
           onLibrary={showLibrary}
           onNew={() => {
             showLibrary();
@@ -553,7 +560,7 @@ export function App() {
           theme={resolvedTheme}
           jobs={jobs}
           onLibrary={showLibrary}
-          onSettings={() => setSettings(true)}
+          onSettings={openSettings}
         />
         {!active && (
           <div
@@ -663,7 +670,7 @@ export function App() {
                   data-tour="open-settings"
                   variant="ghost"
                   className="nav-item"
-                  onClick={() => setSettings(true)}
+                  onClick={() => openSettings()}
                 >
                   <Settings2 />
                   设置
@@ -695,7 +702,7 @@ export function App() {
             {nav && <LibrarySidebarResizer />}
             {papers ? (
               <PaperLibrary
-                onSettings={() => setSettings(true)}
+                onSettings={openSettings}
                 openDocuments={theme.documentTabs ? openDocuments : undefined}
                 documents={documents}
                 trash={trash}
@@ -832,7 +839,7 @@ export function App() {
                           processingError={processingError}
                           openDocument={openDocument}
                           favorite={favorite}
-                          onSettings={() => setSettings(true)}
+                          onSettings={openSettings}
                           onOverview={setOverviewDocument}
                           onUsage={setUsageDocument}
                           detailId={detail?.id}
@@ -853,7 +860,7 @@ export function App() {
                           openDocument={openDocument}
                           favorite={favorite}
                           onMove={moveDocument}
-                          onSettings={() => setSettings(true)}
+                          onSettings={openSettings}
                           onOverview={setOverviewDocument}
                           onUsage={setUsageDocument}
                           activeId={detail?.id}
@@ -972,7 +979,7 @@ export function App() {
           open={guide}
           onOpenChange={setGuide}
           onAction={(action) => {
-            if (action === "settings") setSettings(true);
+            if (action === "settings") openSettings();
             else if (currentMode() === "papers") setImportingPaper(true);
             else chooseFiles();
           }}
@@ -1005,7 +1012,7 @@ export function App() {
           </DialogContent>
         </Dialog>
         <Dialog open={command} onOpenChange={setCommand}>
-          <DialogContent>
+          <DialogContent data-quick-find>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Command size={18} />
@@ -1042,7 +1049,7 @@ export function App() {
                 className="w-full justify-start"
                 onClick={() => {
                   setCommand(false);
-                  setSettings(true);
+                  openSettings();
                 }}
               >
                 <Settings2 />

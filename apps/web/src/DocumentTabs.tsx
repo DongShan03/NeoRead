@@ -50,10 +50,12 @@ const animated = () => !reducedMotion();
 
 export function DocumentTabs({
   onSelect,
+  onReopen = onSelect,
   onLibrary,
   onNew,
 }: {
   onSelect: (doc: Document) => void;
+  onReopen?: (doc: Document) => void;
   onLibrary: () => void;
   onNew: () => void;
 }) {
@@ -144,7 +146,7 @@ export function DocumentTabs({
     if (pendingClose.current) return;
     restoreFocus.current = true;
     const doc = useReaderStore.getState().reopenTabs();
-    if (doc) onSelect(doc);
+    if (doc) onReopen(doc);
     else restoreFocus.current = false;
   };
   const extra = enabled
