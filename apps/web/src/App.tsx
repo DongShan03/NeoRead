@@ -132,7 +132,12 @@ export function App() {
   const [guide, setGuide] = useState(false);
   const [filter, setFilter] = useState("all");
   const [filters, setFilters] = useState(initialFilters);
-  const [libraryView, setLibraryView] = useState<"grid" | "list">("grid");
+  const libraryView = libraryPreferences.books?.view || "grid";
+  const setLibraryView = (view: "grid" | "list") => {
+    void updateLibraryPreferences({ books: {
+      ...useReaderStore.getState().libraryPreferences.books, view,
+    } }).catch((e) => toast.error(e.message));
+  };
   const [editingLibrary, setEditingLibrary] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [libraryBody, setLibraryBody] = useState<HTMLDivElement | null>(null);

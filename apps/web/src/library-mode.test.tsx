@@ -95,3 +95,15 @@ it("refreshes synced categories without changing the current library mode", asyn
     papers: { categories: ["研究"] },
   });
 });
+
+it("saves and reloads the book view without losing other book preferences", async () => {
+  const books = { detailWidth: 380, cardScale: 1.2 };
+  useReaderStore.setState({ libraryPreferences: { books } });
+  await updateLibraryPreferences({ books: { ...books, view: "list" } });
+  const saved = useReaderStore.getState().libraryPreferences;
+  expect(api.saveLibraryPreferences).toHaveBeenLastCalledWith(saved);
+  vi.mocked(api.libraryPreferences).mockResolvedValue(saved);
+  useReaderStore.setState({ libraryPreferences: {} });
+  await loadLibraryPreferences();
+  expect(useReaderStore.getState().libraryPreferences.books).toEqual({ ...books, view: "list" });
+});
