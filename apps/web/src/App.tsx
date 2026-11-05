@@ -986,7 +986,7 @@ export function App() {
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
               <DialogTitle>关于 NeoRead</DialogTitle>
-              <DialogDescription>一千万以内最好的阅读器</DialogDescription>
+              <DialogDescription className="sr-only">NeoRead 版本与更新</DialogDescription>
             </DialogHeader>
             <dl className="flex items-center justify-between text-sm">
               <dt className="text-muted-foreground">版本</dt>
