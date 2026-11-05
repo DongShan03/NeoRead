@@ -43,7 +43,9 @@ func (s *Server) resumeCodexHistory(ctx context.Context, session *codexSession, 
 		_, _ = session.control(ctx, "thread/unarchive", map[string]string{"threadId": thread})
 	}
 	err = session.resumeDocument(ctx, thread)
-	if err != nil && tracked && !hidden && errorKind(err) != ErrorBusy {
+	var rpc *codexRPCError
+	missing := errors.As(err, &rpc) && rpc.missingThread
+	if err != nil && tracked && !hidden && !missing && errorKind(err) != ErrorBusy {
 		// A lost archive acknowledgement can leave the local marker behind.
 		if _, restoreErr := session.control(ctx, "thread/unarchive", map[string]string{"threadId": thread}); restoreErr == nil {
 			err = session.resumeDocument(ctx, thread)
@@ -153,7 +155,12 @@ func (s *Server) applyCodexHistoryVisibility(ctx context.Context) error {
 			continue
 		}
 		_, err = session.control(ctx, method, map[string]string{"threadId": item.thread})
-		if err == nil {
+		var rpc *codexRPCError
+		if errors.As(err, &rpc) && rpc.missingThread {
+			// A migrated library can retain an obsolete local ownership marker.
+			// Drop only that marker; the saved transcript will rebuild on use.
+			_, err = s.Store.DB.ExecContext(ctx, "DELETE FROM codex_history_threads WHERE thread_id=?", item.thread)
+		} else if err == nil {
 			_, err = s.Store.DB.ExecContext(ctx, "UPDATE codex_history_threads SET hidden=? WHERE thread_id=?", hide, item.thread)
 		}
 		s.documentMu.Unlock()

@@ -131,6 +131,8 @@ API 厂商规则、实际强度映射、上游错误分类和请求关联字段�
 
 Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history-visibility.md)。`codex.history.visibility_applied` 只记录隐藏状态、已处理和失败数量；`archive_failed` 只记录固定错误类别。不记录线程日志、原始 RPC 错误、凭据或聊天正文。
 
+迁移或本机原生文件清理后，Codex 明确返回线程不存在时记录 `codex.session.rebuilt`，原因固定为 `native_missing`，再从 NeoRead 的问答、引用和工具记录重建。占用、网络或其他协议错误不触发重建；原始 RPC 消息继续丢弃。
+
 Claude Agent 的原生保存与可恢复隐藏见 [Claude 原生阅读会话](claude-conversations.md)。`claude.session.continuation` 用固定状态区分新建、恢复、恢复未提交轮次及原生文件缺失后的重建；`claude.session.failed` 记录准备阶段和错误类别。`claude.history.visibility_applied` 记录隐藏状态、处理与失败数量，`claude.history.failed` 区分文件定位和可见性应用失败；启动时的 `agent.history.visibility_failed` 记录统一设置应用失败。沿用 `chat.finish` 的生成与保存终态，不重复记录正文或逐片段事件。原生 transcript 和恢复副本属于会话数据，不纳入诊断采集和导出。
 
 ## 本地书库新建

@@ -471,8 +471,9 @@ var errCodexRPCResponse = errors.New("Codex RPC request failed")
 // Keep the code and a known reason, never the upstream message or error data:
 // those may contain private document text, paths or credentials.
 type codexRPCError struct {
-	Code         int
-	activeWriter bool
+	Code          int
+	activeWriter  bool
+	missingThread bool
 }
 
 func (e *codexRPCError) Error() string { return errCodexRPCResponse.Error() }
@@ -518,9 +519,12 @@ func (s *codexSession) callRPC(ctx context.Context, life *rpcLifecycle, method s
 				if json.Unmarshal(msg.Error, &detail) == nil && detail.Code != nil {
 					failure := &codexRPCError{Code: *detail.Code}
 					failure.activeWriter = failure.Code == -32600 && strings.HasPrefix(detail.Message, "thread ") && strings.Contains(detail.Message, " already has an active writer")
+					failure.missingThread = (failure.Code == -32600 || failure.Code == -32602) && (strings.HasPrefix(detail.Message, "no rollout found for thread id ") || strings.HasPrefix(detail.Message, "thread not found"))
 					reason := "rpc_error"
 					if failure.activeWriter {
 						reason = "active_writer"
+					} else if failure.missingThread {
+						reason = "native_missing"
 					}
 					slog.WarnContext(ctx, "codex.rpc.error", "method", method, "rpcCode", failure.Code, "reason", reason, "requestId", requestID(ctx))
 					return nil, failure

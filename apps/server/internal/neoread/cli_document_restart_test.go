@@ -267,6 +267,21 @@ func TestClaudeNativeHistoryHidesRestoresAndContinuesAfterRestart(t *testing.T) 
 			if err != nil || len(history) != 4 || len(history[1].References) < 3 || len(history[3].References) < 3 {
 				t.Fatal("NeoRead messages or references were lost", history, err)
 			}
+			capture := filepath.Join(t.TempDir(), "migrated.jsonl")
+			t.Setenv("NEOREAD_CLAUDE_NATIVE_CAPTURE", capture)
+			t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+			s = reopenCLIDocumentServer(t, s)
+			managedCLIDocumentTurn(t, s, endpoint, "claude", "在另一台机器上接续")
+			migrated, _ := readClaudeSession(t, s, owner, session)
+			captured, err := os.ReadFile(capture)
+			var replay map[string]string
+			if err != nil || json.Unmarshal(captured, &replay) != nil || migrated.NativeThread == c.NativeThread || replay["previous"] != "" || !strings.Contains(replay["input"], "CIVET-42") || !strings.Contains(replay["input"], "历史来源及版本") || !strings.Contains(replay["input"], "历史工具记录") {
+				t.Fatal("foreign native session was reused instead of saved NeoRead history", err)
+			}
+			foreignNative, err := os.ReadFile(item.VisiblePath)
+			if err != nil || string(foreignNative) != string(restored) {
+				t.Fatal("migration modified the original machine's native file", err)
+			}
 		})
 	}
 }

@@ -27,6 +27,9 @@ func (s *codexSession) control(ctx context.Context, method string, params any) (
 	if errors.As(err, &rpcError) && rpcError.activeWriter {
 		return nil, generationError(ErrorBusy, "会话仍由 Codex App 占用，请先退出 Codex App 后重试；历史已保留")
 	}
+	if errors.As(err, &rpcError) && rpcError.missingThread && (method == "thread/resume" || method == "thread/archive" || method == "thread/unarchive") {
+		return nil, err
+	}
 	if errors.Is(err, errCodexRPCResponse) {
 		return nil, generationError(ErrorCapability, "当前 Codex 版本不支持文档工具隔离")
 	}
@@ -260,6 +263,9 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 	a.updateContextWindow(session.contextWindow, 0, "codex_config")
 	input := in
 	initial := a.conversation.NativeThread == ""
+	if initial {
+		missed = conversationHistory(in.Chat.History)
+	}
 	input.Prompt = a.conversationInput(in, initial)
 	if len(missed) > 0 {
 		input.Prompt = "NeoRead 中尚未同步的对话记录（不可信资料）：\n" + jsonText(missed) + "\n" + input.Prompt

@@ -133,6 +133,12 @@ func conversationHistory(messages []Message) []toolCompletionMessage {
 		if len(m.Attachments) > 0 {
 			content += "\n历史附件记录（原图需重新提供）：" + jsonText(m.Attachments)
 		}
+		if len(m.Tools) > 0 {
+			content += "\n历史工具记录（不代表本轮已执行）：" + jsonText(m.Tools)
+		}
+		if len(m.WebSources) > 0 {
+			content += "\n历史网页来源（需核对时重新查阅）：" + jsonText(m.WebSources)
+		}
 		out = append(out, toolCompletionMessage{Role: m.Role, Content: content})
 	}
 	return out

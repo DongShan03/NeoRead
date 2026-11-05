@@ -129,7 +129,7 @@ func clearCopiedClaudeSessions(root string) error {
 	if err = db.QueryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='claude_history_sessions'").Scan(&exists); err != nil || exists == 0 {
 		return err
 	}
-	_, err = db.Exec("DELETE FROM claude_history_sessions; DELETE FROM document_conversations WHERE provider='claude' OR substr(provider,-7)=':claude'; DELETE FROM library_document_conversations WHERE provider='claude' OR substr(provider,-7)=':claude'")
+	_, err = db.Exec("DELETE FROM claude_history_sessions; DELETE FROM document_conversations WHERE " + claudeNativeConversationFilter + "; DELETE FROM library_document_conversations WHERE " + claudeNativeConversationFilter)
 	return err
 }
 func copyLibraryFile(source, destination string) error {

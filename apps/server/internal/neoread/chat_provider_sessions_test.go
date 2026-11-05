@@ -353,12 +353,14 @@ func TestCodexRPCErrorsKeepSafeDiagnostics(t *testing.T) {
 		name, payload string
 		code          int
 		activeWriter  bool
+		missingThread bool
 	}{
-		{"occupied", `{"code":-32600,"message":"thread PRIVATE-THREAD already has an active writer: PRIVATE-TOKEN","data":{"path":"PRIVATE-PATH"}}`, -32600, true},
-		{"other invalid request", `{"code":-32600,"message":"no active writer; PRIVATE-TEXT"}`, -32600, false},
-		{"unsupported method", `{"code":-32601,"message":"thread PRIVATE-THREAD already has an active writer"}`, -32601, false},
-		{"internal error", `{"code":-32603,"message":"PRIVATE-TEXT"}`, -32603, false},
-		{"malformed error", `{"code":"PRIVATE-CODE","message":"PRIVATE-TEXT"}`, 0, false},
+		{"occupied", `{"code":-32600,"message":"thread PRIVATE-THREAD already has an active writer: PRIVATE-TOKEN","data":{"path":"PRIVATE-PATH"}}`, -32600, true, false},
+		{"missing thread", `{"code":-32600,"message":"no rollout found for thread id PRIVATE-THREAD"}`, -32600, false, true},
+		{"other invalid request", `{"code":-32600,"message":"no active writer; PRIVATE-TEXT"}`, -32600, false, false},
+		{"unsupported method", `{"code":-32601,"message":"thread PRIVATE-THREAD already has an active writer"}`, -32601, false, false},
+		{"internal error", `{"code":-32603,"message":"PRIVATE-TEXT"}`, -32603, false, false},
+		{"malformed error", `{"code":"PRIVATE-CODE","message":"PRIVATE-TEXT"}`, 0, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
@@ -373,11 +375,11 @@ func TestCodexRPCErrorsKeepSafeDiagnostics(t *testing.T) {
 			}
 			var rpcError *codexRPCError
 			if tc.code != 0 {
-				if !errors.As(err, &rpcError) || rpcError.Code != tc.code || rpcError.activeWriter != tc.activeWriter {
+				if !errors.As(err, &rpcError) || rpcError.Code != tc.code || rpcError.activeWriter != tc.activeWriter || rpcError.missingThread != tc.missingThread {
 					t.Fatal("RPC classification lost", err)
 				}
 				var event map[string]any
-				if json.Unmarshal(logs.Bytes(), &event) != nil || event["method"] != "thread/resume" || event["rpcCode"] != float64(tc.code) || (event["reason"] == "active_writer") != tc.activeWriter {
+				if json.Unmarshal(logs.Bytes(), &event) != nil || event["method"] != "thread/resume" || event["rpcCode"] != float64(tc.code) || (event["reason"] == "active_writer") != tc.activeWriter || (event["reason"] == "native_missing") != tc.missingThread {
 					t.Fatal("safe diagnostic fields lost", logs.String())
 				}
 			} else if errors.As(err, &rpcError) {

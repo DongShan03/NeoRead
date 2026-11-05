@@ -3,6 +3,8 @@ package neoread
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,11 +126,19 @@ func (c *documentCodexCache) acquire(ctx context.Context, a *documentAgent, root
 	session.baseInstructions = webInstructions(documentReadingInstructions, session.webSearch)
 	if state.NativeThread != "" {
 		if err = a.server.resumeCodexHistory(ctx, session, state.NativeThread); err != nil {
-			session.close()
-			closeMCP()
-			return nil, err
+			var rpc *codexRPCError
+			if !errors.As(err, &rpc) || !rpc.missingThread {
+				session.close()
+				closeMCP()
+				return nil, err
+			}
+			state.NativeThread, state.NativePending, state.NativeCommitted = "", "", ""
+			state.NativeDirty, state.NativeUsage = false, nil
+			state.SeenSources = map[string]bool{}
+			a.server.diagnosticEvent(slog.LevelWarn, "codex.session.rebuilt", "reasonCode", "native_missing")
+		} else {
+			session.total = state.NativeUsage
 		}
-		session.total = state.NativeUsage
 	}
 	e := &documentCodexEntry{document: a.corpus.DocumentID, key: key, active: true, session: session, binding: binding, stopMCP: closeMCP}
 	c.entry = e
@@ -144,6 +154,10 @@ func (s *codexSession) resumeDocument(ctx context.Context, threadID string) erro
 	raw, err := s.control(ctx, "thread/resume", params)
 	if err != nil {
 		if errorKind(err) == ErrorBusy {
+			return err
+		}
+		var rpc *codexRPCError
+		if errors.As(err, &rpc) && rpc.missingThread {
 			return err
 		}
 		return generationError(ErrorProtocol, "无法恢复 Codex 阅读会话，历史已保留，请重试")

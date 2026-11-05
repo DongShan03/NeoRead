@@ -20,6 +20,8 @@ type claudeHistorySession struct {
 	ID, Document, VisiblePath string
 }
 
+const claudeNativeConversationFilter = "(provider='claude' OR substr(provider,-7)=':claude') AND json_extract(body,'$.connectionKey')='claude-native-v1'"
+
 func claudeSessionID() string {
 	raw := id()
 	return raw[:8] + "-" + raw[8:12] + "-4" + raw[13:16] + "-a" + raw[17:20] + "-" + raw[20:]
@@ -39,6 +41,9 @@ func (s *Server) claudeSnapshotPath(snapshot string) (string, error) {
 func (s *Server) claudeHistorySession(ctx context.Context, session string) (claudeHistorySession, error) {
 	var item claudeHistorySession
 	err := s.Store.DB.QueryRowContext(ctx, "SELECT session_id,document_id,visible_path FROM claude_history_sessions WHERE session_id=?", session).Scan(&item.ID, &item.Document, &item.VisiblePath)
+	if err == nil && !localClaudeHistoryPath(item) {
+		err = sql.ErrNoRows
+	}
 	return item, err
 }
 
@@ -73,7 +78,7 @@ func regularClaudeTranscript(path string) (os.FileInfo, error) {
 
 // The CLI chooses the project directory. Discover only this newly allocated
 // UUID's filename, without reading other conversations or any CLI credentials.
-func findClaudeTranscript(session string) (string, error) {
+func claudeProjectsDirectory() (string, error) {
 	root := os.Getenv("CLAUDE_CONFIG_DIR")
 	if root == "" {
 		home, err := os.UserHomeDir()
@@ -82,7 +87,27 @@ func findClaudeTranscript(session string) (string, error) {
 		}
 		root = filepath.Join(home, ".claude")
 	}
-	projects := filepath.Join(root, "projects")
+	return filepath.Abs(filepath.Join(root, "projects"))
+}
+
+func localClaudeHistoryPath(item claudeHistorySession) bool {
+	if item.VisiblePath == "" {
+		return true
+	}
+	projects, err := claudeProjectsDirectory()
+	if err != nil || filepath.Base(item.VisiblePath) != item.ID+".jsonl" {
+		return false
+	}
+	relative, err := filepath.Rel(projects, item.VisiblePath)
+	parts := strings.Split(relative, string(os.PathSeparator))
+	return err == nil && !filepath.IsAbs(relative) && len(parts) == 2 && parts[0] != ".."
+}
+
+func findClaudeTranscript(session string) (string, error) {
+	projects, err := claudeProjectsDirectory()
+	if err != nil {
+		return "", err
+	}
 	entries, err := os.ReadDir(projects)
 	if err != nil {
 		return "", err
@@ -259,7 +284,7 @@ func (s *Server) applyClaudeHistoryVisibility(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if s.claudeActive[item.ID] {
+		if s.claudeActive[item.ID] || !localClaudeHistoryPath(item) {
 			continue
 		}
 		if err = s.setClaudeHistoryVisibility(item, hide); err != nil {
@@ -304,6 +329,9 @@ func (a *documentAgent) beginClaudeConversation(ctx context.Context, in AIInput)
 	}
 	resume := ""
 	reason := "new"
+	if errors.Is(err, sql.ErrNoRows) && c.NativeThread != "" {
+		reason = "native_missing"
+	}
 	if err == nil {
 		if err = s.setClaudeHistoryVisibility(item, s.hideCodexHistory()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return "", generationError(ErrorSave, "无法恢复 Claude 会话可见性；原生副本已保留")
@@ -332,6 +360,7 @@ func (a *documentAgent) beginClaudeConversation(ctx context.Context, in AIInput)
 		}
 		c.NativeThread = item.ID
 		c.NativeSnapshot = ""
+		c.SeenSources = map[string]bool{}
 		missing = conversationHistory(in.Chat.History)
 	} else {
 		if !c.NativeDirty && c.NativeSnapshot != "" {

@@ -525,6 +525,26 @@ func TestCodexConversationReportsActiveWriterAndPreservesHistory(t *testing.T) {
 	if out := conversationRequest(t, s, "codex", "占用已释放，继续解释"); !strings.Contains(out.Body.String(), "event: done") || !strings.Contains(out.Body.String(), "CIVET-42") {
 		t.Fatal("same conversation did not recover after the writer was released", out.Body.String())
 	}
+	for _, message := range chatMessages(t, s) {
+		if message.Role == "assistant" {
+			tools := jsonText([]ToolActivity{{ID: "saved", Tool: "read_passage", Title: "迁移工具记录", Status: "completed"}})
+			if _, err := s.Store.DB.Exec("UPDATE messages SET body=json_set(body,'$.tools',json(?)) WHERE id=?", tools, message.ID); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	s.Close()
+	s = NewServer(s.Store, "test-secret", "")
+	t.Cleanup(s.Close)
+	t.Setenv("NEOREAD_CONVERSATION_RESUME_ERROR", `{"code":-32600,"message":"no rollout found for thread id PRIVATE-THREAD"}`)
+	if out := conversationRequest(t, s, "codex", "原生线程已不存在，从本地记录继续"); !strings.Contains(out.Body.String(), "event: done") || !strings.Contains(out.Body.String(), "CIVET-42") {
+		t.Fatal("missing thread did not rebuild from NeoRead history", out.Body.String())
+	}
+	data, err = os.ReadFile(capture)
+	if err != nil || strings.Count(string(data), `"method":"thread/start"`) != 2 || !strings.Contains(string(data), "历史来源及版本") || !strings.Contains(string(data), "迁移工具记录") {
+		t.Fatal("rebuilt thread did not receive saved questions, sources and tools", err)
+	}
 }
 func TestCodexConversationRetainsThreadAndSources(t *testing.T) {
 	s, a := prepareConversationFixture(t)

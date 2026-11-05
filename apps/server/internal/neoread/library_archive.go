@@ -522,7 +522,7 @@ func importLibraryArchive(ctx context.Context, archivePath, destination, mergeSo
 		// Codex native threads live outside the library on the source machine.
 		// Rebuild them from the preserved transcript on the next question rather
 		// than resuming a missing thread or sharing the original library's writer.
-		_, err = incomingStore.DB.Exec("DELETE FROM codex_history_threads; DELETE FROM claude_history_sessions; DELETE FROM library_document_conversations; DELETE FROM document_conversations WHERE provider IN ('codex','claude') OR substr(provider,-6)=':codex' OR substr(provider,-7)=':claude'")
+		_, err = incomingStore.DB.Exec("DELETE FROM codex_history_threads; DELETE FROM claude_history_sessions; DELETE FROM library_document_conversations; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex' OR (" + claudeNativeConversationFilter + ")")
 	}
 	incomingStore.DB.Close()
 	if err != nil {
@@ -548,7 +548,7 @@ func importLibraryArchive(ctx context.Context, archivePath, destination, mergeSo
 		}
 		// Retained documents also belong to this new independent library.
 		// Keep their transcripts, but never share the source's native Codex writer.
-		if _, e = base.DB.ExecContext(ctx, "DELETE FROM codex_history_threads; DELETE FROM claude_history_sessions; DELETE FROM document_conversations WHERE provider IN ('codex','claude') OR substr(provider,-6)=':codex' OR substr(provider,-7)=':claude'"); e != nil {
+		if _, e = base.DB.ExecContext(ctx, "DELETE FROM codex_history_threads; DELETE FROM claude_history_sessions; DELETE FROM document_conversations WHERE provider='codex' OR substr(provider,-6)=':codex' OR ("+claudeNativeConversationFilter+")"); e != nil {
 			base.DB.Close()
 			return e
 		}
