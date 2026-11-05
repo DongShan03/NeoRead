@@ -4,9 +4,13 @@ import { createContext } from "react";
 import { toast } from "sonner";
 import type { Link, PhrasingContent, Root, Text } from "mdast";
 import { SKIP, visit } from "unist-util-visit";
+import type { PDFLocation } from "@neoread/core";
 
 export const ReadingLinkNavigation = createContext<
   ((blockId: string, label: string) => void) | undefined
+>(undefined);
+export const ReadingLinkResolver = createContext<
+  ((blockId: string) => Promise<Record<string, PDFLocation>>) | undefined
 >(undefined);
 
 export function openExternalLink(url: string) {
@@ -27,13 +31,20 @@ const citationPattern = /\[(\d+(?:\s*[,，–-]\s*\d+)*)\]/g;
 const maxExpandedRange = 20;
 
 // Work on parsed Markdown text nodes so code, links and math stay untouched.
-export function remarkReadingCitations({ blockId }: { blockId?: string }) {
+export function remarkReadingCitations({
+  blockId,
+  labels,
+}: {
+  blockId?: string;
+  labels?: readonly string[];
+}) {
+  const allowed = new Set(labels);
   return (tree: Root) => {
-    if (!blockId) return;
+    if (!blockId || !allowed.size) return;
     visit(tree, (node, index, parent) => {
       if (node.type === "link" || node.type === "linkReference") return SKIP;
       if (node.type !== "text" || !parent || index === undefined) return;
-      const parts = readingParts(node.value, blockId);
+      const parts = readingParts(node.value, blockId, allowed);
       if (!parts) return;
       // Text only lives in phrasing parents.
       (parent.children as PhrasingContent[]).splice(index, 1, ...parts);
@@ -41,34 +52,48 @@ export function remarkReadingCitations({ blockId }: { blockId?: string }) {
     });
   };
 }
-function readingParts(value: string, blockId: string) {
+function readingParts(
+  value: string,
+  blockId: string,
+  allowed: ReadonlySet<string>,
+) {
   const references = [
     ...figureReferences(value).map((ref) => ({ ...ref, kind: "figure" })),
     ...appendixReferences(value).map((ref) => ({ ...ref, kind: "appendix" })),
   ].sort((a, b) => a.index - b.index);
-  if (!references.length) return citationParts(value, blockId);
+  if (!references.length) return citationParts(value, blockId, allowed);
   const parts: PhrasingContent[] = [];
   let start = 0;
   for (const reference of references) {
     const before = value.slice(start, reference.index);
-    parts.push(...(citationParts(before, blockId) ?? [text(before)]), {
-      type: "link",
-      url: citationHref(blockId, `${reference.kind}:${reference.label}`),
-      children: [text(reference.text)],
-    });
+    const label = `${reference.kind}:${reference.label}`;
+    parts.push(
+      ...(citationParts(before, blockId, allowed) ?? [text(before)]),
+      allowed.has(label)
+        ? {
+            type: "link",
+            url: citationHref(blockId, label),
+            children: [text(reference.text)],
+          }
+        : text(reference.text),
+    );
     start = reference.index + reference.text.length;
   }
   const after = value.slice(start);
-  parts.push(...(citationParts(after, blockId) ?? [text(after)]));
+  parts.push(...(citationParts(after, blockId, allowed) ?? [text(after)]));
   return parts;
 }
-function citationParts(value: string, blockId: string) {
+function citationParts(
+  value: string,
+  blockId: string,
+  allowed: ReadonlySet<string>,
+) {
   const parts: PhrasingContent[] = [];
   let start = 0;
   for (const match of value.matchAll(citationPattern)) {
     parts.push(
       text(value.slice(start, match.index) + "["),
-      ...citationList(match[1], blockId),
+      ...citationList(match[1], blockId, allowed),
       text("]"),
     );
     start = match.index + match[0].length;
@@ -78,12 +103,19 @@ function citationParts(value: string, blockId: string) {
   return parts.filter((part) => part.type !== "text" || part.value);
 }
 /** "3–5, 8" links 3, 4, 5 and 8; separators between items stay as written. */
-function citationList(list: string, blockId: string): PhrasingContent[] {
-  const link = (label: string): Link => ({
-    type: "link",
-    url: citationHref(blockId, label),
-    children: [text(label)],
-  });
+function citationList(
+  list: string,
+  blockId: string,
+  allowed: ReadonlySet<string>,
+): PhrasingContent[] {
+  const link = (label: string): Link | Text =>
+    allowed.has(label)
+      ? {
+          type: "link",
+          url: citationHref(blockId, label),
+          children: [text(label)],
+        }
+      : text(label);
   const comma = list.includes("，") ? "，" : ", ";
   return list.split(/(\s*[,，]\s*)/).flatMap((item, i) => {
     if (i % 2) return [text(item)];

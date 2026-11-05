@@ -5,10 +5,14 @@ import {
   type Annotation,
   type TOCItem,
 } from "@neoread/core";
-import { appendixReferences, appendixTarget } from "./appendix-references";
-import { figureReferences, figureTarget } from "./figure-references";
-import { type PDFDocumentProxy } from "pdfjs-dist";
-import { numberedReference, resolvePDFCitation } from "./pdf-citations";
+import { appendixReferences } from "./appendix-references";
+import { figureReferences } from "./figure-references";
+import { OPS, type PDFDocumentProxy } from "pdfjs-dist";
+import {
+  blockPDFSourceLinks,
+  readPDFSourceLinks,
+  resolvePDFCitation,
+} from "./pdf-citations";
 import { destinationPoint, parseDestinationHash } from "./pdf-link-preview";
 import { ReferenceNavigation } from "../reference-navigation";
 import { readFile } from "node:fs/promises";
@@ -19,20 +23,6 @@ import { writePDFOutline } from "./pdf-outline-export";
 import { annotatedPDF } from "./pdf-export";
 
 describe("figure-references", () => {
-  const block = (
-    id: string,
-    label: string,
-    text: string,
-    x = 0.1,
-    y = 0.1,
-  ): PDFBlock => ({
-    id,
-    label,
-    text,
-    page: 1,
-    bounds: { x, y, width: 0.3, height: 0.2 },
-  });
-
   it("recognizes English, bracketed, Chinese, supplementary and subfigure references", () => {
     expect(
       figureReferences(
@@ -41,70 +31,9 @@ describe("figure-references", () => {
     ).toEqual(["3", "3", "12", "2", "12", "s1", "2.1"]);
     expect(figureReferences("[3] configuration 4 Figure 12word")).toEqual([]);
   });
-
-  it("resolves only caption identities and never selects a matching body paragraph", () => {
-    const image = {
-      ...block("image", "image", ""),
-      caption: "Figure 3. Results",
-    };
-    const body = block("body", "text", "Figure 3 illustrates the result.");
-    expect(figureTarget([body, image], "3")).toBe(image);
-    expect(figureTarget([body, image], "1")).toBeUndefined();
-    expect(
-      figureTarget([body, image, { ...image, id: "duplicate" }], "3"),
-    ).toBeUndefined();
-  });
-
-  it("associates a separate caption with the adjacent image in the same column", () => {
-    const image = block("image", "chart", "");
-    const other = block("other", "image", "", 0.6);
-    const caption = block(
-      "caption",
-      "figure_title",
-      "图三 实验结果",
-      0.1,
-      0.31,
-    );
-    expect(figureTarget([other, caption, image], "3")).toBe(image);
-    expect(figureTarget([other, caption], "3")).toBeUndefined();
-    expect(figureTarget([{ ...image, page: 2 }, caption], "3")).toBeUndefined();
-  });
-
-  it.each([
-    "Supplementary Figure S1. Results",
-    "supplementary Fig. S1. Results",
-    "Supplemental Figure S1. Results",
-    "  Supplementary\nFigure S1. Results  ",
-  ])("resolves supplementary captions: %s", (caption) => {
-    const image = { ...block("image", "image", ""), caption };
-    expect(figureTarget([image], "s1")).toBe(image);
-    expect(figureTarget([image], "1")).toBeUndefined();
-    const separate = block("caption", "figure_title", caption, 0.1, 0.31);
-    const uncaptioned = block("image", "image", "");
-    expect(figureTarget([uncaptioned, separate], "s1")).toBe(uncaptioned);
-  });
-
-  it("rejects incidental supplementary mentions and ambiguous supplementary targets", () => {
-    const image = {
-      ...block("image", "image", ""),
-      caption: "Results shown in Supplementary Figure S1.",
-    };
-    expect(figureTarget([image], "s1")).toBeUndefined();
-    const target = { ...image, caption: "Supplementary Figure S1. Results" };
-    expect(
-      figureTarget([target, { ...target, id: "duplicate" }], "s1"),
-    ).toBeUndefined();
-  });
 });
 
 describe("appendix references", () => {
-  const heading = (id: string, text: string): PDFBlock => ({
-    id,
-    text,
-    label: "paragraph_title",
-    page: 9,
-    bounds: { x: 0.1, y: 0.2, width: 0.8, height: 0.04 },
-  });
   it("recognizes complete English and Chinese appendix identifiers without consuming following punctuation", () => {
     const text =
       "See Appendix C.1, App. A.2.3, 附录 C.1、附錄 Ｂ．２，以及 Appendix C。";
@@ -123,42 +52,6 @@ describe("appendix references", () => {
         "Application C.1, Appendix Coordinate, Appendix C.1word, myAppendix C.1",
       ),
     ).toEqual([]);
-  });
-  it("finds only unique, exactly numbered appendix headings", () => {
-    const target = heading("target", "C.1. Additional experiments");
-    const body = {
-      ...heading("mention", "Appendix C.1 provides details."),
-      label: "text",
-    };
-    const blocks = [
-      body,
-      heading("other", "C.10 Other experiments"),
-      heading("child", "C.1.1 More details"),
-      target,
-    ];
-    expect(appendixTarget(blocks, "c.1")).toBe(target);
-    expect(appendixTarget(blocks, "C")).toBeUndefined();
-    expect(appendixTarget([body], "C.1")).toBeUndefined();
-    expect(
-      appendixTarget([heading("invalid", "C.1.2word")], "C.1"),
-    ).toBeUndefined();
-    expect(
-      appendixTarget(
-        [...blocks, { ...target, id: "duplicate", page: 10 }],
-        "C.1",
-      ),
-    ).toBeUndefined();
-  });
-  it.each([
-    "Appendix C.1 Additional experiments",
-    "附录 C.1 实验细节",
-    "C . 1\nAdditional experiments",
-    "C.1：实验细节",
-    "C.1",
-    "## Ｃ．１ 更多结果",
-  ])("accepts appendix heading styles: %s", (text) => {
-    const target = heading("target", text);
-    expect(appendixTarget([target], "C.1")).toBe(target);
   });
 });
 
@@ -210,23 +103,6 @@ describe("pdf-citations", () => {
     expect(
       await resolvePDFCitation(pdf as unknown as PDFDocumentProxy, block, "7"),
     ).toBeUndefined();
-  });
-
-  it("only falls back to numbered bibliography blocks, preserving references within a multi-entry block", () => {
-    const refs = {
-      ...block,
-      id: "p9-b1",
-      page: 9,
-      label: "reference_content",
-      text: "[5] Five\n[6] Six",
-    };
-    expect(numberedReference([block, refs], "6")).toEqual({
-      type: "pdf",
-      page: 9,
-      x: 0,
-      y: 0.44999999999999996,
-    });
-    expect(numberedReference([block, refs], "8")).toBeUndefined();
   });
 
   it("uses glyph widths for proportional-font lines and excludes the next line's baseline", async () => {
@@ -520,4 +396,80 @@ describe("pdf-outline", () => {
       await reopened.destroy();
     }
   });
+});
+
+it("uses only actual PDF link rectangles and preserves their destinations rather than caption guesses", async () => {
+  const document = await PDFDocument.create();
+  const source = document.addPage([600, 800]);
+  const target = document.addPage([600, 800]);
+  const font = await document.embedFont("Helvetica");
+  const prefix = "See Figure ";
+  source.drawText(prefix + "1 and Appendix C.1.", {
+    x: 40,
+    y: 700,
+    size: 12,
+    font,
+  });
+  const x = 40 + font.widthOfTextAtSize(prefix, 12);
+  const link = document.context.register(
+    document.context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [x, 700, x + font.widthOfTextAtSize("1", 12), 712],
+      Dest: [target.ref, PDFName.of("XYZ"), 72, 600, null],
+    }),
+  );
+  source.node.set(PDFName.of("Annots"), document.context.obj([link]));
+  const task = getDocument({
+    data: await document.save(),
+    useSystemFonts: true,
+    disableFontFace: true,
+  });
+  const pdf = await task.promise;
+  try {
+    const links = await readPDFSourceLinks(
+      pdf as unknown as PDFDocumentProxy,
+      1,
+      OPS,
+    );
+    const block: PDFBlock = {
+      id: "body",
+      page: 1,
+      label: "text",
+      text: "See Figure 1 and Appendix C.1.",
+      bounds: { x: 0, y: 0, width: 1, height: 0.5 },
+    };
+    const found = blockPDFSourceLinks(block, links);
+    expect(found).toEqual({
+      "figure:1": { type: "pdf", page: 2, x: 0.12, y: 0.25 },
+    });
+    expect(
+      blockPDFSourceLinks(
+        { ...block, bounds: { x: 0, y: 0.7, width: 1, height: 0.1 } },
+        links,
+      ),
+    ).toEqual({});
+    expect(
+      await readPDFSourceLinks(pdf as unknown as PDFDocumentProxy, 2, OPS),
+    ).toEqual([]);
+  } finally {
+    await task.destroy();
+  }
+});
+
+it("does not guess between different native destinations with the same label in a paragraph", () => {
+  const bounds = { x: 0.1, y: 0.1, width: 0.1, height: 0.02 };
+  const block: PDFBlock = {
+    id: "body",
+    page: 1,
+    text: "Figure 1",
+    label: "text",
+    bounds: { x: 0, y: 0, width: 1, height: 1 },
+  };
+  expect(
+    blockPDFSourceLinks(block, [
+      { bounds, labels: ["figure:1"], target: { type: "pdf", page: 2 } },
+      { bounds, labels: ["figure:1"], target: { type: "pdf", page: 3 } },
+    ]),
+  ).toEqual({});
 });

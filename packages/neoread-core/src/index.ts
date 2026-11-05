@@ -569,6 +569,7 @@ export interface ReaderAdapter {
     anchor: HTMLAnchorElement,
   ): Promise<void>;
   hideCitationPreview?(): void;
+  readingLinks?(blockId: string): Promise<Record<string, PDFLocation>>;
   resolveCitation?(
     blockId: string,
     label: string,

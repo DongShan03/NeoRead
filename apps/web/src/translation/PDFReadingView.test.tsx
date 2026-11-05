@@ -107,6 +107,7 @@ const adapter = {
   followBlock: vi.fn(async () => {}),
   focusSentences: vi.fn(async () => {}),
   hoverBlock: vi.fn(),
+  resolveCitation: vi.fn(async () => undefined),
 } as unknown as ReaderAdapter;
 vi.mock("../ReaderView", () => ({
   ReaderView: ({
@@ -125,6 +126,7 @@ import { PDFReadingView } from "./PDFReadingView";
 let root: Root, host: HTMLDivElement;
 const events = { location: vi.fn(), selection: vi.fn(), blockAction: vi.fn() };
 beforeEach(async () => {
+  vi.mocked(adapter.resolveCitation!).mockResolvedValue(undefined);
   fixture.resizes.clear();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
@@ -1197,33 +1199,42 @@ it.each(["仅原文", "原文译文"])(
   },
 );
 
-it("focuses the image from a translated figure reference even with sync disabled", async () => {
-  fixture.translations[0].sentences[0].target = "如图三";
-  await renderView(defaultTheme, [
-    {
-      id: "figure-3",
-      page: 2,
-      label: "image",
-      text: "",
-      caption: "Figure 3. Result",
-      image: "figure.png",
-      bounds: { x: 0.1, y: 0.1, width: 0.5, height: 0.3 },
-    },
-  ]);
-  await click("原文译文");
-  await click("取消同步效果");
-  vi.mocked(adapter.focusBlock!).mockClear();
-  await act(async () =>
-    host.querySelector<HTMLAnchorElement>('a[href="#figure"]')!.click(),
-  );
-  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
-    "figure-3",
-    "parallel",
-  );
-  expect(adapter.goTo).not.toHaveBeenCalled();
-});
+it.each([true, false])(
+  "follows a translated figure only when the original PDF has a link: %s",
+  async (linked) => {
+    const target = { type: "pdf" as const, page: 2, x: 0.24, y: 0.35 };
+    vi.mocked(adapter.resolveCitation!).mockResolvedValue(
+      linked ? target : undefined,
+    );
+    fixture.translations[0].sentences[0].target = "如图三";
+    await renderView(defaultTheme, [
+      {
+        id: "figure-3",
+        page: 2,
+        label: "image",
+        text: "",
+        caption: "Figure 3. Result",
+        image: "figure.png",
+        bounds: { x: 0.1, y: 0.1, width: 0.5, height: 0.3 },
+      },
+    ]);
+    await click("原文译文");
+    await click("取消同步效果");
+    vi.mocked(adapter.focusBlock!).mockClear();
+    vi.mocked(adapter.goTo).mockClear();
+    await act(async () =>
+      host.querySelector<HTMLAnchorElement>('a[href="#figure"]')!.click(),
+    );
+    expect(adapter.resolveCitation).toHaveBeenCalledWith("p1-b1", "figure:3");
+    expect(adapter.focusBlock).not.toHaveBeenCalled();
+    if (linked) expect(adapter.goTo).toHaveBeenCalledExactlyOnceWith(target);
+    else expect(adapter.goTo).not.toHaveBeenCalled();
+  },
+);
 
-it("focuses an appendix heading from the translation even with synchronized scrolling disabled", async () => {
+it("follows the exact native appendix destination instead of guessing a heading", async () => {
+  const target = { type: "pdf" as const, page: 4, x: 0.12, y: 0.4 };
+  vi.mocked(adapter.resolveCitation!).mockResolvedValue(target);
   fixture.translations[0].sentences[0].target = "见附录 C.1";
   await renderView(defaultTheme, [
     {
@@ -1237,14 +1248,13 @@ it("focuses an appendix heading from the translation even with synchronized scro
   await click("原文译文");
   await click("取消同步效果");
   vi.mocked(adapter.focusBlock!).mockClear();
+  vi.mocked(adapter.goTo).mockClear();
   await act(async () =>
     host.querySelector<HTMLAnchorElement>('a[href="#appendix"]')!.click(),
   );
-  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
-    "appendix-c1",
-    "parallel",
-  );
-  expect(adapter.goTo).not.toHaveBeenCalled();
+  expect(adapter.resolveCitation).toHaveBeenCalledWith("p1-b1", "appendix:C.1");
+  expect(adapter.focusBlock).not.toHaveBeenCalled();
+  expect(adapter.goTo).toHaveBeenCalledExactlyOnceWith(target);
 });
 
 it("paints search and annotation jump feedback after focusing the source", async () => {

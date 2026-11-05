@@ -4,10 +4,35 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MessageMarkdown } from "./chat/MessageMarkdown";
 import type { Root } from "mdast";
-import { ReadingLinkNavigation, remarkReadingCitations } from "./reading-links";
+import {
+  ReadingLinkNavigation,
+  ReadingLinkResolver,
+  remarkReadingCitations,
+} from "./reading-links";
 import { installPDFExternalLinks } from "./readers/pdf-external-links";
 vi.mock("./chat/clipboard", () => ({ copyText: vi.fn(async () => true) }));
 const openExternal = vi.fn(async () => {});
+const verifiedLabels = [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "100",
+  "figure:1",
+  "figure:2",
+  "figure:3",
+  "appendix:C.1",
+  "appendix:B.2",
+];
+const nativeLinks = async () =>
+  Object.fromEntries(
+    verifiedLabels.map((label) => [label, { type: "pdf" as const, page: 1 }]),
+  );
 let host: HTMLDivElement;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -38,12 +63,14 @@ it("opens translated links in the system browser and routes citations without to
   try {
     await act(async () =>
       root.render(
-        <ReadingLinkNavigation.Provider value={navigate}>
-          <MessageMarkdown
-            content="见 [6, 7]。`[8]` [项目](https://example.com/。)"
-            citationBlockId="p1-b1"
-          />
-        </ReadingLinkNavigation.Provider>,
+        <ReadingLinkResolver.Provider value={nativeLinks}>
+          <ReadingLinkNavigation.Provider value={navigate}>
+            <MessageMarkdown
+              content="见 [6, 7]。`[8]` [项目](https://example.com/。)"
+              citationBlockId="p1-b1"
+            />
+          </ReadingLinkNavigation.Provider>
+        </ReadingLinkResolver.Provider>,
       ),
     );
     const external = host.querySelector<HTMLAnchorElement>(
@@ -92,7 +119,7 @@ it("preserves current PDF.js internal links", async () => {
     await act(async () => cleanup?.());
   }
 });
-it("renders citation-linked text containing inline math", async () => {
+it("keeps math and reference-looking text plain without original PDF links", async () => {
   const root = createRoot(host);
   try {
     await act(async () =>
@@ -106,7 +133,7 @@ it("renders citation-linked text containing inline math", async () => {
     // The lazy formula renders its source as a fallback first.
     expect(host.textContent).toContain("O(n)");
     expect(host.querySelectorAll('a[href^="#neoread-citation?"]')).toHaveLength(
-      1,
+      0,
     );
   } finally {
     await act(async () => root.unmount());
@@ -118,8 +145,8 @@ const paragraph = (...children: unknown[]) =>
     type: "root",
     children: [{ type: "paragraph", children }],
   }) as Root;
-const run = (tree: Root) => {
-  remarkReadingCitations({ blockId: "p1-b1" })(tree);
+const run = (tree: Root, labels = verifiedLabels) => {
+  remarkReadingCitations({ blockId: "p1-b1", labels })(tree);
   return tree;
 };
 const plain = (node: unknown): string => {
@@ -195,12 +222,14 @@ it("renders bracketed figure references as one keyboard-accessible link", async 
   try {
     await act(async () =>
       root.render(
-        <ReadingLinkNavigation.Provider value={navigate}>
-          <MessageMarkdown
-            content="如图三，figure[3]，`Figure 4`，见 [3]。"
-            citationBlockId="body"
-          />
-        </ReadingLinkNavigation.Provider>,
+        <ReadingLinkResolver.Provider value={nativeLinks}>
+          <ReadingLinkNavigation.Provider value={navigate}>
+            <MessageMarkdown
+              content="如图三，figure[3]，`Figure 4`，见 [3]。"
+              citationBlockId="body"
+            />
+          </ReadingLinkNavigation.Provider>
+        </ReadingLinkResolver.Provider>,
       ),
     );
     const links = host.querySelectorAll<HTMLAnchorElement>(
@@ -246,12 +275,14 @@ it("routes a translated appendix reference through the existing reading navigati
   try {
     await act(async () =>
       root.render(
-        <ReadingLinkNavigation.Provider value={navigate}>
-          <MessageMarkdown
-            content="更多结果见附录 C.1。"
-            citationBlockId="body"
-          />
-        </ReadingLinkNavigation.Provider>,
+        <ReadingLinkResolver.Provider value={nativeLinks}>
+          <ReadingLinkNavigation.Provider value={navigate}>
+            <MessageMarkdown
+              content="更多结果见附录 C.1。"
+              citationBlockId="body"
+            />
+          </ReadingLinkNavigation.Provider>
+        </ReadingLinkResolver.Provider>,
       ),
     );
     const link = host.querySelector<HTMLAnchorElement>(
@@ -263,4 +294,29 @@ it("routes a translated appendix reference through the existing reading navigati
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+it("does not invent links when the PDF has no link annotation, even if the text resembles a reference", () => {
+  const value = "意图一致。见图一、附录 C.1 和 [6]。";
+  const tree = paragraph({ type: "text", value });
+  remarkReadingCitations({ blockId: "body" })(tree);
+  expect(citations(tree)).toEqual([]);
+  expect(plain(tree)).toBe(value);
+});
+it("only links labels authorized by annotations in this original paragraph", () => {
+  const tree = run(
+    paragraph({ type: "text", value: "见图一、图二、附录 C.1 和 [6, 7]。" }),
+    ["figure:2", "6"],
+  );
+  expect(citations(tree)).toEqual(["figure:2", "6"]);
+  expect(plain(tree)).toBe("见图一、图二、附录 C.1 和 [6, 7]。");
+});
+
+it("does not turn an unlinked bracketed figure into a bibliography link with the same number", () => {
+  const tree = run(
+    paragraph({ type: "text", value: "figure[3]，参考文献 [3]。" }),
+    ["3"],
+  );
+  expect(citations(tree)).toEqual(["3"]);
+  expect(plain(tree)).toBe("figure[3]，参考文献 [3]。");
 });

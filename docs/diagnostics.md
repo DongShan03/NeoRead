@@ -182,3 +182,5 @@ Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history
 会话删除成功记录 `chat.session_deleted`；事务失败记录 `chat.session_delete_failed`，`errorCode=save`，原记录保持不变。两者通过 `requestId`、`documentId` 和 `sessionId` 关联操作，不记录会话标题、消息、批注或外部 thread 内容。运行中的删除拒绝和会话不存在等响应沿用 HTTP 请求日志。
 
 正文公式修复通过 `translation.math_recovery.started / finished` 记录文档、段落标识、公式数量、耗时及结果。阶段为 rendering、recognizing、translating、saving；沿用提供方生成事件记录外部调用和终态。失败日志仅包含稳定错误类别，不记录截图、公式内容、模型输出或本机路径。
+
+原 PDF 原生链接读取失败记录 `pdf.native_links.failed`，沿用共享异常脱敏器记录错误类型和栈帧，不记录链接文字、目标、论文正文或原始错误消息。每页仅解析一次；失败时译文保留普通文本，关闭文档后释放该缓存。

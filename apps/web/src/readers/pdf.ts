@@ -1,7 +1,7 @@
 import { reportDiagnostic } from "../diagnostics";
+import { diagnosticError } from "../../../../packages/neoread-core/src/diagnostics";
 import { PDFResizeObserver } from "./pdf-resize";
 import { readPDFOutline } from "./pdf-outline";
-import { PDFFigureLinks } from "./pdf-figure-links";
 import { selectionContext } from "./selection-context";
 import { selectionAnchor, isSelectionToolbar } from "./selection-anchor";
 import { pdfQuotePoint } from "./pdf-reference-location";
@@ -43,7 +43,11 @@ import {
 } from "@neoread/core";
 import { selectSentence } from "./sentence-selection";
 import { installPDFExternalLinks } from "./pdf-external-links";
-import { resolvePDFCitation } from "./pdf-citations";
+import {
+  readPDFSourceLinks,
+  blockPDFSourceLinks,
+  type PDFSourceLink,
+} from "./pdf-citations";
 import { pdfObjectColors } from "./pdf-dark-mode";
 import { defaultTheme } from "@neoread/core";
 pdfjs.GlobalWorkerOptions.workerSrc = workerURL;
@@ -83,23 +87,13 @@ export class PDFReaderAdapter implements ReaderAdapter {
   private navigation: PDFReadingNavigation;
   private pointer?: { x: number; y: number };
   private theme: ReaderTheme = defaultTheme;
-  private figureLinks: PDFFigureLinks;
+  private sourceLinks = new Map<number, Promise<PDFSourceLink[]>>();
   constructor(
     private container: HTMLElement,
     private events: ReaderEvents,
   ) {
     container.classList.add("pdf-container");
     this.removeExternalLinks = installPDFExternalLinks(container);
-    this.figureLinks = new PDFFigureLinks(
-      container,
-      () => this.blockData,
-      (block) => {
-        this.linkPreview.hide();
-        this.events.internalLink?.(this.getLocation());
-        if (this.events.blockFocus) this.events.blockFocus(block);
-        else void this.focusBlock(block.id, "source");
-      },
-    );
     this.locationHighlight = new PDFLocationHighlight(container);
     this.annotationLayer = new PDFAnnotationLayer(container, (target) =>
       this.events.annotation?.(target),
@@ -205,7 +199,6 @@ export class PDFReaderAdapter implements ReaderAdapter {
           .then(() => this.navigation.repaint())
           .catch(() => {});
         this.navigation.repaint();
-        this.figureLinks.repaint(pageNumber);
         this.locationHighlight.paint();
       },
     );
@@ -254,6 +247,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
     this.container.dataset.darkContrast = theme.pdfDarkContrast ?? "soft";
   }
   async open(doc: Document) {
+    this.sourceLinks.clear();
     this.task = pdfjs.getDocument({
       url: publicationURL(doc.id, "original.pdf"),
       // Both flags are required to stop background full-file fetching. PDF.js
@@ -696,7 +690,6 @@ export class PDFReaderAdapter implements ReaderAdapter {
   setBlocks(blocks: PDFBlock[]) {
     this.blockData = blocks;
     this.blocks.setBlocks(blocks);
-    this.figureLinks.repaint();
   }
   async focusReference(location: DocumentLocation, text: string) {
     this.viewport.cancelAnimation();
@@ -777,10 +770,29 @@ export class PDFReaderAdapter implements ReaderAdapter {
   hideCitationPreview() {
     this.linkPreview.hide();
   }
-  async resolveCitation(blockId: string, label: string) {
+  async readingLinks(blockId: string) {
     const block = this.blockData.find((b) => b.id === blockId);
-    if (this.pdf && block)
-      return resolvePDFCitation(this.pdf, block, label, pdfjs.OPS);
+    if (!this.pdf || !block || this.disposed) return {};
+    let links = this.sourceLinks.get(block.page);
+    if (!links) {
+      links = readPDFSourceLinks(this.pdf, block.page, pdfjs.OPS).catch(
+        (error) => {
+          if (!this.disposed)
+            reportDiagnostic({
+              level: "error",
+              event: "pdf.native_links.failed",
+              ...diagnosticError(error),
+            });
+          return [];
+        },
+      );
+      this.sourceLinks.set(block.page, links);
+    }
+    const resolved = await links;
+    return this.disposed ? {} : blockPDFSourceLinks(block, resolved);
+  }
+  async resolveCitation(blockId: string, label: string) {
+    return (await this.readingLinks(blockId))[label];
   }
   sentenceRanges(passages: import("@neoread/core").PDFPassage[]) {
     return this.navigation.sentenceRanges(passages);
@@ -915,6 +927,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
   async destroy() {
     backgroundPDFCache.forget(this);
     this.cropPreparations.clear();
+    this.sourceLinks.clear();
     if (this.disposed) return;
     this.navigation.destroy();
     this.blocks.destroy();
@@ -922,7 +935,6 @@ export class PDFReaderAdapter implements ReaderAdapter {
     this.locationHighlight.clear();
     this.linkPreview.destroy();
     this.removeExternalLinks();
-    this.figureLinks.destroy();
     this.disposed = true;
     this.resize.disconnect();
     this.viewport.cancelAnimation();

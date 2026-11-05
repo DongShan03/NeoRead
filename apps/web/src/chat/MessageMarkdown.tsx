@@ -28,6 +28,7 @@ import remend from "remend";
 import { marked } from "marked";
 import {
   ReadingLinkNavigation,
+  ReadingLinkResolver,
   openExternalLink,
   remarkReadingCitations,
 } from "../reading-links";
@@ -247,6 +248,7 @@ const markdownOptions = {
   skipHtml: true,
   urlTransform: safeMarkdownURL,
 };
+const noReadingLinks: readonly string[] = [];
 const StaticBlock = memo(function StaticBlock({
   text,
   citationBlockId,
@@ -257,6 +259,42 @@ const StaticBlock = memo(function StaticBlock({
   generating: boolean;
 }) {
   const evidence = useContext(ChatCitationNavigation);
+  const resolveReadingLinks = useContext(ReadingLinkResolver);
+  const [readingLinks, setReadingLinks] = useState<{
+    block: string;
+    resolve: typeof resolveReadingLinks;
+    labels: string[];
+  }>();
+  useEffect(() => {
+    if (!citationBlockId || !resolveReadingLinks) return;
+    let active = true;
+    void resolveReadingLinks(citationBlockId)
+      .then((links) => {
+        if (active)
+          setReadingLinks({
+            block: citationBlockId,
+            resolve: resolveReadingLinks,
+            labels: Object.keys(links),
+          });
+      })
+      .catch(() => {
+        if (active)
+          setReadingLinks({
+            block: citationBlockId,
+            resolve: resolveReadingLinks,
+            labels: [],
+          });
+      });
+    return () => {
+      active = false;
+    };
+  }, [citationBlockId, resolveReadingLinks]);
+  const labels =
+    readingLinks &&
+    readingLinks.block === citationBlockId &&
+    readingLinks.resolve === resolveReadingLinks
+      ? readingLinks.labels
+      : noReadingLinks;
   const options = useMemo<
     Pick<ComponentProps<typeof CachedMarkdown>, "remarkPlugins">
   >(
@@ -264,10 +302,10 @@ const StaticBlock = memo(function StaticBlock({
       remarkPlugins: [
         ...plugins,
         [remarkChatCitations, { sourceIds: evidence?.sourceIds, generating }],
-        [remarkReadingCitations, { blockId: citationBlockId }],
+        [remarkReadingCitations, { blockId: citationBlockId, labels }],
       ],
     }),
-    [citationBlockId, evidence?.sourceIds, generating],
+    [citationBlockId, labels, evidence?.sourceIds, generating],
   );
   return (
     <CachedMarkdown {...markdownOptions} {...options}>
