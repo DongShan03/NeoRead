@@ -2,7 +2,7 @@
 
 在「设置 → Agent → 联网搜索」配置，聊天输入框不再提供单轮开关。设置持久保存在本机书库的 AI 连接配置中，切换文档、切换会话和重启应用后保持。
 
-- 勾选「允许 CLI 原生联网搜索」即自动保存，之后 Codex 的新问题可按需搜索。当前支持 Codex；Claude Code / Kimi 不因此获得联网工具。
+- 勾选「允许 CLI 原生联网搜索」即自动保存，之后 Codex 和 Claude Code 的新问题可按需搜索；Kimi 不因此获得联网工具。
 - 「搜索 API」可选关闭或 DeepSeek。选择 DeepSeek 即保存服务类型，再填写独立的搜索 API 地址和 Key，地址与 Key 在失焦或回车时自动保存。默认地址为 `https://api.deepseek.com`，也可填写采用相同 Search / Fetch 协议的兼容服务；不自动复用聊天模型的地址和 Key。
 - 开关与搜索服务选择即时保存，地址和 Key 输入结束后自动保存。配置对后续问题生效，不中断已经开始的生成。默认两条路径均关闭。重新生成保留原问题记录的联网权限，同时受当前设置约束；关闭设置后不能通过旧问题或请求参数重新取得搜索权限。开启设置后如需为原来未联网的问题搜索，应重新发送该问题。
 
@@ -10,7 +10,8 @@
 
 - **Codex**：使用 App Server 原生 `web_search="live"`，支持搜索、打开网页及页内查找。保留只读沙箱，关闭 Shell、Apps、插件等其他能力，逐项禁用继承的 MCP，仅注册当前文档工具。会话缓存包含联网模式；恢复会话时重新应用并核验配置。图片问答、翻译等生成路径也采用相同的 MCP 隔离入口；翻译不启用联网。
 - **API / 内置 Pi**：聊天模型和搜索服务分别配置。首版搜索适配器支持 DeepSeek Search / Fetch 协议，模型须通过现有的工具调用检测。请求发送到明确配置的搜索地址：根地址追加 `/v1/tools/search` 或 `/v1/tools/fetch`，已以 `/v1` 结尾的地址追加 `/tools/search` 或 `/tools/fetch`；兼容服务的路径前缀保留。Go 执行搜索请求，独立搜索 Key 不交给 Pi worker 或聊天模型。
-- **Claude / Kimi**：本轮不增加联网工具。既有适配器权限核查中发现的问题不因本功能而视为已修复。
+- **Claude Code**：单文档和书库工具对话在本轮 `chat.WebSearch` 为 true 时开放原生 WebSearch、WebFetch；关闭时只开放四个 NeoRead 文档工具。启动时核验完整工具集合和 MCP connected 状态，工具步骤及返回的网页来源随回答保存。不开放 Bash、文件读写等内置工具。用户 settings 中的网关和模型默认值继续由 CLI 加载，显式关闭 hooks、auto-memory 和 CLAUDE.md 自动加载；非对话任务继续使用原来的 safe-mode 参数。
+- **Kimi**：本次不开放联网。HTTP MCP 文档工具使用 ACP；远端工具清单无法核验时明确记录该限制，额外工具调用会取消本轮。
 
 开启联网的请求失败时不自动切换到另一个后端，避免用户收到未执行联网却被当作搜索结果的回答。
 
@@ -20,7 +21,7 @@ DeepSeek 参考：[Search & Fetch 指南](https://api-docs.deepseek.com/zh-cn/gu
 
 聊天回答上方提供可展开的执行记录。搜索词、网页 URL、工具名和中途进度来自实际工具事件；按调用 ID 更新为执行中、完成、失败或取消，正文到达后仍可展开查看。Go 文档工具补充实际读取的章节、页码或关键词。
 
-Codex 的 `item/started`、`item/completed` 和 `item/mcpToolCall/progress` 经 stdio JSON-RPC 接收，由 Go 转为统一的 `tool` SSE 事件；Pi 的工具桥接调用使用同一事件结构。MCP 只显示已知安全参数和服务/工具身份，不展示完整请求、认证头或原始工具结果。
+Codex 的 `item/started`、`item/completed` 和 `item/mcpToolCall/progress` 经 stdio JSON-RPC 接收，由 Go 转为统一的 `tool` SSE 事件；Claude 的 assistant tool_use / user tool_result 和 Pi 的工具桥接调用使用同一事件结构。MCP 只显示已知安全参数和服务/工具身份，不展示完整请求、认证头或原始工具结果。
 
 成功回答将执行记录和网页来源一起保存到消息。搜索摘要与读取到的正文分别标记，记录获取时间，超过 8192 UTF-8 字节的正文快照明确标为截短。DeepSeek 每次搜索最多返回 5 个候选，本轮网页调用最多 12 次；最多保存 24 个网页来源、256 个执行步骤。失败或取消的独立会话保留运行事件，重新打开未完成的问题时可恢复查看。
 
@@ -30,7 +31,7 @@ Codex 的 `item/started`、`item/completed` 和 `item/mcpToolCall/progress` 经 
 
 ## 请求边界
 
-联网授权受保存的搜索设置控制，并保存在用户问题的 `webSearch` 字段中。请求省略此字段时采用当前设置；显式 false 可关闭本轮；显式 true 不能越过设置中已关闭的权限。不接受文档内容或模型输出修改权限。关闭时不注册 API 网页工具，并将 Codex 搜索设为 disabled；历史网页资料只作为历史快照。
+联网授权受保存的搜索设置控制，并保存在用户问题的 `webSearch` 字段中。请求省略此字段时采用当前设置；显式 false 可关闭本轮；显式 true 不能越过设置中已关闭的权限。不接受文档内容或模型输出修改权限。关闭时不注册 API 或 Claude 网页工具，并将 Codex 搜索设为 disabled；历史网页资料只作为历史快照。
 
 DeepSeek 只收到必要查询词或指定 URL，不发送整篇文档及聊天历史。Fetch 请求在本机检查协议、凭据、localhost、内网和链路本地 IP，包括 DNS 解析结果；实际网页抓取由 DeepSeek 执行，远端抓取和跳转策略仍由其安全策略负责。Search/Fetch API 目标由用户在设置中明确指定，不跟随 API HTTP 重定向。搜索服务要求 HTTPS，本机兼容服务可使用 HTTP。更改服务地址时必须重新填写 Key；同一地址留空才可保留原 Key，移除密钥同时关闭搜索 API。配置返回值仅含 hasKey，不回传 Key。错误展示不包含原始上游响应体。
 

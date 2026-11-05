@@ -181,6 +181,10 @@ Claude Agent 的原生保存与可恢复隐藏见 [Claude 原生阅读会话](cl
 
 书库对话沿用 `chat.finish` 和生成提供方的开始、终态与首段输出事件；`chat.library_scope_prepared` 仅记录会话 ID、可读论文数量和完整／部分覆盖阶段，不记录分类名称、论文标题、聊天或论文正文。
 
+Claude/Kimi 的书库读取在提供方结束或失败时汇总 `chat.library_retrieval`：`mode=agent/retrieval`、`status=completed/failed/cancelled`、`queryGroups`（检索调用数）、`hitPassages`（去重命中数）、`readPassages`、`coveredPapers`、`totalPapers`、`fallback`。字段只有数量、布尔值和固定枚举，不包含问题、关键词、标题或原文；没有额外的模型查询规划调用。`completed` 表示提供方读取和生成阶段完成，来源校验与保存结果仍以 `chat.finish` 及 run 状态为准。
+
+`chat.document_tools` 记录 Claude/Kimi 的 `provider` 和权限检查 `status`。Claude 为 `passed/missing_tools/extra_tools`，必须在任何文字前核验四个文档工具，以及按本轮授权启用的 WebSearch/WebFetch，并确认唯一 MCP 为 connected。Kimi 为 `inventory_unavailable/unsupported_http/session_rejected`：先独立核验应用 MCP 的四工具集合，但 ACP 不提供远端实际清单，绝不把它记为通过；运行时发现额外工具即取消，不保存回答。无 HTTP MCP 能力或建立 MCP 会话被拒绝时才退回文字检索；已经输出后不回退。检索失败和零命中分开处理；回退摘要读取仍由同一文档工具及预算约束。
+
 会话删除成功记录 `chat.session_deleted`；事务失败记录 `chat.session_delete_failed`，`errorCode=save`，原记录保持不变。两者通过 `requestId`、`documentId` 和 `sessionId` 关联操作，不记录会话标题、消息、批注或外部 thread 内容。运行中的删除拒绝和会话不存在等响应沿用 HTTP 请求日志。
 
 正文公式修复通过 `translation.math_recovery.started / finished` 记录文档、段落标识、公式数量、耗时及结果。阶段为 rendering、recognizing、translating、saving；沿用提供方生成事件记录外部调用和终态。失败日志仅包含稳定错误类别，不记录截图、公式内容、模型输出或本机路径。

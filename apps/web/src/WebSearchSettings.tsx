@@ -131,7 +131,7 @@ export function WebSearchSettings({
           />
         </div>
         <p className="text-xs leading-5 text-muted-foreground">
-          目前支持 Codex，使用 CLI 自身的联网能力。
+          目前支持 Codex 和 Claude Code，使用 CLI 自身的联网能力。
         </p>
         <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2">
           <label id={`${id}-provider`} className="text-sm">

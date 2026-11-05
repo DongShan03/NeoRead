@@ -118,7 +118,7 @@ func streamClaudeDocument(ctx context.Context, work, model, url, token string, i
 		state.sessionID = in.Chat.Agent.claudeNative.item.ID
 	}
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 4096), maxProviderFrame)
+	scanner.Buffer(make([]byte, 4096), documentCLIFrameBytes)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			err = ctx.Err()

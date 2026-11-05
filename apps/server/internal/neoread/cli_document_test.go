@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"neoread.local/server/internal/diagnostics"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -175,6 +176,9 @@ func runFakeClaudeDocument(mode, input string, emit func(any), gate func()) bool
 		}
 		_ = call("get_outline", map[string]any{})
 		answer = fakeDocumentRead(session, call)
+		if mode == "document-image-frame" {
+			emit(map[string]any{"type": "user", "message": map[string]any{"content": []any{map[string]any{"type": "tool_result", "tool_use_id": "1", "content": []any{map[string]any{"type": "image", "source": map[string]string{"type": "base64", "media_type": "image/png", "data": strings.Repeat("A", 9<<20)}}}}}}})
+		}
 	}
 	runes := []rune(answer)
 	part(string(runes[:len(runes)/2]))
@@ -274,6 +278,9 @@ func runFakeKimiDocument(mode string, emit func(any)) {
 					return raw
 				}
 				answer = fakeDocumentRead(session, call)
+				if mode == "document-image-frame" {
+					update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "1", "status": "completed", "content": []any{map[string]any{"type": "content", "content": map[string]string{"type": "image", "mimeType": "image/png", "data": strings.Repeat("A", 9<<20)}}}})
+				}
 				session.Close()
 			}
 			part(answer)
@@ -318,6 +325,7 @@ func TestCLIDocumentToolsReadEvidenceAndDiscardIntermediateText(t *testing.T) {
 			fakeAgent(t, provider, "document-tools")
 			visible := ""
 			drafts, resets := 0, 0
+			model := ""
 			result, err := streamCLIDocumentChat(t.Context(), cliAdapter{s.Store.Root, provider, "test"}, AIInput{Chat: a.chat}, func(e ProviderEvent) error {
 				visible += e.Text
 				if e.Draft != "" {
@@ -326,10 +334,16 @@ func TestCLIDocumentToolsReadEvidenceAndDiscardIntermediateText(t *testing.T) {
 				if e.ResetDraft {
 					resets++
 				}
+				for _, metric := range e.Metrics {
+					model = metric.Model
+				}
 				return nil
 			})
 			if err != nil || len(a.Evidence) < 2 || drafts == 0 || resets == 0 || strings.Contains(visible, "INTERMEDIATE") || visible != result.Text {
 				t.Fatal(result, err, len(a.Evidence), visible)
+			}
+			if provider == "kimi" && model != "test" {
+				t.Fatal("Kimi lost selected model metadata", model)
 			}
 			if err = s.saveDocumentAgentAnswer(t.Context(), a, result.Text, provider); err != nil {
 				t.Fatal(err)
@@ -557,4 +571,113 @@ func TestClaudeNativeHistoryInstalledCLI(t *testing.T) {
 		t.Fatal("disabling hiding did not restore the native transcript", err)
 	}
 	t.Logf("same native session, tool context after restart, ordinary history restored; model requests=%d", total)
+}
+
+func TestClaudeDocumentWebToolsRespectSettingAndSaveSources(t *testing.T) {
+	config := AIConfig{WebSearch: &WebSearchConfig{CLIEnabled: false}}
+	if webSearchEnabled(config, "claude") {
+		t.Fatal("Claude web tools enabled by default")
+	}
+	config.WebSearch.CLIEnabled = true
+	if !webSearchEnabled(config, "claude") || !webSearchEnabled(config, "codex") || webSearchEnabled(config, "kimi") {
+		t.Fatal("CLI web permission changed for unrelated providers")
+	}
+	for _, enabled := range []bool{false, true} {
+		chat := &chatInput{WebSearch: enabled}
+		stream := claudeDocumentStream{chat: chat}
+		block := claudeToolBlock{Type: "tool_use", ID: "search", Name: "WebSearch", Input: json.RawMessage(`{"query":"synthetic public query"}`)}
+		err := stream.toolBlock(block)
+		if !enabled {
+			if errorKind(err) != ErrorCapability || len(chat.toolSnapshot()) != 0 {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := json.RawMessage(jsonText(`Web search results. Links: [{"title":"Example","url":"https://example.com/"}]`))
+		if err = stream.toolBlock(claudeToolBlock{Type: "tool_result", CallID: "search", Content: raw}); err != nil {
+			t.Fatal(err)
+		}
+		if err = stream.toolBlock(claudeToolBlock{Type: "tool_use", ID: "fetch", Name: "WebFetch", Input: json.RawMessage(`{"url":"https://example.com/"}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if err = stream.toolBlock(claudeToolBlock{Type: "tool_result", CallID: "fetch", Content: json.RawMessage(`{"url":"https://example.com/","title":"Example","text":"Verified public page"}`)}); err != nil {
+			t.Fatal(err)
+		}
+		sources := chat.webSourcesSnapshot()
+		if len(sources) != 1 || sources[0].Kind != "page" || sources[0].Text != "Verified public page" {
+			t.Fatal(sources)
+		}
+		if tools := chat.toolSnapshot(); len(tools) != 2 || tools[0].Status != "completed" || tools[1].Status != "completed" {
+			t.Fatal(tools)
+		}
+	}
+}
+
+func TestCLIDocumentToolsAcceptPageImageFrames(t *testing.T) {
+	for _, provider := range []string{"claude", "kimi"} {
+		t.Run(provider, func(t *testing.T) {
+			s, a, _ := libraryRetrievalFixture(t, []string{retrievalAbstract, "Synthetic agent attacks."})
+			fakeAgent(t, provider, "document-image-frame")
+			result, err := streamCLIDocumentChat(t.Context(), cliAdapter{s.Store.Root, provider, "test"}, AIInput{Chat: a.chat}, nil)
+			if err != nil || !strings.Contains(result.Text, "[S") {
+				t.Fatal("valid page tool payload exceeded text-only frame limit", err)
+			}
+		})
+	}
+}
+
+func TestCLIDocumentDiagnosticsContainCountsAndStatesOnly(t *testing.T) {
+	for _, tc := range []struct{ provider, mode, status string }{{"claude", "document-tools", "passed"}, {"claude", "document-extra", "extra_tools"}, {"claude", "document-missing", "missing_tools"}, {"kimi", "document-tools", "inventory_unavailable"}, {"kimi", "document-unsupported", "unsupported_http"}, {"kimi", "document-unexpected", "inventory_unavailable"}} {
+		t.Run(tc.provider+"/"+tc.mode, func(t *testing.T) {
+			s, a, _ := libraryRetrievalFixture(t, []string{retrievalAbstract, "PRIVATE_BODY agent attacks."}, []string{retrievalAbstract})
+			a.chat.Question = "PRIVATE_QUESTION"
+			fakeAgent(t, tc.provider, tc.mode)
+			logs, err := diagnostics.New(t.TempDir(), "retrieval-test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.SetDiagnostics(logs)
+			_, _ = streamCLIDocumentChat(t.Context(), cliAdapter{s.Store.Root, tc.provider, "test"}, AIInput{Chat: a.chat}, nil)
+			files, err := os.ReadDir(logs.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			startup, retrieval := false, false
+			for _, file := range files {
+				data, err := os.ReadFile(filepath.Join(logs.Dir, file.Name()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(data), "PRIVATE_") || strings.Contains(string(data), "interpretability") || strings.Contains(string(data), "Abstract.") {
+					t.Fatal("content leaked into diagnostics", string(data))
+				}
+				for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+					var event map[string]any
+					if json.Unmarshal([]byte(line), &event) != nil {
+						t.Fatal(line)
+					}
+					if event["event"] == "chat.document_tools" {
+						startup = event["status"] == tc.status
+					}
+					if event["event"] == "chat.library_retrieval" {
+						retrieval = true
+						if event["totalPapers"] != float64(2) {
+							t.Fatal(event)
+						}
+						for _, field := range []string{"queryGroups", "hitPassages", "readPassages", "coveredPapers"} {
+							if _, ok := event[field].(float64); !ok {
+								t.Fatal(event)
+							}
+						}
+					}
+				}
+			}
+			if !startup || !retrieval {
+				t.Fatal("missing structured retrieval diagnostic", startup, retrieval)
+			}
+		})
+	}
 }
