@@ -768,8 +768,6 @@ func TestTranslationMathRecoveryRestoresDroppedCompatibilityGlyphs(t *testing.T)
 	}{
 		{"iid_increment", deltaIIDParagraph, "\u2206", []string{`\Delta`}},
 		{"control_increment", deltaControlParagraph, "\u2206", []string{`\Delta`, `P_{n}^{q}`}},
-		{"micro", "The distance is 5 \u00b5m.", "\u00b5", []string{`\mu`}},
-		{"ohm", "The resistance is 5 \u2126.", "\u2126", []string{`\Omega`}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			s, _, m := translationFixture(t)
@@ -940,6 +938,47 @@ func TestTranslationMathRecoverySkipsAreDiagnosed(t *testing.T) {
 				if err != nil || bytes.Contains(data, []byte(privateText)) || bytes.Contains(data, []byte("private-image")) {
 					t.Fatal("source or image path entered exported diagnostics", file.Name, err)
 				}
+			}
+		})
+	}
+}
+
+func TestTranslationUnitGlyphsDoNotRequireMathRecovery(t *testing.T) {
+	for _, tt := range []struct{ name, source, target string }{
+		{"micro", "The distance is 5 \u00b5m.", "距离为 5 微米。"},
+		{"ohm", "The resistance is 10 \u2126.", "电阻为 10 欧姆。"},
+		{"kiloohm", "The resistance is 10 k\u2126.", "电阻为 10 千欧。"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _, m := translationFixture(t)
+			m.Blocks = m.Blocks[:1]
+			m.Blocks[0].Text = tt.source
+			var texts atomic.Int32
+			textAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				texts.Add(1)
+				para := readTranslationInput(t, r).Batch.Paragraphs[0]
+				pairs := []TranslationSentence{{Source: para.Source, Target: tt.target}}
+				writeAPIReply(w, jsonText(map[string]any{"blockId": para.BlockID, "sourceHash": para.SourceHash, "sentences": pairs})+"\n")
+			}))
+			defer textAPI.Close()
+			// No image provider or verified image capability is configured.
+			configureTranslationTest(t, s, textAPI.URL)
+			doc, err := s.Store.Document("doc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := s.taskGenerationService(s.aiConfig(), taskTranslation)
+			batch := translationBatch{Paragraphs: m.translationParagraphs()}
+			if err := s.translateBatch(t.Context(), doc, m, batch, service, func() {}); err != nil {
+				t.Fatal(err)
+			}
+			items, err := s.translations("doc", m)
+			if err != nil || len(items) != 1 || items[0].Status != "complete" || len(items[0].Sentences) != 1 {
+				t.Fatal("unit translation required recovery", items, err)
+			}
+			pair := items[0].Sentences[0]
+			if texts.Load() != 1 || pair.Source != tt.source || pair.Target != tt.target {
+				t.Fatal("unit translation retried or changed text", texts.Load(), pair)
 			}
 		})
 	}

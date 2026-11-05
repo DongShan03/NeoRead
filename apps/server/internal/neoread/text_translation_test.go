@@ -1548,7 +1548,7 @@ func TestTranslationMathCompatibilityGlyphs(t *testing.T) {
 					t.Fatal("comparison rewrote source or target", parsed)
 				}
 			}
-			for _, symbol := range []string{"", `$\delta$`, `$\Gamma$`} {
+			for _, symbol := range []string{`$\delta$`, `$\Gamma$`} {
 				if matchingMathDecorations(tt.source, strings.ReplaceAll(tt.source, tt.glyph, symbol)) {
 					t.Errorf("lost or different symbol accepted: %U -> %q", []rune(tt.glyph)[0], symbol)
 				}
@@ -1559,6 +1559,53 @@ func TestTranslationMathCompatibilityGlyphs(t *testing.T) {
 			}
 			if got := tt.source[spans[0].Start:spans[0].End]; got != tt.glyph || strings.TrimSpace(spans[0].Formula) != tt.latex {
 				t.Fatal("span did not preserve original glyph and canonical formula", got, spans[0])
+			}
+		})
+	}
+}
+
+func TestTranslationUnitGlyphsAreOptional(t *testing.T) {
+	for _, tt := range []struct {
+		name, source, target string
+		valid                bool
+	}{
+		{"micro_unit_words", "5 \u00b5m", "5 微米", true},
+		{"ohm_unit_words", "10 \u2126", "10 欧姆", true},
+		{"kiloohm_unit_words", "10 k\u2126", "10 千欧", true},
+		{"micro_greek", "5 \u00b5m", "5 μm", true},
+		{"micro_latex", "5 \u00b5m", `5 $\mu$m`, true},
+		{"ohm_greek", "10 \u2126", "10 Ω", true},
+		{"ohm_latex", "10 \u2126", `10 $\Omega$`, true},
+		{"micro_omitted", "5 \u00b5m", "5 m", true},
+		{"ohm_omitted", "10 \u2126", "10", true},
+		{"mixed_micro_required_retained", "µ μ", "μ", true},
+		{"mixed_ohm_required_retained", "Ω Ω", "Ω", true},
+		{"two_optional_micro_one_retained", "µ µ", "μ", true},
+		{"two_optional_micro_both_retained", "µ µ", `μ $\mu$`, true},
+		{"extra_micro", "5 \u00b5m", "5 μm μ", false},
+		{"extra_ohm", "10 \u2126", `10 Ω $\Omega$`, false},
+		{"micro_replaced_by_alpha", "5 \u00b5m", `$\alpha$`, false},
+		{"micro_replaced_by_omega", "5 \u00b5m", `$\Omega$`, false},
+		{"required_mu_omitted", "5 \u03bcm", "5 微米", false},
+		{"required_omega_omitted", "10 \u03a9", "10 欧姆", false},
+		{"mixed_micro_required_omitted", "µ μ", "省略符号", false},
+		{"mixed_ohm_required_omitted", "Ω Ω", "省略符号", false},
+		{"increment_omitted", "\u2206 RR-Judge", "RR-Judge", false},
+		{"increment_changed_to_delta", "\u2206 RR-Judge", `$\delta$ RR-Judge`, false},
+		{"increment_changed_to_gamma", "\u2206 RR-Judge", `$\Gamma$ RR-Judge`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchingMathDecorations(tt.source, tt.target); got != tt.valid {
+				t.Fatalf("matchingMathDecorations(%q, %q) = %v, want %v", tt.source, tt.target, got, tt.valid)
+			}
+			pairs := []TranslationSentence{{Source: tt.source, Target: tt.target}}
+			parsed, err := parseTranslationSource(jsonText(map[string]any{"sentences": pairs}), tt.source, true)
+			if tt.valid {
+				if err != nil || jsonText(parsed) != jsonText(pairs) {
+					t.Fatal("valid unit translation rejected or rewritten", parsed, err)
+				}
+			} else if !errors.Is(err, errTranslationMath) {
+				t.Fatal("invalid symbols accepted by translation parser", parsed, err)
 			}
 		})
 	}
