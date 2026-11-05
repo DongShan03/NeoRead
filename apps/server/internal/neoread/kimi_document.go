@@ -64,7 +64,7 @@ func streamKimiDocument(ctx context.Context, work, model, url, token string, in 
 	profile := filepath.Join(work, "neoread.md")
 	// Never advertise terminal/filesystem capabilities or built-in tools. Kimi
 	// ACP has no remote inventory API; runtime tool events are checked below.
-	if err := os.WriteFile(profile, []byte("---\nname: reader\ndescription: NeoRead document assistant\ntools: []\nsubagents: []\n---\n"+webInstructions(documentReadingInstructions, false)+"\n"), 0600); err != nil {
+	if err := os.WriteFile(profile, []byte("---\nname: reader\ndescription: NeoRead document assistant\ntools: []\nsubagents: []\n---\n"+webInstructions(documentReadingRules, false)+"\n未注册文档工具时，仅依据应用提供的原文摘录回答，不虚构工具调用。\n"), 0600); err != nil {
 		return GenerateResult{}, err
 	}
 	args := []string{"--agent-file", profile, "--skills-dir", work}
@@ -236,12 +236,20 @@ func streamKimiDocument(ctx context.Context, work, model, url, token string, in 
 		return GenerateResult{}, err
 	}
 	var session struct {
-		ID string `json:"sessionId"`
+		ID     string `json:"sessionId"`
+		Models struct {
+			Current string `json:"currentModelId"`
+		} `json:"models"`
 	}
 	if json.Unmarshal(raw, &session) != nil || session.ID == "" {
 		return GenerateResult{}, generationError(ErrorProtocol, "Kimi 会话无效")
 	}
 	sessionID = session.ID
+	if emit != nil && session.Models.Current != "" {
+		if err = emit(ProviderEvent{Metrics: []ModelTokens{{Model: session.Models.Current}}}); err != nil {
+			return GenerateResult{}, err
+		}
+	}
 	toolsEnabled = mode == "agent"
 	life.setCancel(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": sessionID}})
 	if mode == "retrieval" {

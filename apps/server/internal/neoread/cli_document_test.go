@@ -266,6 +266,7 @@ func TestCLIDocumentToolsReadEvidenceAndDiscardIntermediateText(t *testing.T) {
 			fakeAgent(t, provider, "document-tools")
 			visible := ""
 			drafts, resets := 0, 0
+			model := ""
 			result, err := streamCLIDocumentChat(t.Context(), cliAdapter{s.Store.Root, provider, "test"}, AIInput{Chat: a.chat}, func(e ProviderEvent) error {
 				visible += e.Text
 				if e.Draft != "" {
@@ -274,10 +275,16 @@ func TestCLIDocumentToolsReadEvidenceAndDiscardIntermediateText(t *testing.T) {
 				if e.ResetDraft {
 					resets++
 				}
+				for _, metric := range e.Metrics {
+					model = metric.Model
+				}
 				return nil
 			})
 			if err != nil || len(a.Evidence) < 2 || drafts == 0 || resets == 0 || strings.Contains(visible, "INTERMEDIATE") || visible != result.Text {
 				t.Fatal(result, err, len(a.Evidence), visible)
+			}
+			if provider == "kimi" && model != "test" {
+				t.Fatal("Kimi lost selected model metadata", model)
 			}
 			if err = s.saveDocumentAgentAnswer(t.Context(), a, result.Text, provider); err != nil {
 				t.Fatal(err)
