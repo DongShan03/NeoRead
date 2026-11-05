@@ -3,6 +3,7 @@ import { cp, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dedupeOnnxLibraries } from "./dedupe-onnx.mjs";
+import { canonicalReleaseTag } from "./release-tag.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const desktop = join(root, "apps/desktop");
@@ -35,7 +36,10 @@ const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const app = JSON.parse(await readFile(join(desktop, "package.json"), "utf8"));
 if (manifest.version !== app.version)
   throw new Error("Root and desktop versions must match.");
-if (process.env.RELEASE_TAG && process.env.RELEASE_TAG !== `v${app.version}`)
+if (
+  process.env.RELEASE_TAG &&
+  canonicalReleaseTag(process.env.RELEASE_TAG) !== `v${app.version}`
+)
   throw new Error(
     `Release tag must be v${app.version}, got ${process.env.RELEASE_TAG}`,
   );

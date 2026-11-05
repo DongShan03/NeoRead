@@ -201,3 +201,49 @@ test.each([0, 1, 2])(
       ]);
   },
 );
+
+test("dotted experiment tags accept only the matching SemVer package and still pin the source commit", async () => {
+  const cwd = await fixture();
+  const version = "0.2.0-experiment.1";
+  for (const path of ["package.json", "apps/desktop/package.json"])
+    await writeFile(join(cwd, path), JSON.stringify({ version }));
+  await mkdir(join(cwd, "docs"));
+  await writeFile(
+    join(cwd, "docs/release-notes.json"),
+    JSON.stringify({ [version]: [{ title: "实验版本" }] }),
+  );
+  const git = (args) => {
+    const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    return result.stdout.trim();
+  };
+  git(["init", "--quiet"]);
+  git([
+    "add",
+    "package.json",
+    "apps/desktop/package.json",
+    "docs/release-notes.json",
+  ]);
+  git([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgSign=false",
+    "commit",
+    "--quiet",
+    "-m",
+    "fixture",
+  ]);
+  const result = run("release-source.mjs", cwd, {
+    RELEASE_TAG: "v0.2.0.experiment.1",
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).toContain(git(["rev-parse", "HEAD"]));
+  const wrong = run("release-source.mjs", cwd, {
+    RELEASE_TAG: "v0.2.0.experiment.2",
+  });
+  expect(wrong.status).not.toBe(0);
+  expect(wrong.stderr).toContain("Release tag must match app version");
+});

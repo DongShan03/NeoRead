@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { canonicalReleaseTag } from "./release-tag.mjs";
 
 const { version } = JSON.parse(
   await readFile("apps/desktop/package.json", "utf8"),
@@ -9,7 +10,9 @@ const { version } = JSON.parse(
 const expected = [
   `NeoRead-${version}-mac-arm64.dmg`,
   `NeoRead-${version}-mac-arm64.zip`,
-  ...(process.env.MAC_ONLY === "true" ? [] : [`NeoRead-${version}-win-x64.exe`]),
+  ...(process.env.MAC_ONLY === "true"
+    ? []
+    : [`NeoRead-${version}-win-x64.exe`]),
 ].sort();
 const actual = (await readdir("release"))
   .filter((file) => file !== "SHA256SUMS.txt")
@@ -40,7 +43,7 @@ await writeFile("release/SHA256SUMS.txt", checksums.join("\n") + "\n");
 console.log(checksums.join("\n"));
 if (process.argv.includes("--upload")) {
   assert.equal(
-    process.env.RELEASE_TAG,
+    canonicalReleaseTag(process.env.RELEASE_TAG),
     `v${version}`,
     "Release tag must match app version",
   );

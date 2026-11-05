@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { appendFile, readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import { canonicalReleaseTag } from "./release-tag.mjs";
 const root = JSON.parse(await readFile("package.json", "utf8"));
 const app = JSON.parse(await readFile("apps/desktop/package.json", "utf8"));
 assert.equal(root.version, app.version, "Root and desktop versions must match");
@@ -11,7 +12,7 @@ assert.match(
 );
 if (process.env.RELEASE_TAG)
   assert.equal(
-    process.env.RELEASE_TAG,
+    canonicalReleaseTag(process.env.RELEASE_TAG),
     `v${app.version}`,
     "Release tag must match app version",
   );
