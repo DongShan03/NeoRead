@@ -90,7 +90,7 @@ func streamKimiDocument(ctx context.Context, work, model, url, token string, in 
 	life := newRPCLifecycle(child, cmd, stdin, stdout)
 	defer func() { life.close(); _ = cmd.Wait() }()
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 4096), maxProviderFrame)
+	scanner.Buffer(make([]byte, 4096), documentCLIFrameBytes)
 	draft := cliDocumentDraft{emit: emit}
 	sessionID := ""
 	toolNames := map[string]string{}

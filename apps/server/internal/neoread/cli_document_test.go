@@ -124,6 +124,9 @@ func runFakeClaudeDocument(mode, input string, emit func(any), gate func()) bool
 		}
 		_ = call("get_outline", map[string]any{})
 		answer = fakeDocumentRead(session, call)
+		if mode == "document-image-frame" {
+			emit(map[string]any{"type": "user", "message": map[string]any{"content": []any{map[string]any{"type": "tool_result", "tool_use_id": "1", "content": []any{map[string]any{"type": "image", "source": map[string]string{"type": "base64", "media_type": "image/png", "data": strings.Repeat("A", 9<<20)}}}}}}})
+		}
 	}
 	runes := []rune(answer)
 	part(string(runes[:len(runes)/2]))
@@ -223,6 +226,9 @@ func runFakeKimiDocument(mode string, emit func(any)) {
 					return raw
 				}
 				answer = fakeDocumentRead(session, call)
+				if mode == "document-image-frame" {
+					update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "1", "status": "completed", "content": []any{map[string]any{"type": "content", "content": map[string]string{"type": "image", "mimeType": "image/png", "data": strings.Repeat("A", 9<<20)}}}})
+				}
 				session.Close()
 			}
 			part(answer)
@@ -450,5 +456,18 @@ func TestClaudeDocumentWebToolsRespectSettingAndSaveSources(t *testing.T) {
 		if tools := chat.toolSnapshot(); len(tools) != 2 || tools[0].Status != "completed" || tools[1].Status != "completed" {
 			t.Fatal(tools)
 		}
+	}
+}
+
+func TestCLIDocumentToolsAcceptPageImageFrames(t *testing.T) {
+	for _, provider := range []string{"claude", "kimi"} {
+		t.Run(provider, func(t *testing.T) {
+			s, a, _ := libraryRetrievalFixture(t, []string{retrievalAbstract, "Synthetic agent attacks."})
+			fakeAgent(t, provider, "document-image-frame")
+			result, err := streamCLIDocumentChat(t.Context(), cliAdapter{s.Store.Root, provider, "test"}, AIInput{Chat: a.chat}, nil)
+			if err != nil || !strings.Contains(result.Text, "[S") {
+				t.Fatal("valid page tool payload exceeded text-only frame limit", err)
+			}
+		})
 	}
 }

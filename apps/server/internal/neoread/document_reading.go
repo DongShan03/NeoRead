@@ -30,6 +30,10 @@ const documentReadingRounds = 64
 // Transport ceiling, independent of the estimated token allowance.
 const documentEvidenceBytes = 2 << 20
 
+// A page tool may return 32 MiB of pixels plus base64 and JSON metadata.
+// Keep the CLI transport ceiling aligned with the multimodal API body limit.
+const documentCLIFrameBytes = 48 << 20
+
 var errDocumentReadingBudget = generationError(ErrorLimit, "本轮检索已收束，请基于已有资料回答")
 var errDocumentToolContext = generationError(ErrorLimit, "API 工具上下文超过限制")
 var errDocumentAttemptEnded = generationError(ErrorCanceled, "文档工具尝试已结束")
