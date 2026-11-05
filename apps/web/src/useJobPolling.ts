@@ -35,6 +35,7 @@ export function useJobPolling<T extends { documentId: string }>(
         return;
       }
       pending = true;
+      refreshOnReady = false;
       try {
         const next = await load();
         if (!stopped && !document.hidden) {

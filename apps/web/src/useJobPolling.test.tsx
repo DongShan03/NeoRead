@@ -85,3 +85,20 @@ it("starts without a request when hidden and refreshes after an in-flight visibi
   await act(async () => resolve([]));
   expect(load).toHaveBeenCalledTimes(2);
 });
+
+it("does not replay a stale visibility refresh after hiding again", async () => {
+  let resolve!: (jobs: { documentId: string }[]) => void;
+  const load = vi.fn(async () => [] as { documentId: string }[])
+    .mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  function Harness() { useJobPolling(load, 1200); return null; }
+  await act(async () => root.render(<Harness />));
+  hidden = true; document.dispatchEvent(new Event("visibilitychange"));
+  hidden = false; document.dispatchEvent(new Event("visibilitychange"));
+  hidden = true; document.dispatchEvent(new Event("visibilitychange"));
+  await act(async () => resolve([]));
+  hidden = false;
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+  expect(load).toHaveBeenCalledTimes(2);
+  await act(async () => vi.advanceTimersByTimeAsync(1199));
+  expect(load).toHaveBeenCalledTimes(2);
+});
