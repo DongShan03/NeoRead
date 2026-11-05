@@ -76,7 +76,9 @@ beforeEach(() => {
     { runScripts: "outside-only", pretendToBeVisual: true },
   );
   motion = Object.assign(new page.window.EventTarget(), { matches: false });
-  Object.defineProperty(page.window, "matchMedia", { value: vi.fn(() => motion) });
+  Object.defineProperty(page.window, "matchMedia", {
+    value: vi.fn(() => motion),
+  });
   fontLoad = vi.fn(async () => []);
   Object.defineProperty(page.window.document, "fonts", {
     value: { load: fontLoad },
@@ -434,17 +436,21 @@ it("does not execute exit code in a destroyed target", async () => {
   expect(target.webContents.executeJavaScript).toHaveBeenCalledTimes(1);
 });
 
-it.each([undefined, "false"])("animates with missing or enabled app motion even if the system disables motion (%s)", async (marker) => {
-  if (marker !== undefined) source.window.document.documentElement.dataset.reducedMotion = marker;
-  motion.matches = true;
-  const query = vi.mocked(page.window.matchMedia);
-  const exit = await prepareStartupExit(loading, target);
-  const pending = exit();
-  expect(animate).toHaveBeenCalledTimes(2);
-  motion.dispatchEvent(new page.window.Event("change"));
-  expect(overlay()).not.toBeNull();
-  expect(query).not.toHaveBeenCalled();
-  for (const animation of animations) animation.resolve();
-  await pending;
-  assertClean();
-});
+it.each([undefined, "false"])(
+  "animates with missing or enabled app motion even if the system disables motion (%s)",
+  async (marker) => {
+    if (marker !== undefined)
+      source.window.document.documentElement.dataset.reducedMotion = marker;
+    motion.matches = true;
+    const query = vi.mocked(page.window.matchMedia);
+    const exit = await prepareStartupExit(loading, target);
+    const pending = exit();
+    expect(animate).toHaveBeenCalledTimes(2);
+    motion.dispatchEvent(new page.window.Event("change"));
+    expect(overlay()).not.toBeNull();
+    expect(query).not.toHaveBeenCalled();
+    for (const animation of animations) animation.resolve();
+    await pending;
+    assertClean();
+  },
+);

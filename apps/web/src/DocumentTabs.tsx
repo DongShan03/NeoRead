@@ -521,9 +521,14 @@ export function ReadingWorkspaces({
   onLibrary: () => void;
   onSettings: () => void;
 }) {
-  const { documents, tabIds, visitedTabs, active } = useReaderStore(useShallow((s) => ({
-    documents: s.documents, tabIds: s.tabIds, visitedTabs: s.visitedTabs, active: s.active,
-  })));
+  const { documents, tabIds, visitedTabs, active } = useReaderStore(
+    useShallow((s) => ({
+      documents: s.documents,
+      tabIds: s.tabIds,
+      visitedTabs: s.visitedTabs,
+      active: s.active,
+    })),
+  );
   return tabIds.map((id) => {
     const doc = documents.find((item) => item.id === id);
     if (!doc) return null;

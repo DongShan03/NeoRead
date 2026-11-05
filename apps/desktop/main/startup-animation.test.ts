@@ -12,7 +12,8 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function setup(reduced?: boolean) {
   const page = new DOMParser().parseFromString(createStartupHTML(assets), "text/html");
   document.body.innerHTML = page.body.innerHTML;
-  if (reduced === undefined) delete document.documentElement.dataset.reducedMotion;
+  if (reduced === undefined)
+    delete document.documentElement.dataset.reducedMotion;
   else document.documentElement.dataset.reducedMotion = String(reduced);
   const media = Object.assign(new EventTarget(), { matches: reduced, media: "system-motion", onchange: null, addListener() {}, removeListener() {} });
   vi.stubGlobal("matchMedia", vi.fn(() => media));
@@ -58,14 +59,18 @@ it("pauses when hidden, resumes when visible and releases animations on page exi
   expect(animations.every(a => a.pause.mock.calls.length === 1)).toBe(true);
 });
 
-it.each([undefined, false, true])("uses only the app motion marker (%s)", (reduced) => {
-  const state = setup(reduced);
-  expect(state.animate.mock.calls.length > 0).toBe(reduced !== true);
-  expect(matchMedia).not.toHaveBeenCalled();
-  const before = state.animations.length;
-  state.media.matches = !state.media.matches;
+it.each([undefined, false, true])(
+  "uses only the app motion marker (%s)",
+  (reduced) => {
+    const state = setup(reduced);
+    expect(state.animate.mock.calls.length > 0).toBe(reduced !== true);
+    expect(matchMedia).not.toHaveBeenCalled();
+    const before = state.animations.length;
+    state.media.matches = !state.media.matches;
   state.media.dispatchEvent(new Event("change"));
-  expect(state.animations).toHaveLength(before);
-  expect(state.animations.every((a) => a.cancel.mock.calls.length === 0)).toBe(true);
+    expect(state.animations).toHaveLength(before);
+    expect(
+      state.animations.every((a) => a.cancel.mock.calls.length === 0),
+    ).toBe(true);
   window.dispatchEvent(new Event("pagehide"));
 });

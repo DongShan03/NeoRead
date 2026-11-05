@@ -761,8 +761,11 @@ app
       void saveStartupAppearance(
         app.getPath("userData"),
         appearance ?? "system",
-        typeof preferences === "object" && preferences !== null && "reducedMotion" in preferences
-          ? preferences.reducedMotion === true : undefined,
+        typeof preferences === "object" &&
+        preferences !== null &&
+        "reducedMotion" in preferences
+          ? preferences.reducedMotion === true
+          : undefined,
       ).catch(
         (error) =>
           diagnostics?.record("startup.appearance_cache_failed", error),
@@ -1759,8 +1762,11 @@ app
         void saveStartupAppearance(
           app.getPath("userData"),
           appearance,
-          typeof palettes === "object" && palettes !== null && "reducedMotion" in palettes
-            ? palettes.reducedMotion : undefined,
+          typeof palettes === "object" &&
+          palettes !== null &&
+          "reducedMotion" in palettes
+            ? palettes.reducedMotion
+            : undefined,
         ).catch(
           (error) =>
             diagnostics?.record("startup.appearance_cache_failed", error),

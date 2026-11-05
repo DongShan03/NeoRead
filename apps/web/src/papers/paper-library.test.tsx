@@ -2565,11 +2565,22 @@ it("does not look up the AI title if applying it fails", async () => {
 });
 
 it("shows connection and processing failures instead of an empty paper library", async () => {
-  await act(async () => root.render(
-    <PaperLibrary documents={[]} trash={[]} jobs={new Map()} loading={false}
-      error="连接失败" processingError="进度读取失败" openDocument={open}
-      moveToBooks={() => {}} navOpen={false} onToggleNav={() => {}} />,
-  ));
+  await act(async () =>
+    root.render(
+      <PaperLibrary
+        documents={[]}
+        trash={[]}
+        jobs={new Map()}
+        loading={false}
+        error="连接失败"
+        processingError="进度读取失败"
+        openDocument={open}
+        moveToBooks={() => {}}
+        navOpen={false}
+        onToggleNav={() => {}}
+      />,
+    ),
+  );
   expect(host.textContent).toContain("暂时无法连接本地书库");
   expect(host.textContent).toContain("重新连接");
   expect(host.textContent).toContain("解析进度暂时不可用：进度读取失败");
@@ -2578,10 +2589,24 @@ it("shows connection and processing failures instead of an empty paper library",
 
 it("offers the existing import flow in a truly empty library", async () => {
   const onImport = vi.fn();
-  await act(async () => root.render(
-    <PaperLibrary documents={[]} trash={[]} jobs={new Map()} loading={false}
-      onImport={onImport} openDocument={open} moveToBooks={() => {}} navOpen={false} onToggleNav={() => {}} />,
-  ));
-  const button = [...host.querySelectorAll("button")].find((el) => el.textContent === "导入论文")!;
-  await act(async () => button.click()); expect(onImport).toHaveBeenCalledOnce();
+  await act(async () =>
+    root.render(
+      <PaperLibrary
+        documents={[]}
+        trash={[]}
+        jobs={new Map()}
+        loading={false}
+        onImport={onImport}
+        openDocument={open}
+        moveToBooks={() => {}}
+        navOpen={false}
+        onToggleNav={() => {}}
+      />,
+    ),
+  );
+  const button = [...host.querySelectorAll("button")].find(
+    (el) => el.textContent === "导入论文",
+  )!;
+  await act(async () => button.click());
+  expect(onImport).toHaveBeenCalledOnce();
 });

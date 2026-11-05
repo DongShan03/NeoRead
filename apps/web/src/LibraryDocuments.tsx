@@ -63,8 +63,14 @@ export function LibraryDocuments({
   onActivate?: (id: string | null) => void;
 }) {
   const overviewJobs = useOverviewJobs();
-  const jobsById = useMemo(() => new Map(jobs.map((job) => [job.documentId, job])), [jobs]);
-  const overviewsById = useMemo(() => new Map(overviewJobs.map((job) => [job.documentId, job])), [overviewJobs]);
+  const jobsById = useMemo(
+    () => new Map(jobs.map((job) => [job.documentId, job])),
+    [jobs],
+  );
+  const overviewsById = useMemo(
+    () => new Map(overviewJobs.map((job) => [job.documentId, job])),
+    [overviewJobs],
+  );
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState(false);
   const clickIntent = useClickIntent(activeId);
@@ -197,7 +203,11 @@ export function LibraryDocuments({
       )}
       <div className={`book-grid ${libraryView === "list" ? "book-list" : ""}`}>
         {documents.map((doc, i) => {
-          const status = coverStatus(doc.type, jobsById.get(doc.id), overviewsById.get(doc.id));
+          const status = coverStatus(
+            doc.type,
+            jobsById.get(doc.id),
+            overviewsById.get(doc.id),
+          );
           return (
           <ContextMenu key={doc.id}>
             <ContextMenuTrigger
@@ -306,9 +316,16 @@ export function LibraryDocuments({
                   <div className="cover-decoration" />
                 </Button>
                 {status.kind === "overview" ? (
-                  <CoverOverview job={status.job} onOpen={() => onOverview(doc)} />
+                  <CoverOverview
+                    job={status.job}
+                    onOpen={() => onOverview(doc)}
+                  />
                 ) : status.kind === "processing" ? (
-                  <CoverProcessing job={status.job} onSettings={onSettings} unavailable={!!processingError} />
+                  <CoverProcessing
+                    job={status.job}
+                    onSettings={onSettings}
+                    unavailable={!!processingError}
+                  />
                 ) : status.kind === "analyze" ? (
                     <Button
                       data-document-action
@@ -381,7 +398,8 @@ export function LibraryDocuments({
               )}
             </ContextMenuContent>
           </ContextMenu>
-        ); })}
+          );
+        })}
       </div>
     </section>
   );

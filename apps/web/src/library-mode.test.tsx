@@ -105,5 +105,8 @@ it("saves and reloads the book view without losing other book preferences", asyn
   vi.mocked(api.libraryPreferences).mockResolvedValue(saved);
   useReaderStore.setState({ libraryPreferences: {} });
   await loadLibraryPreferences();
-  expect(useReaderStore.getState().libraryPreferences.books).toEqual({ ...books, view: "list" });
+  expect(useReaderStore.getState().libraryPreferences.books).toEqual({
+    ...books,
+    view: "list",
+  });
 });

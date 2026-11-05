@@ -45,7 +45,8 @@ it.each(["queued", "running", "paused", "waiting", "failed"] as const)(
     vi.mocked(api.processing).mockResolvedValue([job({ status })]);
     await expect(openLibraryDocument(doc)).rejects.toThrow(
       ["queued", "running"].includes(status)
-        ? "论文飞速解析中，请稍等" : "论文解析没有完成，无法打开",
+        ? "论文飞速解析中，请稍等"
+        : "论文解析没有完成，无法打开",
     );
     expect(useReaderStore.getState().active).toBeNull();
   },
@@ -53,7 +54,10 @@ it.each(["queued", "running", "paused", "waiting", "failed"] as const)(
 it("blocks unknown and incomplete parsing", async () => {
   for (const [jobs, reason] of [
     [[], "论文解析任务已不存在，请重新解析文档"],
-    [[job({ phase: "translating", incomplete: true })], "论文正文不完整，无法打开"],
+    [
+      [job({ phase: "translating", incomplete: true })],
+      "论文正文不完整，无法打开",
+    ],
   ] as const) {
     vi.mocked(api.processing).mockResolvedValue([...jobs]);
     await expect(openLibraryDocument(doc)).rejects.toThrow(
@@ -208,15 +212,19 @@ it("reports a missing parsing task instead of polling indefinitely", async () =>
   expect(api.processing).toHaveBeenCalledOnce();
 });
 
-
 it("opens only allowed documents with one processing snapshot and records every visit", async () => {
   const book = paper({ id: "book", library: "books" });
   const ready = paper({ id: "ready" });
-  vi.mocked(api.processing).mockResolvedValue([job(), job({ documentId: ready.id, phase: "ready" })]);
+  vi.mocked(api.processing).mockResolvedValue([
+    job(),
+    job({ documentId: ready.id, phase: "ready" }),
+  ]);
   const result = await openLibraryDocuments([doc, book, ready]);
   expect(api.processing).toHaveBeenCalledOnce();
   expect(result.opened).toEqual([book, ready]);
-  expect(result.skipped).toEqual([{ document: doc, reason: "论文飞速解析中，请稍等" }]);
+  expect(result.skipped).toEqual([
+    { document: doc, reason: "论文飞速解析中，请稍等" },
+  ]);
   expect(api.update).toHaveBeenCalledWith(book.id, {});
   expect(api.update).toHaveBeenCalledWith(ready.id, {});
   expect(useReaderStore.getState().active).toEqual(book);
@@ -224,14 +232,22 @@ it("opens only allowed documents with one processing snapshot and records every 
 it("keeps the current view when every requested document is blocked", async () => {
   const book = paper({ id: "book", library: "books" });
   useReaderStore.getState().open(book);
-  vi.mocked(api.processing).mockResolvedValue([job({ status: "failed", detail: "解析失败" })]);
-  expect((await openLibraryDocuments([doc])).skipped[0].reason).toBe("解析失败");
+  vi.mocked(api.processing).mockResolvedValue([
+    job({ status: "failed", detail: "解析失败" }),
+  ]);
+  expect((await openLibraryDocuments([doc])).skipped[0].reason).toBe(
+    "解析失败",
+  );
   expect(useReaderStore.getState().active).toEqual(book);
   expect(api.update).not.toHaveBeenCalled();
 });
 it("does not replace a newer navigation with a late batch response", async () => {
   let resolve!: (jobs: Processing[]) => void;
-  vi.mocked(api.processing).mockReturnValue(new Promise((done) => { resolve = done; }));
+  vi.mocked(api.processing).mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
   const pending = openLibraryDocuments([doc]);
   const book = paper({ id: "book", library: "books" });
   useReaderStore.getState().open(book);
@@ -241,7 +257,11 @@ it("does not replace a newer navigation with a late batch response", async () =>
 });
 it("does not cancel a pending open for an empty tab group", async () => {
   let resolve!: (jobs: Processing[]) => void;
-  vi.mocked(api.processing).mockReturnValue(new Promise((done) => { resolve = done; }));
+  vi.mocked(api.processing).mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
   const pending = openLibraryDocument(doc);
   useReaderStore.getState().openMany([]);
   await openLibraryDocuments([]);
@@ -256,16 +276,20 @@ it("preserves receiving papers' existing opening permission", async () => {
 it("keeps Open With waiting for the learning phase before reporting incomplete text", async () => {
   vi.useFakeTimers();
   try {
-    vi.mocked(api.processing).mockResolvedValueOnce([job({ incomplete: true })])
+    vi.mocked(api.processing)
+      .mockResolvedValueOnce([job({ incomplete: true })])
       .mockResolvedValue([job({ incomplete: true, phase: "ready" })]);
     const onWaiting = vi.fn();
     const pending = openWhenParsed(doc.id, onWaiting);
-    const rejection = expect(pending).rejects.toThrow("论文正文不完整，无法打开");
+    const rejection =
+      expect(pending).rejects.toThrow("论文正文不完整，无法打开");
     await vi.advanceTimersByTimeAsync(0);
     expect(onWaiting).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1200);
     await rejection;
-  } finally { vi.useRealTimers(); }
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("returns opened and skipped documents even when a recent-visit write fails", async () => {
@@ -275,7 +299,9 @@ it("returns opened and skipped documents even when a recent-visit write fails", 
   vi.mocked(api.update).mockRejectedValueOnce(new Error("写入失败"));
   const result = await openLibraryDocuments([book, doc, other]);
   expect(result.opened).toEqual([book, other]);
-  expect(result.skipped).toEqual([{ document: doc, reason: "论文飞速解析中，请稍等" }]);
+  expect(result.skipped).toEqual([
+    { document: doc, reason: "论文飞速解析中，请稍等" },
+  ]);
   expect(result).toMatchObject({ recentErrors: ["写入失败"] });
   expect(api.update).toHaveBeenCalledTimes(2);
   expect(useReaderStore.getState().active).toEqual(book);

@@ -368,9 +368,12 @@ export async function openLibraryDocuments(documents: Document[]) {
   });
   if (opened.length) {
     useReaderStore.getState().openMany(opened);
-    const results = await Promise.allSettled(opened.map((doc) => api.update(doc.id, {})));
+    const results = await Promise.allSettled(
+      opened.map((doc) => api.update(doc.id, {})),
+    );
     for (const result of results)
-      if (result.status === "rejected") recentErrors.push((result.reason as Error).message);
+      if (result.status === "rejected")
+        recentErrors.push((result.reason as Error).message);
   }
   return { opened, skipped, recentErrors };
 }
@@ -427,8 +430,12 @@ export async function openWhenParsed(id: string, onWaiting: () => void) {
     if (revision !== openRevision) return true;
     if (!useReaderStore.getState().documents.some((item) => item.id === id))
       return false;
-    if (!job || (job.phase !== "learning" && job.incomplete) ||
-      (job.phase === "learning" && ["failed", "waiting", "paused"].includes(job.status)))
+    if (
+      !job ||
+      (job.phase !== "learning" && job.incomplete) ||
+      (job.phase === "learning" &&
+        ["failed", "waiting", "paused"].includes(job.status))
+    )
       throw new Error(paperOpenReason(job));
     if (job.phase !== "learning") break;
     if (!waiting) {

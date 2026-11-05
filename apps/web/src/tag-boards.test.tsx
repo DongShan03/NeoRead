@@ -7,7 +7,9 @@ import { TagBoards } from "./TagBoards";
 import { paper } from "./papers/fixtures";
 import type { LibraryDocuments } from "./LibraryDocuments";
 import type { ComponentProps } from "react";
-const captured = vi.hoisted(() => ({ props: undefined as ComponentProps<typeof LibraryDocuments> | undefined }));
+const captured = vi.hoisted(() => ({
+  props: undefined as ComponentProps<typeof LibraryDocuments> | undefined,
+}));
 vi.mock("@neoread/api", () => ({
   api: {
     tagBoards: vi.fn(),
@@ -17,7 +19,18 @@ vi.mock("@neoread/api", () => ({
   },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("./LibraryDocuments", () => ({ LibraryDocuments: (props: ComponentProps<typeof LibraryDocuments>) => { captured.props = props; return <div data-cards>{props.documents.map((doc) => <article key={doc.id}>{doc.title}</article>)}</div>; } }));
+vi.mock("./LibraryDocuments", () => ({
+  LibraryDocuments: (props: ComponentProps<typeof LibraryDocuments>) => {
+    captured.props = props;
+    return (
+      <div data-cards>
+        {props.documents.map((doc) => (
+          <article key={doc.id}>{doc.title}</article>
+        ))}
+      </div>
+    );
+  },
+}));
 const board = {
   id: "board",
   name: "Web Security",
@@ -144,11 +157,27 @@ it("reloads saved boards after library data arrives from sync", async () => {
 });
 
 it("keeps matching board card nodes during search and forwards menu and batch actions", async () => {
-  const documents = [paper({ id: "a", library: "books", title: "Alpha", tags: ["web"] })];
-  const onMove = vi.fn(), openDocuments = vi.fn();
-  const show = (query: string) => root.render(<TagBoards documents={documents} query={query} jobs={[]}
-    processingError="" openDocument={() => {}} favorite={() => {}} onSettings={() => {}}
-    onOverview={() => {}} onUsage={() => {}} onMove={onMove} openDocuments={openDocuments} />);
+  const documents = [
+    paper({ id: "a", library: "books", title: "Alpha", tags: ["web"] }),
+  ];
+  const onMove = vi.fn(),
+    openDocuments = vi.fn();
+  const show = (query: string) =>
+    root.render(
+      <TagBoards
+        documents={documents}
+        query={query}
+        jobs={[]}
+        processingError=""
+        openDocument={() => {}}
+        favorite={() => {}}
+        onSettings={() => {}}
+        onOverview={() => {}}
+        onUsage={() => {}}
+        onMove={onMove}
+        openDocuments={openDocuments}
+      />,
+    );
   await act(async () => show(""));
   await act(async () => button("Web Security").click());
   const card = host.querySelector("[data-cards] article");

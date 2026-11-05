@@ -55,7 +55,11 @@ export async function bootstrapDesktop(loadDesktop: () => DesktopModule) {
     const cached = readStartupAppearance(app.getPath("userData"));
     await app.whenReady();
     if (cancelled) return;
-    startup = createStartupWindow(() => app.quit(), cached.appearance, cached.reducedMotion);
+    startup = createStartupWindow(
+      () => app.quit(),
+      cached.appearance,
+      cached.reducedMotion,
+    );
     await startup.load();
     if (cancelled) return;
     const desktop = loadDesktop();

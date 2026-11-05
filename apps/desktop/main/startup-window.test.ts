@@ -139,7 +139,9 @@ it("loads local feedback without a server or preload and preserves close cancell
   expect(html).not.toContain("script-src 'unsafe-inline'");
   expect(html).not.toContain("prefers-reduced-motion");
   expect(html).toContain('data-reduced-motion="false"');
-  expect(html.match(/<script>([\s\S]*?)<\/script>/)?.[1]).toBe(startupAnimationScript);
+  expect(html.match(/<script>([\s\S]*?)<\/script>/)?.[1]).toBe(
+    startupAnimationScript,
+  );
   state.window.emit("close");
   expect(quit).toHaveBeenCalledOnce();
   startup.dispose();
@@ -148,11 +150,16 @@ it("loads local feedback without a server or preload and preserves close cancell
   expect(quit).toHaveBeenCalledOnce();
 });
 
-it.each([false, true])("passes the app motion setting to the fixed startup script (%s)", async (reduced) => {
-  const startup = createStartupWindow(vi.fn(), "dark", reduced);
-  await startup.load();
-  const html = decodeURIComponent(state.window.loadURL.mock.calls[0][0]);
-  expect(html).toContain(`data-reduced-motion="${reduced}"`);
-  expect(html.match(/<script>([\s\S]*?)<\/script>/)?.[1]).toBe(startupAnimationScript);
-  startup.dispose();
-});
+it.each([false, true])(
+  "passes the app motion setting to the fixed startup script (%s)",
+  async (reduced) => {
+    const startup = createStartupWindow(vi.fn(), "dark", reduced);
+    await startup.load();
+    const html = decodeURIComponent(state.window.loadURL.mock.calls[0][0]);
+    expect(html).toContain(`data-reduced-motion="${reduced}"`);
+    expect(html.match(/<script>([\s\S]*?)<\/script>/)?.[1]).toBe(
+      startupAnimationScript,
+    );
+    startup.dispose();
+  },
+);

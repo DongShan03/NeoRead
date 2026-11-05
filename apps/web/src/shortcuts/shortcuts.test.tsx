@@ -357,9 +357,15 @@ it("forwards the command palette shortcut from Readium frames", () => {
   const listener = vi.fn((event: KeyboardEvent) => event.preventDefault());
   window.addEventListener("keydown", listener);
   try {
-    const event = new KeyboardEvent("keydown", { key: "k", ctrlKey: true, cancelable: true });
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      cancelable: true,
+    });
     forwardReaderShortcut(event);
     expect(listener).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(true);
-  } finally { window.removeEventListener("keydown", listener); }
+  } finally {
+    window.removeEventListener("keydown", listener);
+  }
 });

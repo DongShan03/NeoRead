@@ -108,7 +108,10 @@ export function App() {
   } = useReaderStore();
   const mode = libraryMode(libraryPreferences);
   const papers = mode === "papers";
-  const documents = useMemo(() => allDocuments.filter((d) => d.library === mode), [allDocuments, mode]);
+  const documents = useMemo(
+    () => allDocuments.filter((d) => d.library === mode),
+    [allDocuments, mode],
+  );
   const resolvedTheme = useResolvedTheme(theme);
   const { jobs, error: processingError } = useProcessing();
   useUpdateProgress();
@@ -136,9 +139,12 @@ export function App() {
   const [filters, setFilters] = useState(initialFilters);
   const libraryView = libraryPreferences.books?.view || "grid";
   const setLibraryView = (view: "grid" | "list") => {
-    void updateLibraryPreferences({ books: {
-      ...useReaderStore.getState().libraryPreferences.books, view,
-    } }).catch((e) => toast.error(e.message));
+    void updateLibraryPreferences({
+      books: {
+        ...useReaderStore.getState().libraryPreferences.books,
+        view,
+      },
+    }).catch((e) => toast.error(e.message));
   };
   const [editingLibrary, setEditingLibrary] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -398,7 +404,9 @@ export function App() {
       setBusy(false);
     }
   };
-  const { dragging, ...fileDrop } = useLibraryFileDrop((files) => void importFiles(files));
+  const { dragging, ...fileDrop } = useLibraryFileDrop(
+    (files) => void importFiles(files),
+  );
   const sample = async () => {
     setBusy(true);
     try {
@@ -460,29 +468,42 @@ export function App() {
       })
       .catch((e) => toast.error(e.message));
   };
-  const selectDocumentTab = useCallback((doc: Document) => {
-    open(doc);
-    setEditingLibrary(false);
-    void api.update(doc.id, {}).catch((e) => toast.error(e.message));
-  }, [open]);
+  const selectDocumentTab = useCallback(
+    (doc: Document) => {
+      open(doc);
+      setEditingLibrary(false);
+      void api.update(doc.id, {}).catch((e) => toast.error(e.message));
+    },
+    [open],
+  );
   const tabsShown = documentTabsShown({ theme, tabIds, closedTabGroups });
   const openDocuments = (docs: Document[]) => {
-    void openLibraryDocuments(docs).then(({ opened, skipped, recentErrors }) => {
-      if (opened.length) setEditingLibrary(false);
-      if (skipped.length) {
-        const reasons = [...new Set(skipped.map((item) => item.reason))].join("；");
-        toast.info(`已跳过 ${skipped.length} 份文档：${reasons}`);
-      }
-      if (recentErrors.length)
-        toast.error(`最近打开时间更新失败：${[...new Set(recentErrors)].join("；")}`);
-    }).catch((e) => toast.error(e.message));
+    void openLibraryDocuments(docs)
+      .then(({ opened, skipped, recentErrors }) => {
+        if (opened.length) setEditingLibrary(false);
+        if (skipped.length) {
+          const reasons = [...new Set(skipped.map((item) => item.reason))].join(
+            "；",
+          );
+          toast.info(`已跳过 ${skipped.length} 份文档：${reasons}`);
+        }
+        if (recentErrors.length)
+          toast.error(
+            `最近打开时间更新失败：${[...new Set(recentErrors)].join("；")}`,
+          );
+      })
+      .catch((e) => toast.error(e.message));
   };
-  const filtered = useMemo(() => filterDocuments(
-    documents,
-    filter,
-    filter === "all" ? "" : query,
-    filters,
-  ), [documents, filter, query, filters]);
+  const filtered = useMemo(
+    () =>
+      filterDocuments(
+        documents,
+        filter,
+        filter === "all" ? "" : query,
+        filters,
+      ),
+    [documents, filter, query, filters],
+  );
   const awaitingClassification = documents.some(
     (d) =>
       d.classificationStatus === "pending" ||
@@ -533,7 +554,11 @@ export function App() {
         data-has-tabs={tabsShown || undefined}
         {...fileDrop}
       >
-        {dragging && <div className="library-file-drop" role="status">松开以导入到{papers ? "论文库" : "图书库"}</div>}
+        {dragging && (
+          <div className="library-file-drop" role="status">
+            松开以导入到{papers ? "论文库" : "图书库"}
+          </div>
+        )}
         <input
           type="file"
           ref={fileRef}
@@ -837,7 +862,9 @@ export function App() {
                           documents={documents}
                           query={query}
                           onMove={moveDocument}
-                          openDocuments={theme.documentTabs ? openDocuments : undefined}
+                          openDocuments={
+                            theme.documentTabs ? openDocuments : undefined
+                          }
                           jobs={jobs}
                           processingError={processingError}
                           openDocument={openDocument}
@@ -880,7 +907,8 @@ export function App() {
                             </span>
                           </div>
                           <h2>
-                            {filter === "favorites" && !documents.some((doc) => doc.favorite)
+                            {filter === "favorites" &&
+                            !documents.some((doc) => doc.favorite)
                               ? "暂无收藏"
                               : documents.length
                                 ? "没有符合筛选条件的文档"
@@ -900,14 +928,19 @@ export function App() {
                           )}
                           {!documents.length && filter !== "favorites" && (
                             <>
-                            <Button onClick={() => chooseFiles()} disabled={busy}>导入文档</Button>
-                            <Button
-                              variant="link"
-                              onClick={() => void sample()}
-                              disabled={busy}
-                            >
-                              先体验示例文档 <ArrowUpRight className="size-3" />
-                            </Button>
+                              <Button
+                                onClick={() => chooseFiles()}
+                                disabled={busy}
+                              >
+                                导入文档
+                              </Button>
+                              <Button
+                                variant="link"
+                                onClick={() => void sample()}
+                                disabled={busy}
+                              >
+                                先体验示例文档 <ArrowUpRight className="size-3" />
+                              </Button>
                             </>
                           )}
                         </div>
@@ -992,7 +1025,9 @@ export function App() {
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
               <DialogTitle>关于 NeoRead</DialogTitle>
-              <DialogDescription className="sr-only">NeoRead 版本与更新</DialogDescription>
+              <DialogDescription className="sr-only">
+                NeoRead 版本与更新
+              </DialogDescription>
             </DialogHeader>
             <dl className="flex items-center justify-between text-sm">
               <dt className="text-muted-foreground">版本</dt>
@@ -1015,10 +1050,16 @@ export function App() {
             )}
           </DialogContent>
         </Dialog>
-        <QuickFind open={command} onOpenChange={setCommand} documents={documents} mode={mode}
-          onDocument={openDocument} onSettings={showSettings}
-          onImport={() => papers ? setImportingPaper(true) : chooseFiles()}
-          onSwitchLibrary={() => openLibrary(papers ? "books" : "papers")} />
+        <QuickFind
+          open={command}
+          onOpenChange={setCommand}
+          documents={documents}
+          mode={mode}
+          onDocument={openDocument}
+          onSettings={showSettings}
+          onImport={() => (papers ? setImportingPaper(true) : chooseFiles())}
+          onSwitchLibrary={() => openLibrary(papers ? "books" : "papers")}
+        />
         <LargePaperConfirmation />
         <LargePaperDialog
           papers={largePapers}
@@ -1033,7 +1074,13 @@ export function App() {
         <LibraryArchiveProgress onBackground={() => setSettings(false)} />
         <Toaster
           richColors
-          style={{ "--normal-bg": "var(--popover)", "--normal-border": "var(--border)", "--normal-text": "var(--popover-foreground)" } as React.CSSProperties}
+          style={
+            {
+              "--normal-bg": "var(--popover)",
+              "--normal-border": "var(--border)",
+              "--normal-text": "var(--popover-foreground)",
+            } as React.CSSProperties
+          }
           position="bottom-right"
           theme={resolvedTheme.mode === "dark" ? "dark" : "light"}
         />
