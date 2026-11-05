@@ -67,7 +67,7 @@ vi.mock("./DocumentTabs", () => ({
     fixture.tabs = props;
     return null;
   },
-  ReadingWorkspaces: () => null,
+  ReadingWorkspaces: ({ onSettings }: { onSettings: () => void }) => <button onClick={onSettings}>阅读设置</button>,
 }));
 vi.mock("./guide/GuideHost", () => ({ GuideHost: () => null }));
 vi.mock("./papers/PaperLibrary", () => ({ PaperLibrary: () => null }));
@@ -200,4 +200,9 @@ it("sends motion changes through the existing appearance bridge", async () => {
   expect(setAppearance).toHaveBeenLastCalledWith("system", expect.objectContaining({ reducedMotion: true }));
   await act(async () => useReaderStore.getState().setTheme({ reducedMotion: false }));
   expect(setAppearance).toHaveBeenLastCalledWith("system", expect.objectContaining({ reducedMotion: false }));
+});
+
+it("opens the default settings tab from reader button callbacks", async () => {
+  await act(async () => button("阅读设置").click());
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("agent");
 });

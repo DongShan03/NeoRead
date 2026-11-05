@@ -122,6 +122,7 @@ export function App() {
     setSettingsTab(tab);
     setSettings(true);
   }, []);
+  const showSettings = useCallback(() => openSettings(), [openSettings]);
   useEffect(() => {
     const openSync = () => openSettings("papers");
     window.addEventListener("neoread:open-sync-settings", openSync);
@@ -557,7 +558,7 @@ export function App() {
           theme={resolvedTheme}
           jobs={jobs}
           onLibrary={showLibrary}
-          onSettings={openSettings}
+          onSettings={showSettings}
         />
         {!active && (
           <div
@@ -700,7 +701,7 @@ export function App() {
             {nav && <LibrarySidebarResizer />}
             {papers ? (
               <PaperLibrary
-                onSettings={openSettings}
+                onSettings={showSettings}
                 openDocuments={theme.documentTabs ? openDocuments : undefined}
                 documents={documents}
                 trash={trash}
@@ -838,7 +839,7 @@ export function App() {
                           processingError={processingError}
                           openDocument={openDocument}
                           favorite={favorite}
-                          onSettings={openSettings}
+                          onSettings={showSettings}
                           onOverview={setOverviewDocument}
                           onUsage={setUsageDocument}
                           detailId={detail?.id}
@@ -859,7 +860,7 @@ export function App() {
                           openDocument={openDocument}
                           favorite={favorite}
                           onMove={moveDocument}
-                          onSettings={openSettings}
+                          onSettings={showSettings}
                           onOverview={setOverviewDocument}
                           onUsage={setUsageDocument}
                           activeId={detail?.id}
@@ -1012,7 +1013,7 @@ export function App() {
           </DialogContent>
         </Dialog>
         <QuickFind open={command} onOpenChange={setCommand} documents={documents} mode={mode}
-          onDocument={openDocument} onSettings={openSettings}
+          onDocument={openDocument} onSettings={showSettings}
           onImport={() => papers ? setImportingPaper(true) : chooseFiles()}
           onSwitchLibrary={() => openLibrary(papers ? "books" : "papers")} />
         <LargePaperConfirmation />
