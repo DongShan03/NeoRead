@@ -409,3 +409,46 @@ func TestLiveClaudeDocumentWebTools(t *testing.T) {
 		t.Fatal("native web tools were not both exercised")
 	}
 }
+
+func TestClaudeDocumentWebToolsRespectSettingAndSaveSources(t *testing.T) {
+	config := AIConfig{WebSearch: &WebSearchConfig{CLIEnabled: false}}
+	if webSearchEnabled(config, "claude") {
+		t.Fatal("Claude web tools enabled by default")
+	}
+	config.WebSearch.CLIEnabled = true
+	if !webSearchEnabled(config, "claude") || !webSearchEnabled(config, "codex") || webSearchEnabled(config, "kimi") {
+		t.Fatal("CLI web permission changed for unrelated providers")
+	}
+	for _, enabled := range []bool{false, true} {
+		chat := &chatInput{WebSearch: enabled}
+		stream := claudeDocumentStream{chat: chat}
+		block := claudeToolBlock{Type: "tool_use", ID: "search", Name: "WebSearch", Input: json.RawMessage(`{"query":"synthetic public query"}`)}
+		err := stream.toolBlock(block)
+		if !enabled {
+			if errorKind(err) != ErrorCapability || len(chat.toolSnapshot()) != 0 {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := json.RawMessage(jsonText(`Web search results. Links: [{"title":"Example","url":"https://example.com/"}]`))
+		if err = stream.toolBlock(claudeToolBlock{Type: "tool_result", CallID: "search", Content: raw}); err != nil {
+			t.Fatal(err)
+		}
+		if err = stream.toolBlock(claudeToolBlock{Type: "tool_use", ID: "fetch", Name: "WebFetch", Input: json.RawMessage(`{"url":"https://example.com/"}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if err = stream.toolBlock(claudeToolBlock{Type: "tool_result", CallID: "fetch", Content: json.RawMessage(`{"url":"https://example.com/","title":"Example","text":"Verified public page"}`)}); err != nil {
+			t.Fatal(err)
+		}
+		sources := chat.webSourcesSnapshot()
+		if len(sources) != 1 || sources[0].Kind != "page" || sources[0].Text != "Verified public page" {
+			t.Fatal(sources)
+		}
+		if tools := chat.toolSnapshot(); len(tools) != 2 || tools[0].Status != "completed" || tools[1].Status != "completed" {
+			t.Fatal(tools)
+		}
+	}
+}
