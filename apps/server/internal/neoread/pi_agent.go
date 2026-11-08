@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"neoread.local/server/internal/runtimeenv"
@@ -33,25 +34,95 @@ type piRequest struct {
 	Tools    []map[string]any    `json:"tools"`
 }
 type piEvent struct {
-	Version int                                                  `json:"version"`
-	RunID   string                                               `json:"runId"`
-	Type    string                                               `json:"type"`
-	Text    string                                               `json:"text"`
-	Reset   bool                                                 `json:"reset"`
-	Message string                                               `json:"message"`
-	ID      string                                               `json:"id"`
-	Name    string                                               `json:"name"`
-	Args    json.RawMessage                                      `json:"args"`
-	Entries json.RawMessage                                      `json:"entries"`
-	Model   string                                               `json:"model"`
-	Usage   struct{ Input, Output, CacheRead, CacheWrite int64 } `json:"usage"`
+	Code     string                                               `json:"code"`
+	Status   int                                                  `json:"status"`
+	Phase    string                                               `json:"phase"`
+	Attempts int                                                  `json:"attempts"`
+	Attempt  int                                                  `json:"attempt"`
+	Max      int                                                  `json:"max"`
+	DelayMs  int                                                  `json:"delayMs"`
+	Version  int                                                  `json:"version"`
+	RunID    string                                               `json:"runId"`
+	Type     string                                               `json:"type"`
+	Text     string                                               `json:"text"`
+	Reset    bool                                                 `json:"reset"`
+	Message  string                                               `json:"message"`
+	ID       string                                               `json:"id"`
+	Name     string                                               `json:"name"`
+	Args     json.RawMessage                                      `json:"args"`
+	Entries  json.RawMessage                                      `json:"entries"`
+	Model    string                                               `json:"model"`
+	Usage    struct{ Input, Output, CacheRead, CacheWrite int64 } `json:"usage"`
 }
 
 func piImage(data []byte) map[string]string {
 	return map[string]string{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(data)}
 }
 
-func runPiWorker(ctx context.Context, root string, request piRequest, event func(piEvent) error, tool func(string, json.RawMessage) ([]any, error)) (piEvent, error) {
+func piFailure(code string) (string, error) {
+	kind, message := ErrorProtocol, "pi 模型调用失败或未正常结束，请检查模型配置后重试"
+	switch code {
+	case "http_400", "http_409", "http_422":
+		kind, message = ErrorConfiguration, "模型服务拒绝请求参数，请检查模型配置"
+	case "http_401":
+		kind, message = ErrorAuthentication, "API Key 无效，请检查模型配置"
+	case "http_403":
+		kind, message = ErrorPermission, "API Key 无权限访问此模型，请检查模型权限"
+	case "http_402":
+		kind, message = ErrorBilling, "模型服务余额或配额不足，请检查账户"
+	case "http_404":
+		kind, message = ErrorModel, "模型或 API 接口不存在，请检查模型配置"
+	case "http_408", "timeout":
+		kind, message = ErrorTimeout, "模型服务请求超时，请稍后重试"
+	case "http_429":
+		kind, message = ErrorLimit, "模型服务限流，请稍后重试"
+	case "http_5xx":
+		kind, message = ErrorUpstream, "模型服务暂时不可用，请稍后重试"
+	case "network":
+		kind, message = ErrorNetwork, "无法连接模型服务，请检查网络后重试"
+	case "stream_interrupted":
+		kind, message = ErrorNetwork, "模型服务连接中断，回答未完成"
+	case "stop_length", "output_limit":
+		kind, message = ErrorLimit, "回答超过输出上限，请缩小问题范围后重新生成"
+	case "empty_answer":
+		message = "模型未返回回答，请重试"
+	case "invalid_message":
+		message = "pi 运行消息格式无效，请重试"
+	case "stop_other":
+	default:
+		code = "unrecognized"
+	}
+	return code, generationError(kind, message)
+}
+
+func (s *Server) runPiWorker(ctx context.Context, root string, request piRequest, event func(piEvent) error, tool func(string, json.RawMessage) ([]any, error)) (result piEvent, runErr error) {
+	started := time.Now()
+	phase, code, status, attempts, visible := "bootstrap", "", 0, 0, false
+	currentMessageVisible := false
+	s.diagnosticEvent(slog.LevelInfo, "pi.run.started", "runId", request.RunID, "requestId", requestID(ctx))
+	defer func() {
+		level, outcome, kind := slog.LevelInfo, "completed", ErrorKind("")
+		if runErr != nil {
+			level, outcome = slog.LevelError, "failed"
+			if code == "" {
+				code = string(errorKind(runErr))
+			}
+		}
+		if ctx.Err() != nil {
+			runErr = ctx.Err()
+			if errors.Is(ctx.Err(), context.Canceled) {
+				level, outcome, code = slog.LevelInfo, "cancelled", "canceled"
+			} else {
+				level, outcome, code = slog.LevelError, "failed", "timeout"
+			}
+		}
+		if runErr != nil {
+			kind = errorKind(runErr)
+		}
+		s.diagnosticEvent(level, "pi.run.finished", "runId", request.RunID, "requestId", requestID(ctx),
+			"status", outcome, "phase", phase, "errorCode", kind, "reasonCode", code, "upstreamStatus", status,
+			"visibleOutput", visible, "currentMessageVisible", currentMessageVisible, "attempts", attempts, "durationMs", time.Since(started).Milliseconds())
+	}()
 	node, worker := os.Getenv("NEOREAD_NODE"), os.Getenv("NEOREAD_AGENT")
 	if node == "" || worker == "" {
 		return piEvent{}, generationError(ErrorConfiguration, "pi 运行时不可用，请重新构建或安装 NeoRead")
@@ -86,6 +157,7 @@ func runPiWorker(ctx context.Context, root string, request piRequest, event func
 			_ = cmd.Wait()
 		}
 	}()
+	phase = "request"
 	encoder := json.NewEncoder(input)
 	if err = encoder.Encode(map[string]any{"type": "start", "input": request}); err != nil {
 		return piEvent{}, err
@@ -95,11 +167,28 @@ func runPiWorker(ctx context.Context, root string, request piRequest, event func
 	var complete piEvent
 	seen := map[string]bool{}
 	for scan.Scan() {
+		if ctx.Err() != nil {
+			return piEvent{}, ctx.Err()
+		}
 		var e piEvent
 		if json.Unmarshal(scan.Bytes(), &e) != nil || e.Version != 1 || e.RunID != request.RunID || complete.Type != "" {
 			return piEvent{}, generationError(ErrorProtocol, "pi 返回了无效的运行事件")
 		}
+		attempts = max(attempts, e.Attempts)
 		switch e.Type {
+		case "retry":
+			if e.Attempt < 1 || e.Attempt > 3 || e.Max != 3 || e.DelayMs < 0 || e.DelayMs > 20000 || e.Status < 0 || e.Status > 599 || currentMessageVisible {
+				return piEvent{}, generationError(ErrorProtocol, "pi 返回了无效的重试事件")
+			}
+			phase, status = "request", e.Status
+			s.diagnosticEvent(slog.LevelWarn, "pi.request.retry", "runId", request.RunID, "requestId", requestID(ctx),
+				"phase", phase, "attempt", e.Attempt, "maxAttempts", e.Max, "delayMs", e.DelayMs,
+				"upstreamStatus", e.Status, "visibleOutput", visible, "currentMessageVisible", currentMessageVisible, "attempts", attempts)
+			if event != nil {
+				if err = event(piEvent{Type: "activity", Message: fmt.Sprintf("模型服务繁忙，正在重试（%d/%d）", e.Attempt, e.Max)}); err != nil {
+					return piEvent{}, err
+				}
+			}
 		case "tool":
 			if e.ID == "" || seen[e.ID] || tool == nil {
 				return piEvent{}, generationError(ErrorProtocol, "pi 返回了无效的工具请求")
@@ -124,10 +213,30 @@ func runPiWorker(ctx context.Context, root string, request piRequest, event func
 				return piEvent{}, generationError(ErrorProtocol, "pi 未返回完整回答和会话状态")
 			}
 			complete = e
+			phase, status = "validation", 0
 		case "error":
 			// Do not surface upstream bodies, prompts or credentials from child errors.
-			return piEvent{}, generationError(ErrorProtocol, "pi 模型调用失败或未正常结束，请检查模型配置后重试")
+			code, err = piFailure(e.Code)
+			if e.Status >= 100 && e.Status <= 599 {
+				status = e.Status
+			} else {
+				status = 0
+			}
+			switch e.Phase {
+			case "request", "stream", "validation":
+				phase = e.Phase
+			default:
+				phase = "unrecognized"
+			}
+			return piEvent{}, err
 		case "draft", "reasoning", "activity", "usage":
+			if e.Type == "draft" && e.Reset {
+				currentMessageVisible = false
+			}
+			if (e.Type == "draft" || e.Type == "reasoning") && e.Text != "" {
+				visible, phase, status = true, "stream", 0
+				currentMessageVisible = true
+			}
 			if event != nil {
 				if err = event(e); err != nil {
 					return piEvent{}, err
@@ -282,7 +391,7 @@ func streamPiChat(ctx context.Context, c APIConnection, req completionRequest, i
 	}
 	request.System = webInstructions(request.System, in.Chat.WebSearch)
 	root := in.Chat.server.Store.Root
-	complete, err := runPiWorker(ctx, root, request, func(e piEvent) error {
+	complete, err := in.Chat.server.runPiWorker(ctx, root, request, func(e piEvent) error {
 		switch e.Type {
 		case "draft":
 			if emit != nil {
@@ -295,6 +404,9 @@ func streamPiChat(ctx context.Context, c APIConnection, req completionRequest, i
 		case "activity":
 			if a != nil && a.activity != nil {
 				return a.activity("reading", "", e.Message)
+			}
+			if in.Chat.activity != nil {
+				return in.Chat.activity("writing", "", e.Message)
 			}
 		case "usage":
 			if in.UsageSink != nil {

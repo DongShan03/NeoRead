@@ -1,5 +1,7 @@
 import { createInterface } from "node:readline";
 import { runAgent, type AgentRequest, type ToolResult } from "./runtime";
+import { AgentFailure } from "./failure";
+import { ModelTransport } from "./transport";
 
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const controller = new AbortController();
@@ -28,47 +30,28 @@ lines.on("line", (line) => {
       started = true;
       const input = message.input as AgentRequest;
       runId = input.runId;
-      // API keys must never follow redirects or escape the configured origin.
-      const upstream = new URL(input.model.baseUrl);
-      if (input.endpoint && new URL(input.endpoint).origin !== upstream.origin)
-        throw new Error("模型端点不匹配");
-      const fetch = globalThis.fetch;
-      globalThis.fetch = async (url, init) => {
-        const target = new URL(url instanceof Request ? url.url : String(url));
-        if (target.origin !== upstream.origin)
-          throw new Error("模型请求目标不匹配");
-        const headers = new Headers(
-          init?.headers ?? (url instanceof Request ? url.headers : undefined),
-        );
-        if (!input.key) {
-          headers.delete("authorization");
-          headers.delete("x-api-key");
-        }
-        let body = init?.body;
-        if (input.payload && typeof body === "string") {
-          const payload = JSON.parse(body);
-          for (const field of [
-            "reasoning_effort",
-            "thinking",
-            "output_config",
-            "reasoning_split",
-            "max_tokens",
-            "max_completion_tokens",
-          ])
-            delete payload[field];
-          Object.assign(payload, input.payload);
-          body = JSON.stringify(payload);
-        }
-        return fetch(input.endpoint || url, {
-          ...init,
-          body,
-          headers,
-          redirect: "error",
-        });
+      let currentMessageVisible = false;
+      const emit = (event: Record<string, unknown>) => {
+        if (event.type === "draft" && event.reset)
+          currentMessageVisible = false;
+        if (
+          (event.type === "draft" || event.type === "reasoning") &&
+          event.text
+        )
+          currentMessageVisible = true;
+        send(event);
       };
+      const transport = new ModelTransport(
+        input,
+        globalThis.fetch,
+        emit,
+        controller.signal,
+        () => currentMessageVisible,
+      );
+      globalThis.fetch = transport.fetch;
       void runAgent(
         input,
-        send,
+        emit,
         async (name, args, signal) => {
           signal?.throwIfAborted();
           const id = String(++counter);
@@ -80,16 +63,27 @@ lines.on("line", (line) => {
         controller.signal,
       )
         .then((result) => {
-          send({ type: "complete", ...result });
+          send({ type: "complete", ...result, attempts: transport.attempts });
         })
         .catch((error: unknown) => {
-          const text =
-            error instanceof Error ? error.message : "Agent 运行失败";
+          if (controller.signal.aborted) return;
+          const failure =
+            transport.failure ??
+            (error instanceof AgentFailure
+              ? error
+              : new AgentFailure(
+                  transport.phase === "stream"
+                    ? "stream_interrupted"
+                    : "stop_other",
+                  transport.phase,
+                ));
           send({
             type: "error",
-            message: input.key
-              ? text.split(input.key).join("[redacted]")
-              : text,
+            code: failure.code,
+            status: failure.status ?? transport.status,
+            phase: failure.phase,
+            attempts: transport.attempts,
+            message: failure.message,
           });
           process.exitCode = 1;
         })
@@ -105,7 +99,12 @@ lines.on("line", (line) => {
     } else if (message.type === "cancel" && message.runId === runId) close();
     else throw new Error("不兼容的 Agent 消息");
   } catch {
-    send({ type: "error", message: "Agent 消息格式无效" });
+    send({
+      type: "error",
+      code: "invalid_message",
+      phase: "validation",
+      message: "Agent 消息格式无效",
+    });
     process.exitCode = 1;
     close();
     lines.close();

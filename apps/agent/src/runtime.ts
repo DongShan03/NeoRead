@@ -19,6 +19,7 @@ import {
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { Type } from "typebox";
+import { AgentFailure, type FailureCode } from "./failure";
 
 export interface AgentRequest {
   version: 1;
@@ -56,10 +57,10 @@ export async function runAgent(
   signal: AbortSignal,
 ) {
   if (input.version !== 1 || !input.runId || !input.model || !input.prompt)
-    throw new Error("不兼容的 Agent 请求");
+    throw new AgentFailure("invalid_message", "validation");
   const model = input.model;
   if (!["openai-completions", "anthropic-messages"].includes(model.api))
-    throw new Error("不支持的模型协议");
+    throw new AgentFailure("invalid_message", "validation");
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
     modelsStore: new InMemoryModelsStore(),
@@ -125,6 +126,8 @@ export async function runAgent(
     sessionManager: manager,
     thinkingLevel: input.effort,
     settingsManager: SettingsManager.inMemory({
+      // pi retries whole assistant turns, including errors after streamed text.
+      // Only ModelTransport may retry before a response is handed to pi.
       retry: { enabled: false, provider: { maxRetries: 0 } },
       cacheWarming: "off",
       compaction: {
@@ -139,12 +142,11 @@ export async function runAgent(
   });
   const maxToolRounds = 255;
   let rounds = 0,
-    aborted = false,
     outputBytes = 0,
     reasoningBytes = 0,
     draftBytes = 0;
+  let failure: AgentFailure | undefined;
   const stop = () => {
-    aborted = true;
     void session.abort();
   };
   signal.addEventListener("abort", stop, { once: true });
@@ -184,6 +186,7 @@ export async function runAgent(
           reasoningBytes > 1024 * 1024 ||
           draftBytes > 1024 * 1024
         ) {
+          failure = new AgentFailure("output_limit", "stream");
           stop();
           return;
         }
@@ -195,6 +198,24 @@ export async function runAgent(
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
       const m = event.message;
+      if (
+        !signal.aborted &&
+        !failure &&
+        m.stopReason !== "stop" &&
+        m.stopReason !== "toolUse"
+      ) {
+        let code: FailureCode = "stop_other";
+        if (m.stopReason === "length") code = "stop_length";
+        else if (
+          m.stopReason === "error" &&
+          (!m.errorMessage?.startsWith("Provider finish_reason:") ||
+            m.errorMessage === "Provider finish_reason: network_error")
+        )
+          code = "stream_interrupted";
+        failure = new AgentFailure(code, "stream");
+        // Stop post-turn compaction recovery from replaying a failed answer.
+        stop();
+      }
       emit({ type: "usage", model: m.model, usage: m.usage });
       if (m.content.some((part) => part.type === "toolCall"))
         emit({ type: "draft", reset: true, text: "" });
@@ -213,19 +234,15 @@ export async function runAgent(
     });
     await session.waitForIdle();
     signal.throwIfAborted();
-    if (aborted) throw new Error("Agent 输出超过限制");
+    if (failure) throw failure;
     const last = session.messages.at(-1);
     if (!last || last.role !== "assistant" || last.stopReason !== "stop")
-      throw new Error(
-        last?.role === "assistant"
-          ? last.errorMessage || `模型未正常完成：${last.stopReason}`
-          : "模型未返回完整回答",
-      );
+      throw new AgentFailure("stop_other", "validation");
     const text = last.content
       .filter((part) => part.type === "text")
       .map((part) => part.text)
       .join("");
-    if (!text.trim()) throw new Error("模型未返回回答");
+    if (!text.trim()) throw new AgentFailure("empty_answer", "validation");
     // Images stay in NeoRead's document cache. Historical attachments must be
     // re-read through scoped tools, never silently become unbounded DB blobs.
     const entries = JSON.parse(
@@ -247,8 +264,10 @@ export async function runAgent(
       ),
     ) as FileEntry[];
     if (Buffer.byteLength(JSON.stringify(entries)) > 32 * 1024 * 1024)
-      throw new Error("会话记录过大，请新建会话；已有历史已保留");
+      throw new AgentFailure("output_limit", "validation");
     return { text, entries };
+  } catch (error) {
+    throw failure ?? error;
   } finally {
     signal.removeEventListener("abort", stop);
     unsubscribe();
