@@ -1,4 +1,5 @@
 import { sentenceTextRanges } from "./pdf-sentence-matching";
+import { lineBoxes, type PDFRect } from "./pdf-line-boxes";
 import type { Annotation, PDFLocation, TOCItem } from "@neoread/core";
 import type {
   DocumentInitParameters,
@@ -13,7 +14,6 @@ import type {
 // become Highlight annotations; notes, question text and AI answers become
 // their comments. Underlines become a thin strip under the text. Bookmarks are exported separately as navigation entries when requested.
 
-type Rect = { x: number; y: number; width: number; height: number };
 /** A quadrilateral in PDF user space: top-left, top-right, bottom-left, bottom-right. */
 type Quad = [number, number, number, number, number, number, number, number];
 
@@ -39,36 +39,6 @@ export function hexColor(value: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Horizontal gap, as a fraction of the page width, still joined into one box. */
-const wordGap = 0.01;
-
-/**
- * Overlapping rects of one text run, as returned by Range.getClientRects(),
- * become one box. Rects at the same height in different columns stay apart.
- */
-export function lineBoxes(rects: Rect[]): Rect[] {
-  const lines: Rect[] = [];
-  for (const r of [...rects].sort((a, b) => a.y - b.y || a.x - b.x)) {
-    const line = lines.find((l) => {
-      const overlap =
-        Math.min(l.y + l.height, r.y + r.height) - Math.max(l.y, r.y);
-      const gap = Math.max(l.x, r.x) - Math.min(l.x + l.width, r.x + r.width);
-      return overlap > Math.min(l.height, r.height) / 2 && gap <= wordGap;
-    });
-    if (!line) {
-      lines.push({ ...r });
-      continue;
-    }
-    const right = Math.max(line.x + line.width, r.x + r.width);
-    const bottom = Math.max(line.y + line.height, r.y + r.height);
-    line.x = Math.min(line.x, r.x);
-    line.y = Math.min(line.y, r.y);
-    line.width = right - line.x;
-    line.height = bottom - line.y;
-  }
-  return lines;
-}
-
 /** The comment written into the PDF, or "" for none. */
 export function commentText(annotation: Annotation, answer?: string) {
   const note = annotation.note.trim();
@@ -82,14 +52,14 @@ const compact = (text: string) => text.replace(/\s+/g, "").toLowerCase();
 
 // NeoRead stores rects relative to the displayed page, which includes /Rotate
 // and the crop box; the viewport maps them back to PDF user space.
-function displayQuads(page: PDFPageProxy, rects: Rect[]): Quad[] {
+function displayQuads(page: PDFPageProxy, rects: PDFRect[]): Quad[] {
   const viewport = page.getViewport({ scale: 1 });
   const point = (x: number, y: number) =>
     viewport.convertToPdfPoint(x * viewport.width, y * viewport.height) as [
       number,
       number,
     ];
-  return lineBoxes(rects).map((r) => [
+  return lineBoxes(rects, viewport.width / viewport.height).map((r) => [
     ...point(r.x, r.y),
     ...point(r.x + r.width, r.y),
     ...point(r.x, r.y + r.height),
@@ -166,7 +136,7 @@ function editorValue(
 
 async function sentenceQuads(
   page: PDFPageProxy,
-  block: Rect,
+  block: PDFRect,
   sources: string[],
 ): Promise<Quad[]> {
   const viewport = page.getViewport({ scale: 1 });

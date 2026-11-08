@@ -4,6 +4,7 @@ import { act } from "react";
 import { PDFBlockOverlay } from "./pdf-blocks";
 import type { Annotation, PDFBlock } from "@neoread/core";
 import { PDFAnnotationLayer } from "./pdf-annotations";
+import * as pdfLineBoxes from "./pdf-line-boxes";
 import { readFileSync } from "node:fs";
 
 let host: HTMLDivElement;
@@ -94,6 +95,135 @@ it("opens all overlapping records at the clicked line and removes only deleted m
   layer.paint();
   expect(host.querySelectorAll(".neoread-highlight")).toHaveLength(2);
 });
+it.each(["highlight", "underline"] as const)(
+  "paints CJK %s as continuous lines and keeps hover active between glyphs",
+  (kind) => {
+    const mark = annotation("cjk", kind);
+    if (mark.location.type !== "pdf") throw new Error("Expected PDF location");
+    mark.location.rects = [
+      { x: 0.1, y: 0.1, width: 0.02, height: 0.02 },
+      { x: 0.124, y: 0.102, width: 0.02, height: 0.018 },
+      { x: 0.148, y: 0.099, width: 0.02, height: 0.022 },
+      { x: 0.1, y: 0.15, width: 0.02, height: 0.02 },
+    ];
+    const saved = JSON.stringify(mark.location);
+    layer.setAnnotations([mark]);
+    const rects = [...host.querySelectorAll<HTMLElement>(".neoread-highlight")];
+    expect(rects).toHaveLength(2);
+    const first = rects[0];
+    expect(Number.parseFloat(first.style.top)).toBeCloseTo(9.9);
+    expect(Number.parseFloat(first.style.height)).toBeCloseTo(2.2);
+    expect(Number.parseFloat(first.style.width)).toBeCloseTo(6.8);
+    // This point sits in the original 0.120–0.124 gap between two glyphs.
+    const clientX = 20 + 0.122 * 600;
+    pointer("pointermove", { clientX });
+    expect(host.querySelectorAll("[data-hovered]")).toHaveLength(2);
+    const observer = new MutationObserver(() => {});
+    observer.observe(host, {
+      subtree: true,
+      attributes: true,
+      childList: true,
+    });
+    try {
+      for (const x of [0.119, 0.122, 0.125])
+        pointer("pointermove", { clientX: 20 + x * 600 });
+      layer.paint();
+      expect(observer.takeRecords()).toHaveLength(0);
+    } finally {
+      observer.disconnect();
+    }
+    pointer("pointerdown", { clientX });
+    expect(pointer("click", { clientX }).defaultPrevented).toBe(true);
+    const target = activate.mock.calls[0][0];
+    expect(target.ids).toEqual(["cjk"]);
+    expect(target.anchor.top).toBeCloseTo(40 + 0.099 * 800);
+    expect(target.anchor.bottom).toBeCloseTo(40 + 0.121 * 800);
+    expect(JSON.stringify(mark.location)).toBe(saved);
+  },
+);
+it("places one continuous underline at the bottom of each merged line", () => {
+  const style = document.createElement("style");
+  // jsdom needs a literal colour to compute border shorthand properties.
+  style.textContent = readFileSync("apps/web/src/style.css", "utf8")
+    .match(/\.neoread-(?:annotation|highlight)[^{]*\{[^}]*\}/g)!
+    .join("\n")
+    .replaceAll("var(--annotation-color)", "#e6b94c");
+  document.head.append(style);
+  const mark = annotation("underline", "underline");
+  if (mark.location.type !== "pdf") throw new Error("Expected PDF location");
+  mark.location.rects = [
+    { x: 0.1, y: 0.1, width: 0.02, height: 0.02 },
+    { x: 0.122, y: 0.102, width: 0.02, height: 0.022 },
+  ];
+  try {
+    layer.setAnnotations([mark]);
+    const rects = host.querySelectorAll<HTMLElement>(".neoread-highlight");
+    expect(rects).toHaveLength(1);
+    const line = rects[0];
+    expect(
+      Number.parseFloat(line.style.top) + Number.parseFloat(line.style.height),
+    ).toBeCloseTo(12.4);
+    expect(getComputedStyle(line).borderBottomWidth).toBe("2px");
+    expect(getComputedStyle(line).borderBottomStyle).toBe("solid");
+  } finally {
+    style.remove();
+  }
+});
+it("keeps same-height columns separate for drawing and hit testing", () => {
+  const mark = annotation("columns");
+  if (mark.location.type !== "pdf") throw new Error("Expected PDF location");
+  mark.location.rects = [
+    { x: 0.1, y: 0.1, width: 0.3, height: 0.02 },
+    { x: 0.54, y: 0.1, width: 0.3, height: 0.02 },
+  ];
+  layer.setAnnotations([mark]);
+  expect(host.querySelectorAll(".neoread-highlight")).toHaveLength(2);
+  pointer("pointermove", { clientX: 20 + 0.47 * 600 });
+  expect(host.querySelectorAll("[data-hovered]")).toHaveLength(0);
+  pointer("pointermove", { clientX: 20 + 0.6 * 600 });
+  expect(host.querySelectorAll("[data-hovered]")).toHaveLength(2);
+});
+it("reuses line boxes for repaint, pointer moves, equivalent records and zoom", () => {
+  const merge = vi.spyOn(pdfLineBoxes, "lineBoxes");
+  const mark = annotation("cached");
+  if (mark.location.type !== "pdf") throw new Error("Expected PDF location");
+  mark.location.rects = [
+    { x: 0.1, y: 0.1, width: 0.02, height: 0.02 },
+    { x: 0.135, y: 0.101, width: 0.02, height: 0.02 },
+  ];
+  try {
+    layer.setAnnotations([mark]);
+    expect(merge).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll(".neoread-highlight")).toHaveLength(1);
+    for (let i = 0; i < 10; i++) {
+      layer.paint(1);
+      pointer("pointermove");
+    }
+    layer.setAnnotations([JSON.parse(JSON.stringify(mark))]);
+    vi.spyOn(host.firstElementChild!, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(20, 40, 1200, 1600),
+    );
+    layer.paint();
+    expect(merge).toHaveBeenCalledTimes(1);
+    // Changing the displayed aspect ratio must reconsider the physical gap.
+    vi.spyOn(host.firstElementChild!, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(20, 40, 1600, 800),
+    );
+    layer.paint();
+    expect(merge).toHaveBeenCalledTimes(2);
+    expect(host.querySelectorAll(".neoread-highlight")).toHaveLength(2);
+    layer.setAnnotations([mark]);
+    mark.location.rects[0].x = 0.2;
+    layer.paint();
+    expect(merge).toHaveBeenCalledTimes(3);
+    // Removing the annotation also releases its geometry cache.
+    layer.setAnnotations([]);
+    layer.setAnnotations([mark]);
+    expect(merge).toHaveBeenCalledTimes(4);
+  } finally {
+    merge.mockRestore();
+  }
+});
 it("composites overlapping rectangles once per annotation, including on hover and repaint", () => {
   // Use the production rules: per-rectangle opacity would darken this overlap.
   const style = document.createElement("style");
@@ -114,7 +244,7 @@ it("composites overlapping rectangles once per annotation, including on hover an
       const rects = [
         ...host.querySelectorAll<HTMLElement>(".neoread-highlight"),
       ];
-      expect(rects).toHaveLength(3);
+      expect(rects).toHaveLength(1);
       const group = rects[0].parentElement!;
       expect(group).not.toBe(host.firstElementChild);
       expect(rects.every((rect) => rect.parentElement === group)).toBe(true);
@@ -342,7 +472,8 @@ it("updates in-place color, kind and geometry while leaving another page untouch
     first.location.rects!.push({ x: 0, y: 0, width: 1, height: 1 });
     layer.paint();
     expect(group.style.getPropertyValue("--annotation-color")).toBe("#facc15");
-    expect(group.children).toHaveLength(2);
+    // The full-page rectangle contains the prior line and normalizes to one box.
+    expect(group.children).toHaveLength(1);
     expect(group.firstElementChild).toBe(rect);
     layer.setAnnotations([second]);
     expect(group.isConnected).toBe(false);

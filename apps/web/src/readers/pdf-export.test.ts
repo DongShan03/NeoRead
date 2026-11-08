@@ -6,9 +6,9 @@ import {
   bottomStrip,
   commentText,
   hexColor,
-  lineBoxes,
   type ExportContext,
 } from "./pdf-export";
+import { lineBoxes } from "./pdf-line-boxes";
 
 const sample = new URL(
   "../../public/samples/reading-notes.pdf",
@@ -47,12 +47,73 @@ async function exportAndReopen(
   const pages = [];
   for (let i = 1; i <= pdf.numPages; i++)
     pages.push(await (await pdf.getPage(i)).getAnnotations());
-  const text = await (await pdf.getPage(1)).getTextContent();
+  const page = await pdf.getPage(1);
+  const text = await page.getTextContent();
+  const viewport = page.getViewport({ scale: 1 });
   await task.destroy();
-  return { result, original, pages, text };
+  return { result, original, pages, text, viewport };
 }
 
 describe("annotated PDF export", () => {
+  it("exports the same CJK line unions and underline bottoms as the screen", async () => {
+    // The 0.015 page-width gap exceeds the old fixed 0.01 threshold. On the
+    // portrait sample it remains below 0.65 physical line heights.
+    const rects = [
+      { x: 0.1, y: 0.2, width: 0.02, height: 0.02 },
+      { x: 0.135, y: 0.201, width: 0.02, height: 0.021 },
+      { x: 0.54, y: 0.2, width: 0.02, height: 0.02 },
+      { x: 0.1, y: 0.24, width: 0.02, height: 0.02 },
+    ];
+    const location = { type: "pdf" as const, page: 1, rects };
+    const { result, pages, viewport } = await exportAndReopen([
+      mark({ id: "cjk-highlight", location, note: "高亮" }),
+      mark({
+        id: "cjk-underline",
+        location,
+        kind: "underline",
+        note: "下划线",
+      }),
+    ]);
+    expect(result).toMatchObject({ exported: 2, skipped: 0 });
+    const boxes = lineBoxes(rects, viewport.width / viewport.height);
+    expect(boxes).toHaveLength(3);
+    const highlight = pages[0].find((a) => a.contentsObj.str === "高亮")!;
+    const underline = pages[0].find((a) => a.contentsObj.str === "下划线")!;
+    expect(highlight.quadPoints).toHaveLength(boxes.length * 8);
+    expect(underline.quadPoints).toHaveLength(boxes.length * 8);
+    boxes.forEach((box, index) => {
+      const [left, top] = viewport.convertToPdfPoint(
+        box.x * viewport.width,
+        box.y * viewport.height,
+      );
+      const [right, bottom] = viewport.convertToPdfPoint(
+        (box.x + box.width) * viewport.width,
+        (box.y + box.height) * viewport.height,
+      );
+      const quad = Array.from(highlight.quadPoints).slice(
+        index * 8,
+        index * 8 + 8,
+      );
+      const strip = Array.from(underline.quadPoints).slice(
+        index * 8,
+        index * 8 + 8,
+      );
+      [left, top, right, top, left, bottom, right, bottom].forEach((value, i) =>
+        expect(quad[i]).toBeCloseTo(value, 3),
+      );
+      [
+        left,
+        bottom + 1.5,
+        right,
+        bottom + 1.5,
+        left,
+        bottom,
+        right,
+        bottom,
+      ].forEach((value, i) => expect(strip[i]).toBeCloseTo(value, 3));
+    });
+  }, 30_000);
+
   it("appends highlights, comments and underline strokes to the original", async () => {
     const { result, original, pages } = await exportAndReopen(
       [
@@ -267,23 +328,6 @@ describe("page geometry", () => {
 });
 
 describe("export helpers", () => {
-  it("merges the overlapping boxes of a line", () => {
-    expect(
-      lineBoxes([
-        { x: 0.3, y: 0.1, width: 0.2, height: 0.02 },
-        { x: 0.1, y: 0.101, width: 0.25, height: 0.019 },
-        { x: 0.1, y: 0.13, width: 0.4, height: 0.02 },
-      ]),
-    ).toEqual([
-      {
-        x: 0.1,
-        y: 0.1,
-        width: expect.closeTo(0.4),
-        height: expect.closeTo(0.02),
-      },
-      { x: 0.1, y: 0.13, width: 0.4, height: 0.02 },
-    ]);
-  });
   it("cuts the underline strip along the quad's own up direction", () => {
     // Horizontal line, 10 pt tall: keep the bottom 1.5 pt.
     expect(bottomStrip([0, 10, 50, 10, 0, 0, 50, 0])).toEqual([
@@ -293,15 +337,6 @@ describe("export helpers", () => {
     expect(bottomStrip([10, 0, 10, 50, 20, 0, 20, 50])).toEqual([
       18.5, 0, 18.5, 50, 20, 0, 20, 50,
     ]);
-  });
-  it("keeps same-height rects in different columns apart", () => {
-    const left = { x: 0.08, y: 0.4, width: 0.38, height: 0.02 };
-    const right = { x: 0.54, y: 0.401, width: 0.38, height: 0.02 };
-    expect(lineBoxes([left, right])).toEqual([left, right]);
-    // Neighbouring words on one line still join.
-    expect(
-      lineBoxes([left, { ...right, x: left.x + left.width + 0.005 }]),
-    ).toHaveLength(1);
   });
   it("writes notes, questions and answers as comments", () => {
     expect(commentText(mark({ note: " 备注 " }))).toBe("备注");
