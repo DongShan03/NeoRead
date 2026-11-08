@@ -97,6 +97,9 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	out := &chatStreamWriter{w: w, cancel: cancel}
 	if in.Chat != nil {
 		in.Chat.toolEvent = func(v ToolActivity) error { return out.send("tool", v) }
+		in.Chat.activity = func(phase, tool, message string) error {
+			return out.send("activity", map[string]string{"phase": phase, "tool": tool, "message": message})
+		}
 		defer func() {
 			status := "failed"
 			if ctx.Err() != nil {

@@ -127,6 +127,23 @@ ZIP 包含：
 
 API 厂商规则、实际强度映射、上游错误分类和请求关联字段见 [API 厂商适配与错误诊断](api-provider-compatibility.md)。新增 API 错误事件只记录安全的结构化证据，不保存厂商可能回显正文的原始错误 message。
 
+### API Agent 的 pi 请求重试
+
+`pi.run.started / pi.request.retry / pi.run.finished` 通过 `runId` 与 HTTP `requestId` 关联一次 worker 运行。重试事件为 warn，记录 `attempt`（本请求第几次重试）、`maxAttempts`、`delayMs`、`upstreamStatus`、`visibleOutput`、`currentMessageVisible` 与累计的 `attempts`（已发出的模型 HTTP 请求数，包含上下文整理）。终态记录 `status=completed/failed/cancelled`、`phase=bootstrap/request/stream/validation`、`errorCode`、`reasonCode`、上游状态、累计请求数、是否已有可见内容及 `durationMs`。`visibleOutput` 表示本次运行是否曾显示过草稿或思考，`currentMessageVisible` 表示最近一次 `draft reset` 之后当前助手消息是否显示过这些内容，重试校验使用后者。worker 完成后，业务保存结果以 `chat.finish` 和 run 状态为准。取消为 info，失败为 error。未观察到上游状态时为 0，未知分类与阶段归一化为 `unrecognized`。
+
+`reasonCode` 区分 `http_400/401/402/403/404/408/409/422/429`、`http_5xx`、`network`、`timeout`、`stream_interrupted`、`stop_length`、`stop_other`、`empty_answer`、`output_limit` 和 `invalid_message`。日志只记录固定分类、计数和关联标识，worker 错误正文和 stderr 均不写入诊断。Go 事件直接进入现有诊断 Store。
+
+pi 1.3.0 的会话重试在 `_handlePostAgentRun / _prepareRetry` 中根据失败消息决定重发，`isRetryableAssistantError` 包含断流特征，未检查已有可见正文。因此保留 `retry.enabled=false` 和 `retry.provider.maxRetries=0`，由 fetch 层在交付 2xx 响应前有限重试。失败的助手轮次同时终止 pi 的后置上下文恢复，避免长度截断或断流后重新生成。当前助手消息显示草稿或思考后禁止请求阶段重试，`draft reset` 清除该消息的可见标记，后续工具轮的新请求可继续有限重试。
+
+人工验收使用独立开发书库和本地 loopback OpenAI 兼容模拟服务，使用虚构 Key。
+
+1. 先完成模型配置和能力探测，再将聊天响应设为首次返回 429 或 503、下一次返回正常 SSE。发送问题，确认出现“模型服务繁忙，正在重试（1/3）”，回答成功后只保存一份完整内容。导出诊断，检查 retry 及 completed 事件。
+2. 将 429 响应的 `Retry-After` 设为 6 秒，确认再次请求至少等待 6 秒，设为 999 秒时等待上限为 20 秒。退避时点击停止，确认没有后续请求，终态为 cancelled。
+3. 返回 401，确认只请求一次，界面显示 API Key 无效及重新生成入口。连续返回 503，确认总共请求四次、重试三次，诊断包含 `reasonCode=http_5xx`、`upstreamStatus=503` 与 `attempts=4`。
+4. 先返回 200 SSE 和一段正文，再断开连接或省略 `finish_reason`。确认界面保留未完成内容和重新生成入口，没有新模型请求或成功保存，诊断为 `stream_interrupted`、`phase=stream`、`visibleOutput=true`。
+5. 模拟服务的错误正文写入可识别的正文与凭据标记，确认界面错误和导出的日志均不含这些标记。输出长度截断使用 `finish_reason=length`，确认显示输出上限提示且只请求一次。
+6. 让第一轮先输出思考并调用工具，第二轮首次返回 503、重试后返回正常 SSE。确认工具只执行一次、思考只显示一次且回答完整保存，retry 诊断为 `visibleOutput=true`、`currentMessageVisible=false`。
+
 ## Codex 历史可见性
 
 Codex 对话的可恢复归档与恢复见 [Codex 历史可见性](codex-history-visibility.md)。`codex.history.visibility_applied` 只记录隐藏状态、已处理和失败数量；`archive_failed` 只记录固定错误类别。不记录线程日志、原始 RPC 错误、凭据或聊天正文。

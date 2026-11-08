@@ -42,6 +42,7 @@ type chatInput struct {
 	Tools           []ToolActivity
 	WebSources      []WebSource
 	toolMu          sync.Mutex
+	activity        func(string, string, string) error
 	toolEvent       func(ToolActivity) error
 	piConversation  *documentConversation
 	piProvider      string
