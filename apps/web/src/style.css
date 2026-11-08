@@ -7,8 +7,12 @@
 :root {
   --shadow-xs: 0 1px 3px rgb(0 0 0 / 7%);
   --shadow-sm: 0 2px 8px rgb(0 0 0 / 8%);
-  --shadow-md: 0 8px 28px rgb(0 0 0 / 12%), 0 2px 8px rgb(0 0 0 / 6%);
-  --shadow-lg: 0 12px 36px rgb(0 0 0 / 16%), 0 2px 8px rgb(0 0 0 / 8%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(0 0 0 / 12%), 0 2px 8px rgb(0 0 0 / 6%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(0 0 0 / 16%), 0 2px 8px rgb(0 0 0 / 8%);
+  --shadow-md: var(--shadow-md-elevation);
+  --shadow-lg: var(--shadow-lg-elevation);
   --accent-strong: #438cf5;
   --accent-strong-soft: color-mix(
     in srgb,
@@ -43,12 +47,12 @@
 .dark {
   --shadow-xs: 0 1px 3px rgb(0 0 0 / 22%), 0 0 0 1px rgb(255 255 255 / 5%);
   --shadow-sm: 0 2px 8px rgb(0 0 0 / 28%), 0 0 0 1px rgb(255 255 255 / 5%);
-  --shadow-md:
-    0 8px 28px rgb(0 0 0 / 32%), 0 2px 8px rgb(0 0 0 / 22%),
-    0 0 0 1px rgb(255 255 255 / 5%);
-  --shadow-lg:
-    0 12px 36px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 28%),
-    0 0 0 1px rgb(255 255 255 / 5%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(0 0 0 / 32%), 0 2px 8px rgb(0 0 0 / 22%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 28%);
+  --shadow-md: var(--shadow-md-elevation), 0 0 0 1px rgb(255 255 255 / 5%);
+  --shadow-lg: var(--shadow-lg-elevation), 0 0 0 1px rgb(255 255 255 / 5%);
   --accent-strong: #438cf5;
   --accent-strong-soft: color-mix(
     in srgb,
@@ -80,12 +84,12 @@
 .dark[data-dark-contrast="high"] {
   --shadow-xs: 0 1px 3px rgb(0 0 0 / 32%), 0 0 0 1px rgb(255 255 255 / 8%);
   --shadow-sm: 0 2px 8px rgb(0 0 0 / 40%), 0 0 0 1px rgb(255 255 255 / 8%);
-  --shadow-md:
-    0 8px 28px rgb(0 0 0 / 48%), 0 2px 8px rgb(0 0 0 / 32%),
-    0 0 0 1px rgb(255 255 255 / 8%);
-  --shadow-lg:
-    0 12px 36px rgb(0 0 0 / 56%), 0 2px 8px rgb(0 0 0 / 40%),
-    0 0 0 1px rgb(255 255 255 / 8%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(0 0 0 / 48%), 0 2px 8px rgb(0 0 0 / 32%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(0 0 0 / 56%), 0 2px 8px rgb(0 0 0 / 40%);
+  --shadow-md: var(--shadow-md-elevation), 0 0 0 1px rgb(255 255 255 / 8%);
+  --shadow-lg: var(--shadow-lg-elevation), 0 0 0 1px rgb(255 255 255 / 8%);
   --accent-strong: #438cf5;
   --accent-strong-soft: color-mix(
     in srgb,
@@ -155,8 +159,12 @@
 :root[data-theme="sepia"] {
   --shadow-xs: 0 1px 3px rgb(31 30 29 / 7%);
   --shadow-sm: 0 2px 8px rgb(31 30 29 / 8%);
-  --shadow-md: 0 8px 28px rgb(31 30 29 / 12%), 0 2px 8px rgb(31 30 29 / 6%);
-  --shadow-lg: 0 12px 36px rgb(31 30 29 / 16%), 0 2px 8px rgb(31 30 29 / 8%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(31 30 29 / 12%), 0 2px 8px rgb(31 30 29 / 6%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(31 30 29 / 16%), 0 2px 8px rgb(31 30 29 / 8%);
+  --shadow-md: var(--shadow-md-elevation);
+  --shadow-lg: var(--shadow-lg-elevation);
   --accent-strong: var(--brand);
   --accent-strong-soft: color-mix(
     in srgb,
@@ -269,6 +277,7 @@ svg:is(.lucide-trash, .lucide-trash-2) {
 :is(button, [role="menuitem"]):has(> svg:is(.lucide-trash, .lucide-trash-2)) {
   color: var(--destructive) !important;
 }
+/* Preserve shadcn's ring/shadow composition; these surfaces already have a ring. */
 [data-slot="popover-content"],
 [data-slot="hover-card-content"],
 [data-slot="select-content"],
@@ -276,11 +285,11 @@ svg:is(.lucide-trash, .lucide-trash-2) {
 [data-slot="dropdown-menu-sub-content"],
 [data-slot="context-menu-content"],
 [data-slot="context-menu-sub-content"] {
-  box-shadow: var(--shadow-md);
+  --tw-shadow: var(--shadow-md-elevation);
 }
 [data-slot="dialog-content"],
 [data-slot="alert-dialog-content"] {
-  box-shadow: var(--shadow-lg);
+  --tw-shadow: var(--shadow-lg-elevation);
 }
 /* The citation window is transparent and sized to its dialog. */
 html[data-citation-window] {
@@ -301,6 +310,7 @@ html[data-citation-window]
 }
 html[data-citation-window]
   :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) {
+  --tw-shadow: 0 0 #0000;
   max-width: calc(100% - 2rem);
 }
 /* Without a title bar, the dialog header moves the window. */
@@ -4110,7 +4120,6 @@ textarea.citation-preview {
   animation: none;
   transition: none;
   overflow: hidden;
-  box-shadow: var(--shadow-lg);
 }
 .link-preview-drag {
   flex: 1;
