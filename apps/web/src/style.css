@@ -5,6 +5,20 @@
 @custom-variant motion-reduce (&:where([data-reduced-motion="true"], [data-reduced-motion="true"] *));
 @custom-variant motion-safe (&:where(:root:not([data-reduced-motion="true"]), :root:not([data-reduced-motion="true"]) *));
 :root {
+  --shadow-xs: 0 1px 3px rgb(0 0 0 / 7%);
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 8%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(0 0 0 / 12%), 0 2px 8px rgb(0 0 0 / 6%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(0 0 0 / 16%), 0 2px 8px rgb(0 0 0 / 8%);
+  --shadow-md: var(--shadow-md-elevation);
+  --shadow-lg: var(--shadow-lg-elevation);
+  --accent-strong: #438cf5;
+  --accent-strong-soft: color-mix(
+    in srgb,
+    var(--accent-strong) 16%,
+    transparent
+  );
   color-scheme: light;
   --font-size-small: 11px;
   --library-progress: #6b8373;
@@ -31,6 +45,20 @@
 /* Graphite: a warm charcoal paper. Shell #211e21, surface #2f2c2f,
    wear #777477. */
 .dark {
+  --shadow-xs: 0 1px 3px rgb(0 0 0 / 22%), 0 0 0 1px rgb(255 255 255 / 5%);
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 28%), 0 0 0 1px rgb(255 255 255 / 5%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(0 0 0 / 32%), 0 2px 8px rgb(0 0 0 / 22%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 28%);
+  --shadow-md: var(--shadow-md-elevation), 0 0 0 1px rgb(255 255 255 / 5%);
+  --shadow-lg: var(--shadow-lg-elevation), 0 0 0 1px rgb(255 255 255 / 5%);
+  --accent-strong: #438cf5;
+  --accent-strong-soft: color-mix(
+    in srgb,
+    var(--accent-strong) 24%,
+    transparent
+  );
   --library-progress: #94ad9b;
   color-scheme: dark;
   --background: #2f2c2f;
@@ -54,6 +82,20 @@
 }
 /* Pure black keeps the neutral dark palette, without paper texture. */
 .dark[data-dark-contrast="high"] {
+  --shadow-xs: 0 1px 3px rgb(0 0 0 / 32%), 0 0 0 1px rgb(255 255 255 / 8%);
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 40%), 0 0 0 1px rgb(255 255 255 / 8%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(0 0 0 / 48%), 0 2px 8px rgb(0 0 0 / 32%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(0 0 0 / 56%), 0 2px 8px rgb(0 0 0 / 40%);
+  --shadow-md: var(--shadow-md-elevation), 0 0 0 1px rgb(255 255 255 / 8%);
+  --shadow-lg: var(--shadow-lg-elevation), 0 0 0 1px rgb(255 255 255 / 8%);
+  --accent-strong: #438cf5;
+  --accent-strong-soft: color-mix(
+    in srgb,
+    var(--accent-strong) 28%,
+    transparent
+  );
   --background: oklch(0.16 0 0);
   --foreground: oklch(0.92 0 0);
   --card: oklch(0.19 0 0);
@@ -115,6 +157,20 @@
 /* Paper: a warm light theme for the whole window. Surfaces: primary
    #f7f6f2, secondary #eeede7, tertiary #e2e1db. */
 :root[data-theme="sepia"] {
+  --shadow-xs: 0 1px 3px rgb(31 30 29 / 7%);
+  --shadow-sm: 0 2px 8px rgb(31 30 29 / 8%);
+  --shadow-md-elevation:
+    0 8px 28px rgb(31 30 29 / 12%), 0 2px 8px rgb(31 30 29 / 6%);
+  --shadow-lg-elevation:
+    0 12px 36px rgb(31 30 29 / 16%), 0 2px 8px rgb(31 30 29 / 8%);
+  --shadow-md: var(--shadow-md-elevation);
+  --shadow-lg: var(--shadow-lg-elevation);
+  --accent-strong: var(--brand);
+  --accent-strong-soft: color-mix(
+    in srgb,
+    var(--accent-strong) 16%,
+    transparent
+  );
   color-scheme: light;
   --brand: #c2643e;
   --library-progress: var(--brand);
@@ -157,14 +213,6 @@
 :root[data-theme="sepia"]
   :is(.paper-row, .paper-table-row, .paper-card)[data-picked] {
   background: var(--brand-10);
-}
-:root[data-theme="sepia"]
-  .model-select-menu
-  [data-slot="select-item-indicator"] {
-  color: var(--primary);
-}
-:root[data-theme="sepia"] .effort-panel {
-  --effort-blue: var(--brand-90);
 }
 @theme inline {
   --color-background: var(--background);
@@ -229,6 +277,20 @@ svg:is(.lucide-trash, .lucide-trash-2) {
 :is(button, [role="menuitem"]):has(> svg:is(.lucide-trash, .lucide-trash-2)) {
   color: var(--destructive) !important;
 }
+/* Preserve shadcn's ring/shadow composition; these surfaces already have a ring. */
+[data-slot="popover-content"],
+[data-slot="hover-card-content"],
+[data-slot="select-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="context-menu-content"],
+[data-slot="context-menu-sub-content"] {
+  --tw-shadow: var(--shadow-md-elevation);
+}
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"] {
+  --tw-shadow: var(--shadow-lg-elevation);
+}
 /* The citation window is transparent and sized to its dialog. */
 html[data-citation-window] {
   --text-xs: 0.625rem;
@@ -248,6 +310,7 @@ html[data-citation-window]
 }
 html[data-citation-window]
   :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) {
+  --tw-shadow: 0 0 #0000;
   max-width: calc(100% - 2rem);
 }
 /* Without a title bar, the dialog header moves the window. */
@@ -265,7 +328,7 @@ kbd {
   font-family: inherit;
   background: var(--background);
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   color: var(--muted-foreground);
 }
@@ -757,17 +820,22 @@ kbd {
   border-radius: 0;
   border-bottom: 1px solid var(--border);
   background: var(--background);
-  padding: 8px 14px;
-  gap: 8px;
+  padding: 8px 10px;
+  gap: 4px;
 }
 .panel-tabs [data-slot="tabs-trigger"] {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  gap: 6px;
+  gap: 4px;
   border: 0;
+  min-width: 0;
+  padding-inline: 4px;
+}
+.panel-tabs [data-slot="tabs-trigger"] small {
+  font-size: var(--font-size-small);
 }
 .panel-label {
-  font-size: var(--font-size-small);
+  font-size: 12px;
   color: var(--muted-foreground);
   letter-spacing: 1.4px;
   padding: 20px 20px 12px;
@@ -796,7 +864,7 @@ kbd {
   border-radius: 999px;
   background: var(--background);
   color: var(--foreground);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+  box-shadow: var(--shadow-sm);
 }
 .navigation-collapse-toolbar {
   left: auto;
@@ -816,7 +884,7 @@ kbd {
   border-radius: 50%;
 }
 .navigation-selection-toolbar.is-selecting {
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
 }
 /* Keep actions mounted so closing can finish before they become invisible. */
 .navigation-selection-actions {
@@ -858,7 +926,7 @@ kbd {
   display: flex;
   align-items: center;
   min-width: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin: 1px 0;
   color: var(--muted-foreground);
 }
@@ -868,7 +936,7 @@ kbd {
   color: var(--foreground);
 }
 .navigation-row.multi-selected {
-  background: color-mix(in srgb, #22c55e 16%, var(--background));
+  background: var(--accent-strong-soft);
 }
 .navigation-row.multi-selected .navigation-link:hover {
   background: transparent;
@@ -902,10 +970,10 @@ kbd {
   flex: 1;
   min-width: 0;
   height: auto;
-  min-height: 28px;
+  min-height: 30px;
   padding: 4px 10px 4px 4px;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   font-weight: 400;
   white-space: normal;
@@ -952,12 +1020,14 @@ kbd {
   flex-direction: column;
   align-items: flex-start;
   width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   height: auto;
   white-space: normal;
   text-align: left;
   line-height: 1.7;
   padding: 12px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   margin-bottom: 8px;
 }
@@ -1115,8 +1185,8 @@ kbd {
   align-items: center;
   gap: 3px;
   border: 1px solid var(--border);
-  border-radius: 11px;
-  box-shadow: 0 6px 25px #00000015;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
   z-index: 20;
   white-space: nowrap;
 }
@@ -1160,7 +1230,7 @@ kbd {
   border-radius: 50%;
   background: var(--background);
   color: var(--muted-foreground);
-  box-shadow: 0 2px 8px #0000000a;
+  box-shadow: var(--shadow-sm);
 }
 .chat-follow:hover {
   background: var(--muted);
@@ -1193,9 +1263,14 @@ kbd {
 .suggestion {
   width: 100%;
   justify-content: flex-start;
-  height: 39px;
+  height: auto;
+  min-height: 39px;
+  padding-block: 8px;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.5;
   margin-bottom: 9px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   gap: 9px;
 }
@@ -1203,7 +1278,7 @@ kbd {
   width: 13px;
 }
 .chat-message {
-  font-size: calc(12px * var(--assistant-font-scale, 1));
+  font-size: calc(13px * var(--assistant-font-scale, 1));
   line-height: 1.9;
   padding: 13px 0;
   white-space: pre-wrap;
@@ -1219,7 +1294,7 @@ kbd {
   margin-top: 0;
   padding-bottom: 10px;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   opacity: 0;
   pointer-events: none;
@@ -1282,18 +1357,43 @@ kbd {
   }
 }
 .chat-message.user {
+  width: fit-content;
+  max-width: 88%;
+  min-width: 0;
   background: var(--muted);
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   padding: 14px;
-  margin: 10px 0;
+  margin: 10px 0 10px auto;
+}
+.chat-question-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 6px;
+  padding-bottom: 0;
+}
+.chat-question-actions time {
+  white-space: nowrap;
+}
+.chat-message.user .image-attachment,
+.chat-message.user .attachment-preview,
+.chat-message.user .attachment-preview span {
+  max-width: 100%;
+}
+.chat-message.user .attachment-preview {
+  white-space: normal;
 }
 .chat-reading-location {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.35rem;
   margin-bottom: 0.4rem;
   color: var(--muted-foreground);
   font-size: 0.75rem;
+}
+.chat-reading-location > svg {
+  flex-shrink: 0;
+  margin-top: 0.35em;
 }
 .chat-user-references + .chat-question {
   margin-top: 10px;
@@ -1306,7 +1406,7 @@ kbd {
 }
 .chat-compose {
   border: 1px solid var(--border);
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   margin: 0 6px 6px;
   padding: 7px;
   background: var(--background);
@@ -1320,8 +1420,9 @@ kbd {
   border: 0;
   box-shadow: none !important;
   resize: none;
-  min-height: 77px;
-  font-size: calc(11px * var(--assistant-font-scale, 1));
+  min-height: max(77px, calc(4.8em + 14px));
+  line-height: 1.6;
+  font-size: calc(13px * var(--assistant-font-scale, 1));
   padding: 7px;
   outline: none;
 }
@@ -1362,15 +1463,13 @@ kbd {
   max-width: calc(100vw - 24px);
   padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow:
-    0 12px 36px #00000024,
-    0 2px 8px #00000012;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
 }
 .model-select-menu .model-select-option {
   min-height: 28px;
   padding: 4px 34px 4px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   font-size: 12px;
   line-height: 20px;
 }
@@ -1385,7 +1484,12 @@ kbd {
 }
 .model-select-menu [data-slot="select-item-indicator"] {
   right: 12px;
-  color: #438cf5;
+  color: var(--accent-strong);
+}
+.model-select-menu .model-select-option > :first-child {
+  min-width: 0;
+  flex-shrink: 1;
+  white-space: normal;
 }
 .model-select-name {
   font-weight: 400;
@@ -1394,18 +1498,16 @@ kbd {
 .model-trigger-effort {
   color: var(--muted-foreground);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .effort-panel {
-  --effort-blue: #5197f5;
   width: 256px;
   max-width: calc(100vw - 24px);
   gap: 12px;
   padding: 12px;
   border: 0.5px solid var(--border);
-  border-radius: 18px;
-  box-shadow:
-    0 12px 36px #00000024,
-    0 2px 8px #00000012;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
 }
 .effort-heading {
   display: grid;
@@ -1417,7 +1519,7 @@ kbd {
   margin-left: 2px;
 }
 .effort-title {
-  color: var(--effort-blue);
+  color: var(--accent-strong);
   text-align: center;
   font-size: 14px;
   line-height: 24px;
@@ -1470,7 +1572,7 @@ kbd {
   box-shadow: inset 0 0 0 0.5px var(--border);
 }
 .effort-slider [data-slot="slider-range"] {
-  background: var(--effort-blue);
+  background: var(--accent-strong);
   width: 100% !important;
   transform: translateX(
     calc(-100% + 14px + (100cqw - 28px) * var(--effort-position))
@@ -1486,7 +1588,7 @@ kbd {
   height: 28px;
   border: 0;
   background: white;
-  box-shadow: 0 1px 4px #00000018;
+  box-shadow: var(--shadow-xs);
 }
 /* Saving metadata must not dim the model link on each slider release. */
 .effort-model-trigger:disabled {
@@ -1503,7 +1605,7 @@ kbd {
   }
 }
 .effort-slider [data-slot="slider-thumb"]:focus-visible {
-  outline: 2px solid var(--effort-blue);
+  outline: 2px solid var(--accent-strong);
   outline-offset: 3px;
 }
 .effort-ticks {
@@ -1523,7 +1625,7 @@ kbd {
 .effort-unavailable {
   color: var(--muted-foreground);
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   padding: 4px 0;
 }
 .model-select-status {
@@ -1540,9 +1642,9 @@ kbd {
   gap: 6px;
   background: var(--muted);
   padding: 3px 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   margin: 3px 0;
-  font-size: var(--font-size-small);
+  font-size: 12px;
 }
 .quote-chips span {
   white-space: nowrap;
@@ -1599,14 +1701,14 @@ kbd {
   justify-content: space-between;
   padding: 5px 8px 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--background);
-  box-shadow: 0 2px 12px rgb(0 0 0 / 8%);
-  font-size: 11px;
+  box-shadow: var(--shadow-sm);
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
 }
 .notes-footer button {
-  font-size: var(--font-size-small);
+  font-size: 12px;
 }
 .notes-list {
   padding: 0 15px 76px;
@@ -1615,14 +1717,14 @@ kbd {
   text-align: center;
   padding: 65px 0;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
 }
 .notes-empty svg {
   margin: 0 auto 20px;
   opacity: 0.4;
 }
 .notes-empty small {
-  font-size: var(--font-size-small);
+  font-size: 12px;
   display: block;
   margin-top: 10px;
 }
@@ -1636,7 +1738,7 @@ kbd {
 .note-card {
   border: 1px solid var(--border);
   padding: 12px;
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   margin-bottom: 12px;
 }
 .note-card > div {
@@ -1660,7 +1762,7 @@ kbd {
 .note-quote {
   display: block;
   white-space: pre-wrap;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.8;
   height: auto;
   text-align: left;
@@ -1673,7 +1775,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 .note-card p {
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
   line-height: 1.8;
 }
@@ -1706,7 +1808,7 @@ kbd {
   gap: 10px;
 }
 .page-navigation input {
-  font-size: 11px;
+  font-size: var(--font-size-small);
 }
 @media (max-width: 1000px) {
   .library-content {
@@ -2304,7 +2406,7 @@ kbd {
 .reference-prompt,
 .reference-error {
   margin: 0 0 6px 13px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .reference-error {
@@ -2322,7 +2424,7 @@ kbd {
   z-index: 1;
 }
 .block-actions [data-block-action] {
-  box-shadow: 0 2px 8px #0002;
+  box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
   color: var(--foreground);
   background: var(--popover);
@@ -2356,7 +2458,7 @@ kbd {
   height: 64px;
   object-fit: contain;
   background: white;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .attachment-preview span {
   font-size: var(--font-size-small);
@@ -2390,7 +2492,7 @@ kbd {
   top: 12px;
   right: 12px;
   z-index: 2;
-  box-shadow: 0 1px 6px rgb(0 0 0 / 15%);
+  box-shadow: var(--shadow-sm);
 }
 .image-preview-controls {
   display: flex;
@@ -2407,7 +2509,7 @@ kbd {
   left: 12px;
   z-index: 1;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--background);
   font-size: 12px;
   color: var(--muted-foreground);
@@ -2841,7 +2943,7 @@ kbd {
 .usage-models summary:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .trash-toolbar {
@@ -3970,7 +4072,7 @@ textarea.citation-preview {
   padding: 6px 8px;
   white-space: normal;
   text-align: left;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   line-height: 1.7;
   color: var(--muted-foreground);
@@ -3991,7 +4093,7 @@ textarea.citation-preview {
   width: 100%;
   min-height: 0;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: white;
 }
 .link-preview-header {
@@ -4018,9 +4120,6 @@ textarea.citation-preview {
   animation: none;
   transition: none;
   overflow: hidden;
-  box-shadow:
-    0 12px 40px rgb(0 0 0 / 16%),
-    0 2px 8px rgb(0 0 0 / 8%);
 }
 .link-preview-drag {
   flex: 1;
@@ -4040,7 +4139,7 @@ textarea.citation-preview {
   min-width: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--muted);
   cursor: grab;
   touch-action: none;
@@ -4088,7 +4187,7 @@ textarea.citation-preview {
   left: 18px;
   max-width: calc(100% - 36px);
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--popover);
   color: var(--muted-foreground);
   font-size: 11px;
@@ -4153,12 +4252,12 @@ textarea.citation-preview {
   display: flex;
   align-items: center;
   gap: 8px;
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-md);
 }
 .highlight-color-row[data-dragging] {
   z-index: 1;
   background: var(--background);
-  box-shadow: 0 6px 16px -6px rgb(0 0 0 / 0.25);
+  box-shadow: var(--shadow-lg);
 }
 :root:not([data-reduced-motion="true"]) {
   .highlight-color-row[data-reordering]:not([data-dragging]) {
@@ -4217,11 +4316,8 @@ textarea.citation-preview {
   z-index: 8;
 }
 .neoread-location-highlight > div {
-  background: rgb(0 90 255 / 24%);
+  background: color-mix(in srgb, var(--accent-strong) 30%, transparent);
   border-radius: 2px;
-}
-.pdf-container[data-theme="dark"] .neoread-location-highlight > div {
-  background: rgb(100 170 255 / 36%);
 }
 
 /* Column labels support dragging independently from resize boundaries. */
@@ -4255,7 +4351,7 @@ textarea.citation-preview {
   align-items: center;
   gap: 6px;
   padding: 5px 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .paper-columns-popover {
   max-height: min(70vh, 440px);
@@ -4282,10 +4378,10 @@ textarea.citation-preview {
   z-index: 10000;
   pointer-events: none;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--popover);
   color: var(--popover-foreground);
-  box-shadow: 0 3px 12px #0002;
+  box-shadow: var(--shadow-lg);
 }
 .paper-column-source {
   opacity: 0.4;
@@ -4305,12 +4401,12 @@ textarea.citation-preview {
   contain: layout paint;
   pointer-events: none;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--popover);
   color: var(--popover-foreground);
   font-size: 12px;
   line-height: 18px;
-  box-shadow: 0 3px 12px #0002;
+  box-shadow: var(--shadow-lg);
 }
 .paper-drag-title {
   min-width: 0;
@@ -4333,7 +4429,7 @@ textarea.citation-preview {
 .paper-tag-match {
   display: flex;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--muted);
 }
 .paper-tag-match > button {
@@ -4341,7 +4437,7 @@ textarea.citation-preview {
 }
 .paper-tag-match > button[aria-pressed="true"] {
   background: var(--background);
-  box-shadow: 0 1px 3px #00000012;
+  box-shadow: var(--shadow-xs);
 }
 .paper-tag-options {
   align-content: flex-start;
