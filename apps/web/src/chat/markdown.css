@@ -55,7 +55,7 @@
   min-width: 0;
   max-width: 100%;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   margin: 0.75em 0;
   overflow: hidden;
 }
@@ -97,34 +97,24 @@
   text-underline-offset: 3px;
 }
 .message-markdown a[href^="#neoread-citation?"] {
-  color: #2563eb;
+  color: var(--accent-strong);
   text-decoration: none;
   cursor: pointer;
-}
-.dark .message-markdown a[href^="#neoread-citation?"] {
-  color: #60a5fa;
-}
-:root[data-theme="sepia"] .message-markdown a[href^="#neoread-citation?"] {
-  color: var(--brand-text);
 }
 .message-markdown a[href^="#neoread-citation?"]:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 .message-markdown .chat-source-jump {
-  --source-jump-color: #2563eb;
   position: relative;
   top: -1px;
   width: 16px;
   height: 16px;
   margin-inline: 1px;
   vertical-align: middle;
-  color: var(--source-jump-color);
+  color: var(--accent-strong);
   background: transparent;
   cursor: pointer;
-}
-.dark .message-markdown .chat-source-jump {
-  --source-jump-color: #60a5fa;
 }
 .chat-source-preview {
   display: flex;
@@ -136,10 +126,10 @@
   max-width: min(360px, calc(100vw - 24px));
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--popover);
   color: var(--popover-foreground);
-  box-shadow: 0 8px 28px #00000024;
+  box-shadow: var(--shadow-md);
   animation-duration: 100ms;
   text-align: left;
   white-space: normal;

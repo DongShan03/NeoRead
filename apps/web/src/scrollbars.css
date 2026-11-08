@@ -37,3 +37,26 @@
 :root[data-reduced-motion="true"] [data-slot="scroll-area-scrollbar"] {
   transition: none;
 }
+
+/* Floating surfaces keep scrolling available without scrollbar chrome. */
+:is(
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"],
+  [data-slot="popover-content"],
+  [data-slot="hover-card-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="context-menu-sub-content"]
+) {
+  &,
+  & * {
+    scrollbar-width: none;
+  }
+  &::-webkit-scrollbar,
+  & *::-webkit-scrollbar {
+    display: none;
+  }
+}
