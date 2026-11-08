@@ -154,7 +154,7 @@ export function AnnotationNoteWindow({
         showOverlay={false}
         initialFocus={() => popup?.querySelector("textarea") ?? false}
         finalFocus={false}
-        className="annotation-note-window w-80 gap-3 max-h-[calc(100dvh-24px)] overflow-y-auto"
+        className="annotation-note-window w-80 gap-3 max-h-[calc(100dvh-24px)] overflow-y-auto motion-reduce:animate-none"
         style={
           frame ? { left: frame.x, top: frame.y, translate: "none" } : undefined
         }

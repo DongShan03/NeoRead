@@ -8,6 +8,9 @@ import {
   type Processing,
   type ReaderAdapter,
   type ReaderEvents,
+  type Annotation,
+  type ReaderSelection,
+  type SearchResult,
 } from "@neoread/core";
 import { toast } from "sonner";
 import { TooltipProvider } from "@neoread/ui/components/tooltip";
@@ -19,6 +22,8 @@ import { ChatSession } from "./chat/chat-session";
 import * as sessionRegistry from "./chat/session-registry";
 import type { ChatStreamEvent } from "@neoread/api";
 import { tabCloseWarning } from "./document-tab-guards";
+import { installMotionPreference } from "./motion";
+import type { AnnotationNoteForm } from "./AnnotationNoteForm";
 import type { SessionPicker } from "./chat/SessionPicker";
 import type { ResizablePanelGroup } from "@neoread/ui/components/resizable";
 import type { AssistantPanel } from "./chat/AssistantPanel";
@@ -27,6 +32,14 @@ type GroupProps = ComponentProps<typeof ResizablePanelGroup>;
 const panels = vi.hoisted(() => ({
   props: undefined as GroupProps | undefined,
   readerEvents: undefined as ReaderEvents | undefined,
+  workspaceRenders: 0,
+  noteRenders: 0,
+  noteFormMounts: 0,
+  noteFormUnmounts: 0,
+  inputRenders: 0,
+  pageNavigationVisible: true,
+  readerSearch: undefined as
+    { results: SearchResult[]; query: string } | undefined,
   readerRenders: 0,
   assistantRenders: 0,
   sessions: undefined as ComponentProps<typeof SessionPicker> | undefined,
@@ -46,6 +59,8 @@ vi.mock("@neoread/api", () => ({
     recoverAnnotations: vi.fn(async () => ({ checked: true })),
     annotations: vi.fn(async () => []),
     annotate: vi.fn(),
+    updateAnnotationNote: vi.fn(),
+    updateAnnotation: vi.fn(),
     annotationStream: vi.fn(async (_id, signal, callback) => {
       callback("revision");
       await new Promise<void>((resolve) =>
@@ -76,23 +91,71 @@ vi.mock("./progress", () => ({
 vi.mock("@neoread/ui/components/scroll-area", () => ({
   ScrollArea: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
+vi.mock("./AnnotationNoteForm", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("./AnnotationNoteForm")>();
+  const { useEffect } = await import("react");
+  return {
+    AnnotationNoteForm: (props: ComponentProps<typeof AnnotationNoteForm>) => {
+      useEffect(() => {
+        panels.noteFormMounts++;
+        return () => {
+          panels.noteFormUnmounts++;
+        };
+      }, []);
+      return <original.AnnotationNoteForm {...props} />;
+    },
+  };
+});
+vi.mock("@neoread/ui/components/input", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@neoread/ui/components/input")>();
+  return {
+    Input: (props: ComponentProps<typeof original.Input>) => {
+      panels.inputRenders++;
+      return <original.Input {...props} />;
+    },
+  };
+});
+vi.mock("@neoread/ui/components/textarea", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@neoread/ui/components/textarea")>();
+  return {
+    Textarea: (props: ComponentProps<typeof original.Textarea>) => {
+      if (
+        props.placeholder === "批注内容…" ||
+        props.placeholder === "想弄清楚什么？"
+      )
+        panels.noteRenders++;
+      return <original.Textarea {...props} />;
+    },
+  };
+});
 vi.mock("./translation/PDFReadingView", () => ({
   PDFReadingView: ({
     onReady,
     events,
+    pageNavigation,
+    searchResults = [],
+    searchQuery = "",
   }: {
     onReady: (adapter: ReaderAdapter, items: []) => void;
     events: ReaderEvents;
+    pageNavigation: ReactNode;
+    searchResults?: SearchResult[];
+    searchQuery?: string;
   }) => {
     panels.readerRenders++;
     panels.readerReady = (adapter) => onReady(adapter, []);
     panels.readerEvents = events;
-    return null;
+    panels.readerSearch = { results: searchResults, query: searchQuery };
+    return <>{panels.pageNavigationVisible && pageNavigation}</>;
   },
 }));
-vi.mock("./translation/EPUBReadingView", () => ({
-  EPUBReadingView: () => null,
-}));
+vi.mock("./translation/EPUBReadingView", async () => {
+  const { PDFReadingView } = await import("./translation/PDFReadingView");
+  return { EPUBReadingView: PDFReadingView };
+});
 vi.mock("./chat/AssistantPanel", () => ({
   AssistantPanel: (props: ComponentProps<typeof AssistantPanel>) => {
     panels.assistantRenders++;
@@ -130,6 +193,7 @@ vi.mock("@neoread/ui/components/resizable", async () => {
   return {
     ResizablePanel: Panel,
     ResizablePanelGroup: (props: GroupProps) => {
+      panels.workspaceRenders++;
       panels.props = props;
       return <Panel>{props.children}</Panel>;
     },
@@ -151,12 +215,17 @@ const processing: Processing = {
   updatedAt: "",
 };
 let root: Root, host: HTMLDivElement;
-const render = (tick: number, active = true) =>
+const render = (
+  tick: number,
+  active = true,
+  type: "pdf" | "epub" = "pdf",
+  id = doc.id,
+) =>
   root.render(
     <TooltipProvider>
       <Workspace
         active={active}
-        document={doc}
+        document={{ ...doc, type, id }}
         theme={defaultTheme}
         processing={{ ...processing, updatedAt: String(tick) }}
         onBack={() => {}}
@@ -321,6 +390,100 @@ it("keeps a non-modal annotation draft open while reading elsewhere and saves ag
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 
+it.each([
+  ["pdf", "添加批注"],
+  ["pdf", "提问"],
+  ["epub", "添加批注"],
+  ["epub", "提问"],
+] as const)(
+  "keeps five %s %s keystrokes inside the note form",
+  async (type, action) => {
+    vi.useFakeTimers();
+    await act(async () => render(0, true, type));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    await act(async () =>
+      panels.readerEvents!.selection({
+        text: "Original sentence.",
+        location:
+          type === "pdf"
+            ? { type: "pdf", page: 1 }
+            : { type: "epub", href: "chapter.xhtml" },
+        anchor: { x: 30, top: 20, bottom: 40 },
+      }),
+    );
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>(
+          `.selection-bar [aria-label="${action}"]`,
+        )!
+        .click(),
+    );
+    const field = document.querySelector<HTMLTextAreaElement>(
+      '[role="dialog"] textarea',
+    )!;
+    const before = {
+      workspace: panels.workspaceRenders,
+      reader: panels.readerRenders,
+      assistant: panels.assistantRenders,
+      note: panels.noteRenders,
+    };
+    for (const text of ["一", "一二", "一二三", "一二三四", "一二三四五"]) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value",
+        )!.set!.call(field, text);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
+    expect({
+      workspace: panels.workspaceRenders - before.workspace,
+      reader: panels.readerRenders - before.reader,
+      assistant: panels.assistantRenders - before.assistant,
+      note: panels.noteRenders - before.note,
+    }).toEqual({ workspace: 0, reader: 0, assistant: 0, note: 5 });
+    expect(field.value).toBe("一二三四五");
+    expect(tabCloseWarning(doc.id)).not.toBeNull();
+  },
+);
+
+it.each(["搜索文档", "跳转 PDF 页码"])(
+  "keeps five %s keystrokes out of workspace and reader renders",
+  async (label) => {
+    vi.useFakeTimers();
+    await act(async () => render(0));
+    if (label === "搜索文档")
+      await act(async () =>
+        [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+          .find((tab) => tab.textContent === "搜索")!
+          .click(),
+      );
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    const field = host.querySelector<HTMLInputElement>(
+      `input[aria-label="${label}"]`,
+    )!;
+    const before = {
+      workspace: panels.workspaceRenders,
+      reader: panels.readerRenders,
+      input: panels.inputRenders,
+    };
+    for (const text of ["1", "12", "123", "1234", "12345"]) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )!.set!.call(field, text);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
+    expect({
+      workspace: panels.workspaceRenders - before.workspace,
+      reader: panels.readerRenders - before.reader,
+      input: panels.inputRenders - before.input,
+    }).toEqual({ workspace: 0, reader: 0, input: 5 });
+  },
+);
+
 it("keeps newer model settings when the initial config response arrives late", async () => {
   let finish!: (config: Awaited<ReturnType<typeof api.aiConfig>>) => void;
   vi.mocked(api.aiConfig).mockImplementationOnce(
@@ -358,7 +521,14 @@ beforeEach(() => {
     },
   );
   vi.clearAllMocks();
+  panels.workspaceRenders = panels.noteRenders = panels.inputRenders = 0;
+  panels.noteFormMounts = panels.noteFormUnmounts = 0;
+  panels.pageNavigationVisible = true;
   panels.readerRenders = panels.assistantRenders = 0;
+  vi.mocked(api.annotate).mockReset();
+  vi.mocked(api.updateAnnotationNote).mockReset();
+  vi.mocked(api.updateAnnotation).mockReset();
+  vi.mocked(api.annotations).mockReset().mockResolvedValue([]);
   vi.mocked(api.chatSessions).mockReset().mockResolvedValue([]);
   vi.mocked(api.aiConfig)
     .mockReset()
@@ -1241,4 +1411,434 @@ it("does not rerender mounted workspaces for another document's job update", asy
     ]),
   );
   expect(panels.readerRenders).toBe(before);
+});
+
+const noteField = () =>
+  document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!;
+const selectedText: ReaderSelection = {
+  text: "Original sentence.",
+  location: { type: "pdf", page: 1 },
+  anchor: { x: 30, top: 20, bottom: 40 },
+};
+const savedNote: Annotation = {
+  id: "note-input",
+  documentId: doc.id,
+  kind: "note",
+  quote: selectedText.text,
+  location: selectedText.location,
+  note: "保留草稿",
+  color: "#e6b94c",
+  createdAt: "",
+};
+async function enterField(
+  field: HTMLInputElement | HTMLTextAreaElement,
+  text: string,
+) {
+  await act(async () => {
+    const prototype =
+      field instanceof HTMLInputElement
+        ? HTMLInputElement.prototype
+        : HTMLTextAreaElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(field, text);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+async function openNote(action = "添加批注", selection = selectedText) {
+  await act(async () => panels.readerEvents!.selection(selection));
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        `.selection-bar [aria-label="${action}"]`,
+      )!
+      .click(),
+  );
+}
+async function showSearch() {
+  await act(async () =>
+    [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+      .find((tab) => tab.textContent === "搜索")!
+      .click(),
+  );
+}
+async function submitField(field: HTMLInputElement) {
+  await act(async () =>
+    field.form!.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    ),
+  );
+}
+
+it.each(["添加批注", "提问"])(
+  "retains a failed %s draft through updates and background tabs, then retries",
+  async (action) => {
+    vi.useFakeTimers();
+    await act(async () => render(0));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    await openNote(action);
+    const save = () => button(action === "提问" ? "保存问题" : "保存批注");
+    expect(save().disabled).toBe(true);
+    expect(document.activeElement).toBe(noteField());
+    expect(tabCloseWarning(doc.id)).toBeNull();
+    await enterField(noteField(), savedNote.note);
+    await act(async () => render(1));
+    expect(noteField().value).toBe(savedNote.note);
+    await act(async () => render(2, false));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(tabCloseWarning(doc.id)).not.toBeNull();
+    await act(async () => render(3));
+    expect(noteField().value).toBe(savedNote.note);
+
+    let fail!: (error: Error) => void;
+    vi.mocked(api.annotate).mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    await act(async () => save().click());
+    expect(save().disabled).toBe(true);
+    expect(tabCloseWarning(doc.id)?.blocked).toBe(true);
+    await act(async () => button("Close").click());
+    expect(noteField().value).toBe(savedNote.note);
+    await act(async () => fail(new Error("保存失败")));
+    expect(toast.error).toHaveBeenCalledWith("保存失败");
+    expect(tabCloseWarning(doc.id)?.blocked).not.toBe(true);
+    expect(noteField().value).toBe(savedNote.note);
+    expect(save().disabled).toBe(false);
+    vi.mocked(api.annotate).mockResolvedValueOnce({
+      ...savedNote,
+      kind: action === "提问" ? "question" : "note",
+    });
+    await act(async () => save().click());
+    expect(api.annotate).toHaveBeenLastCalledWith(
+      doc.id,
+      expect.objectContaining({ note: savedNote.note }),
+    );
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(tabCloseWarning(doc.id)).toBeNull();
+    await openNote(action);
+    expect(noteField().value).toBe("");
+  },
+);
+
+it("clears a closed draft and resets when opening a different selection", async () => {
+  await act(async () => render(0));
+  await openNote();
+  await enterField(noteField(), "待清除");
+  await act(async () => button("Close").click());
+  expect(tabCloseWarning(doc.id)).toBeNull();
+  await openNote();
+  expect(noteField().value).toBe("");
+  await enterField(noteField(), "另一个草稿");
+  await openNote();
+  expect(noteField().value).toBe("");
+});
+
+it.each([false, true])(
+  "keeps the closed annotation form mounted and resets new selections and editing with reduced motion %s",
+  async (reducedMotion) => {
+    vi.useFakeTimers();
+    vi.mocked(api.annotations).mockResolvedValue([savedNote]);
+    useReaderStore.setState({ theme: { ...defaultTheme, reducedMotion } });
+    const removeMotion = installMotionPreference(document);
+    try {
+      await act(async () => render(0));
+      await act(async () => vi.advanceTimersByTimeAsync(100));
+      await openNote();
+      await enterField(noteField(), "关闭前的草稿");
+      const mounts = panels.noteFormMounts,
+        unmounts = panels.noteFormUnmounts;
+      await act(async () => button("Close").click());
+      expect(panels.noteFormMounts).toBe(mounts);
+      expect(panels.noteFormUnmounts).toBe(unmounts);
+      expect(tabCloseWarning(doc.id)).toBeNull();
+
+      await openNote("添加批注", {
+        ...selectedText,
+        text: "Different sentence.",
+        location: { type: "pdf", page: 2 },
+      });
+      expect(noteField().value).toBe("");
+      expect(document.querySelector(".note-preview")?.textContent).toBe(
+        "Different sentence.",
+      );
+      expect(tabCloseWarning(doc.id)).toBeNull();
+      await act(async () => button("Close").click());
+      await act(async () => {
+        panels.readerEvents!.selection(null);
+        panels.readerEvents!.annotation!({
+          ids: [savedNote.id],
+          anchor: selectedText.anchor!,
+        });
+      });
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            '.selection-bar [aria-label="编辑批注"]',
+          )!
+          .click(),
+      );
+      expect(noteField().value).toBe(savedNote.note);
+      expect(document.querySelector(".note-preview")?.textContent).toBe(
+        savedNote.quote,
+      );
+      expect(document.documentElement.dataset.reducedMotion).toBe(
+        String(reducedMotion),
+      );
+      expect(
+        document
+          .querySelector('[role="dialog"]')!
+          .classList.contains("motion-reduce:animate-none"),
+      ).toBe(true);
+      await act(async () => button("Close").click());
+      expect(tabCloseWarning(doc.id)).toBeNull();
+    } finally {
+      removeMotion();
+    }
+  },
+);
+
+it.each([
+  ["note", "原批注", true],
+  ["highlight", "", false],
+  ["question", "原问题", false],
+] as const)(
+  "preserves %s editing and its empty-content rule",
+  async (kind, note, canClear) => {
+    vi.useFakeTimers();
+    const original = { ...savedNote, kind, note };
+    vi.mocked(api.annotations).mockResolvedValue([original]);
+    await act(async () => render(0));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    await act(async () =>
+      panels.readerEvents!.annotation!({
+        ids: [original.id],
+        anchor: selectedText.anchor!,
+      }),
+    );
+    const label =
+      kind === "question" ? "编辑问题" : note ? "编辑批注" : "添加批注";
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>(
+          `.selection-bar [aria-label="${label}"]`,
+        )!
+        .click(),
+    );
+    expect(noteField().value).toBe(note);
+    expect(button("保存并让 AI 回答")).toBeUndefined();
+    const save = () => button(kind === "question" ? "保存问题" : "保存批注");
+    await enterField(noteField(), "");
+    expect(save().disabled).toBe(!canClear);
+    await enterField(noteField(), "修改后的内容");
+    vi.mocked(api.updateAnnotationNote).mockRejectedValueOnce(
+      new Error("编辑失败"),
+    );
+    await act(async () => save().click());
+    expect(noteField().value).toBe("修改后的内容");
+    expect(api.annotate).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("编辑失败");
+    const text = canClear ? "" : "修改后的内容";
+    await enterField(noteField(), text);
+    vi.mocked(api.updateAnnotationNote).mockResolvedValueOnce({
+      ...original,
+      note: text,
+    });
+    await act(async () => save().click());
+    expect(api.updateAnnotationNote).toHaveBeenLastCalledWith(
+      doc.id,
+      original.id,
+      text,
+    );
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  },
+);
+
+it("answers only after the question is saved and keeps the draft when saving fails", async () => {
+  vi.mocked(api.aiConfig).mockResolvedValueOnce({
+    primary: "api",
+    models: {},
+    capabilities: {},
+  } as Awaited<ReturnType<typeof api.aiConfig>>);
+  vi.mocked(api.chatSessions).mockResolvedValue([
+    {
+      id: "annotation-question",
+      documentId: doc.id,
+      title: "test",
+      provider: "api",
+      createdAt: "",
+      updatedAt: "",
+    },
+  ]);
+  await act(async () => render(0));
+  await openNote("提问");
+  const answer = () => button("保存并让 AI 回答");
+  expect(answer().disabled).toBe(true);
+  await enterField(noteField(), "这个结论如何得到？");
+  const send = vi
+    .spyOn(ChatSession.prototype, "send")
+    .mockResolvedValue(undefined);
+  vi.mocked(api.annotate).mockRejectedValueOnce(new Error("写入失败"));
+  await act(async () => answer().click());
+  expect(send).not.toHaveBeenCalled();
+  expect(noteField().value).toBe("这个结论如何得到？");
+  let finish!: (annotation: Annotation) => void;
+  vi.mocked(api.annotate).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => answer().click());
+  expect(send).not.toHaveBeenCalled();
+  expect(answer().disabled).toBe(true);
+  await act(async () =>
+    finish({ ...savedNote, kind: "question", note: "这个结论如何得到？" }),
+  );
+  expect(send).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      prompt: expect.stringContaining("这个结论如何得到？"),
+    }),
+  );
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("submits sidebar searches explicitly and clears results without rendering Workspace", async () => {
+  vi.useFakeTimers();
+  const found: SearchResult[] = [
+    {
+      id: "search-result",
+      location: { type: "pdf", page: 3 },
+      excerpt: "原文命中",
+      side: "source",
+    },
+  ];
+  const search = vi.fn<ReaderAdapter["search"]>().mockResolvedValue(found);
+  const focusLocation = vi.fn(async () => {});
+  await act(async () => render(0));
+  await act(async () =>
+    panels.readerReady!({ search, focusLocation } as unknown as ReaderAdapter),
+  );
+  await showSearch();
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  const field = host.querySelector<HTMLInputElement>(
+    '[aria-label="搜索文档"]',
+  )!;
+  const workspaceRenders = panels.workspaceRenders;
+  await enterField(field, "  keyword  ");
+  expect(search).not.toHaveBeenCalled();
+  await submitField(field);
+  expect(search).toHaveBeenCalledExactlyOnceWith("keyword");
+  expect(panels.readerSearch).toEqual({ results: found, query: "keyword" });
+  expect(host.querySelectorAll(".search-result")).toHaveLength(1);
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>(".search-result")!.click(),
+  );
+  expect(focusLocation).toHaveBeenCalledExactlyOnceWith(found[0].location);
+  await enterField(field, "new");
+  expect(host.querySelectorAll(".search-result")).toHaveLength(0);
+  expect(panels.readerSearch).toEqual({ results: [], query: "" });
+  const readerRenders = panels.readerRenders;
+  for (const text of ["new k", "new key", "new keyword", ""])
+    await enterField(field, text);
+  expect(panels.readerRenders).toBe(readerRenders);
+  expect(panels.workspaceRenders).toBe(workspaceRenders);
+
+  let finish!: (results: SearchResult[]) => void;
+  search.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await enterField(field, "stale");
+  await submitField(field);
+  expect(host.textContent).toContain("正在搜索…");
+  await enterField(field, "latest");
+  await act(async () => finish(found));
+  expect(host.querySelectorAll(".search-result")).toHaveLength(0);
+  expect(panels.readerSearch).toEqual({ results: [], query: "" });
+  expect(host.textContent).not.toContain("正在搜索…");
+  expect(panels.workspaceRenders).toBe(workspaceRenders);
+
+  await act(async () =>
+    [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+      .find((tab) => tab.textContent === "目录")!
+      .click(),
+  );
+  await act(async () =>
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "f",
+        ctrlKey: !/Mac/.test(navigator.platform),
+        metaKey: /Mac/.test(navigator.platform),
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(50));
+  expect(document.activeElement).toBe(field);
+  expect(field.value).toBe("latest");
+  await act(async () => render(1, true, "pdf", "another-document"));
+  expect(
+    host.querySelector<HTMLInputElement>('[aria-label="搜索文档"]')!.value,
+  ).toBe("");
+  expect(panels.readerSearch).toEqual({ results: [], query: "" });
+});
+
+it("keeps PDF page typing local, validates submission and follows reader locations", async () => {
+  vi.useFakeTimers();
+  const goTo = vi.fn(async () => {});
+  await act(async () => render(0));
+  await act(async () =>
+    panels.readerReady!({ goTo } as unknown as ReaderAdapter),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  await act(async () =>
+    panels.readerEvents!.location({ type: "pdf", page: 42 }, 0.5),
+  );
+  const field = host.querySelector<HTMLInputElement>(
+    '[aria-label="跳转 PDF 页码"]',
+  )!;
+  expect(field.value).toBe("42");
+  const workspaceRenders = panels.workspaceRenders,
+    readerRenders = panels.readerRenders;
+  await enterField(field, "17");
+  expect(goTo).not.toHaveBeenCalled();
+  await submitField(field);
+  expect(goTo).toHaveBeenCalledExactlyOnceWith({ type: "pdf", page: 17 });
+  for (const text of ["", "0", "-1", "1.5", "abc"]) {
+    await enterField(field, text);
+    await submitField(field);
+  }
+  expect(goTo).toHaveBeenCalledOnce();
+  await act(async () =>
+    panels.readerEvents!.location({ type: "pdf", page: 18 }, 0.6),
+  );
+  expect(field.value).toBe("18");
+  expect(panels.workspaceRenders).toBe(workspaceRenders);
+  expect(panels.readerRenders).toBe(readerRenders);
+});
+
+it("preserves the PDF page draft when reading modes move the navigation controls", async () => {
+  vi.useFakeTimers();
+  await act(async () => render(0));
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  const field = () =>
+    host.querySelector<HTMLInputElement>('[aria-label="跳转 PDF 页码"]')!;
+  await enterField(field(), "25");
+  panels.pageNavigationVisible = false;
+  await act(async () => render(1));
+  panels.pageNavigationVisible = true;
+  await act(async () => render(2));
+  expect(field().value).toBe("25");
+  panels.pageNavigationVisible = false;
+  await act(async () => render(3));
+  await act(async () =>
+    panels.readerEvents!.location({ type: "pdf", page: 26 }, 0.5),
+  );
+  panels.pageNavigationVisible = true;
+  await act(async () => render(4));
+  expect(field().value).toBe("26");
 });
