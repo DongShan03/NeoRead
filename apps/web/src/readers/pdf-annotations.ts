@@ -1,10 +1,15 @@
 import type { Annotation, ReaderAnnotationTarget } from "@neoread/core";
+import { lineBoxes, type PDFRect } from "./pdf-line-boxes";
 
 // Observe the text layer without intercepting text selection or PDF links.
 export class PDFAnnotationLayer {
   private byPage = new Map<number, Annotation[]>();
   private hovered: string[] = [];
   private pressed?: { x: number; y: number };
+  private lineGeometry = new Map<
+    string,
+    { input: PDFRect[]; aspectRatio: number; boxes: PDFRect[] }
+  >();
   private geometryStyles = new WeakMap<
     HTMLElement,
     { input: string; cssText: string }
@@ -28,7 +33,41 @@ export class PDFAnnotationLayer {
       byPage.set(annotation.location.page, annotations);
     }
     this.byPage = byPage;
+    const ids = new Set(annotations.map((annotation) => annotation.id));
+    for (const id of this.lineGeometry.keys()) {
+      if (!ids.has(id)) this.lineGeometry.delete(id);
+    }
     this.paint();
+  }
+  private boxes(annotation: Annotation, bounds: DOMRect): PDFRect[] {
+    if (annotation.location.type !== "pdf") return [];
+    const rects = annotation.location.rects ?? [];
+    const aspectRatio =
+      bounds.width && bounds.height ? bounds.width / bounds.height : 1;
+    const cached = this.lineGeometry.get(annotation.id);
+    // Compare values as callers can update rects in place. Equivalent records
+    // and zoom-only repaints reuse the merged boxes without sorting again.
+    if (
+      cached?.aspectRatio === aspectRatio &&
+      cached.input.length === rects.length &&
+      rects.every((rect, index) => {
+        const previous = cached.input[index];
+        return (
+          rect.x === previous.x &&
+          rect.y === previous.y &&
+          rect.width === previous.width &&
+          rect.height === previous.height
+        );
+      })
+    )
+      return cached.boxes;
+    const boxes = lineBoxes(rects, aspectRatio);
+    this.lineGeometry.set(annotation.id, {
+      input: rects.map((rect) => ({ ...rect })),
+      aspectRatio,
+      boxes,
+    });
+    return boxes;
   }
   paint = (pageNumber?: number) => {
     // Reconcile against the current page DOM, so page resets/replacements need
@@ -38,6 +77,7 @@ export class PDFAnnotationLayer {
         ? ".page[data-page-number]"
         : `.page[data-page-number="${pageNumber}"]`,
     )) {
+      const bounds = page.getBoundingClientRect();
       const remaining = new Map<string, HTMLElement>();
       for (const child of Array.from(page.children)) {
         if (
@@ -56,7 +96,7 @@ export class PDFAnnotationLayer {
           annotation.kind === "bookmark"
         )
           continue;
-        const rects = annotation.location.rects ?? [];
+        const rects = this.boxes(annotation, bounds);
         if (!rects.length) continue;
         let group = remaining.get(annotation.id);
         remaining.delete(annotation.id);
@@ -159,7 +199,7 @@ export class PDFAnnotationLayer {
         annotation.location.page !== Number(page.dataset.pageNumber)
       )
         continue;
-      const rect = annotation.location.rects?.find(
+      const rect = this.boxes(annotation, bounds).find(
         (r) =>
           x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height,
       );
@@ -222,6 +262,7 @@ export class PDFAnnotationLayer {
   };
   destroy() {
     this.clear();
+    this.lineGeometry.clear();
     this.host.removeEventListener("pointermove", this.move);
     this.host.removeEventListener("pointerleave", this.clear);
     this.host.removeEventListener("pointerdown", this.press);
