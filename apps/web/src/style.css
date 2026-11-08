@@ -810,17 +810,22 @@ kbd {
   border-radius: 0;
   border-bottom: 1px solid var(--border);
   background: var(--background);
-  padding: 8px 14px;
-  gap: 8px;
+  padding: 8px 10px;
+  gap: 4px;
 }
 .panel-tabs [data-slot="tabs-trigger"] {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  gap: 6px;
+  gap: 4px;
   border: 0;
+  min-width: 0;
+  padding-inline: 4px;
+}
+.panel-tabs [data-slot="tabs-trigger"] small {
+  font-size: var(--font-size-small);
 }
 .panel-label {
-  font-size: var(--font-size-small);
+  font-size: 12px;
   color: var(--muted-foreground);
   letter-spacing: 1.4px;
   padding: 20px 20px 12px;
@@ -955,10 +960,10 @@ kbd {
   flex: 1;
   min-width: 0;
   height: auto;
-  min-height: 28px;
+  min-height: 30px;
   padding: 4px 10px 4px 4px;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   font-weight: 400;
   white-space: normal;
@@ -1005,12 +1010,14 @@ kbd {
   flex-direction: column;
   align-items: flex-start;
   width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   height: auto;
   white-space: normal;
   text-align: left;
   line-height: 1.7;
   padding: 12px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   margin-bottom: 8px;
 }
@@ -1246,9 +1253,14 @@ kbd {
 .suggestion {
   width: 100%;
   justify-content: flex-start;
-  height: 39px;
+  height: auto;
+  min-height: 39px;
+  padding-block: 8px;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.5;
   margin-bottom: 9px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   gap: 9px;
 }
@@ -1256,7 +1268,7 @@ kbd {
   width: 13px;
 }
 .chat-message {
-  font-size: calc(12px * var(--assistant-font-scale, 1));
+  font-size: calc(13px * var(--assistant-font-scale, 1));
   line-height: 1.9;
   padding: 13px 0;
   white-space: pre-wrap;
@@ -1272,7 +1284,7 @@ kbd {
   margin-top: 0;
   padding-bottom: 10px;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   opacity: 0;
   pointer-events: none;
@@ -1373,8 +1385,9 @@ kbd {
   border: 0;
   box-shadow: none !important;
   resize: none;
-  min-height: 77px;
-  font-size: calc(11px * var(--assistant-font-scale, 1));
+  min-height: max(77px, calc(4.8em + 14px));
+  line-height: 1.6;
+  font-size: calc(13px * var(--assistant-font-scale, 1));
   padding: 7px;
   outline: none;
 }
@@ -1438,6 +1451,11 @@ kbd {
   right: 12px;
   color: var(--accent-strong);
 }
+.model-select-menu .model-select-option > :first-child {
+  min-width: 0;
+  flex-shrink: 1;
+  white-space: normal;
+}
 .model-select-name {
   font-weight: 400;
   overflow-wrap: anywhere;
@@ -1445,6 +1463,7 @@ kbd {
 .model-trigger-effort {
   color: var(--muted-foreground);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .effort-panel {
   width: 256px;
@@ -1571,7 +1590,7 @@ kbd {
 .effort-unavailable {
   color: var(--muted-foreground);
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   padding: 4px 0;
 }
 .model-select-status {
@@ -1590,7 +1609,7 @@ kbd {
   padding: 3px 6px;
   border-radius: var(--radius-sm);
   margin: 3px 0;
-  font-size: var(--font-size-small);
+  font-size: 12px;
 }
 .quote-chips span {
   white-space: nowrap;
@@ -1650,11 +1669,11 @@ kbd {
   border-radius: var(--radius-lg);
   background: var(--background);
   box-shadow: var(--shadow-sm);
-  font-size: 11px;
+  font-size: var(--font-size-small);
   color: var(--muted-foreground);
 }
 .notes-footer button {
-  font-size: var(--font-size-small);
+  font-size: 12px;
 }
 .notes-list {
   padding: 0 15px 76px;
@@ -1663,14 +1682,14 @@ kbd {
   text-align: center;
   padding: 65px 0;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
 }
 .notes-empty svg {
   margin: 0 auto 20px;
   opacity: 0.4;
 }
 .notes-empty small {
-  font-size: var(--font-size-small);
+  font-size: 12px;
   display: block;
   margin-top: 10px;
 }
@@ -1708,7 +1727,7 @@ kbd {
 .note-quote {
   display: block;
   white-space: pre-wrap;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.8;
   height: auto;
   text-align: left;
@@ -1721,7 +1740,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 .note-card p {
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
   line-height: 1.8;
 }
@@ -1754,7 +1773,7 @@ kbd {
   gap: 10px;
 }
 .page-navigation input {
-  font-size: 11px;
+  font-size: var(--font-size-small);
 }
 @media (max-width: 1000px) {
   .library-content {
@@ -2352,7 +2371,7 @@ kbd {
 .reference-prompt,
 .reference-error {
   margin: 0 0 6px 13px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .reference-error {
@@ -4018,7 +4037,7 @@ textarea.citation-preview {
   padding: 6px 8px;
   white-space: normal;
   text-align: left;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   line-height: 1.7;
   color: var(--muted-foreground);
