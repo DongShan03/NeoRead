@@ -474,14 +474,16 @@ export class PDFReaderAdapter implements ReaderAdapter {
       return false;
     if (
       document.querySelector(
-        '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+        'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
       )
     )
       return false;
     return !(
       target instanceof Element &&
       target.closest(
-        'input, textarea, select, .translation-document, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [role="alertdialog"]',
+        // Translation shortcuts are claimed in document capture by the reading
+        // view. Focus may remain there after the pointer returns to the PDF.
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], dialog, [role="dialog"], [role="alertdialog"]',
       )
     );
   }
