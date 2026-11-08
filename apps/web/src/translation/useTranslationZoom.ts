@@ -12,10 +12,13 @@ import { PDFResizeObserver } from "../readers/pdf-resize";
 export function useTranslationZoom(
   pane: RefObject<HTMLDivElement | null>,
   enabled: boolean,
+  keyboardActive: () => boolean,
 ) {
   const [zoom, setZoom] = useState(1);
   const [width, setWidth] = useState<number>();
   const current = useRef(1);
+  const keyboardTarget = useRef(keyboardActive);
+  keyboardTarget.current = keyboardActive;
   const anchor = useRef<
     | { left: number; top: number; x: number; y: number; ratio: number }
     | undefined
@@ -50,8 +53,24 @@ export function useTranslationZoom(
     const resize = () => setWidth(Math.max(1, element.clientWidth - 32));
     resize();
     const observer = new PDFResizeObserver(element, resize, () => {});
+    const canZoom = (target: EventTarget | null) =>
+      !element.closest("[inert]") &&
+      !document.querySelector(
+        'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+      ) &&
+      !(
+        target instanceof Element &&
+        target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], dialog, [role="dialog"], [role="alertdialog"]',
+        )
+      );
     const wheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
+      if (
+        (!event.ctrlKey && !event.metaKey) ||
+        event.defaultPrevented ||
+        !canZoom(event.target)
+      )
+        return;
       event.preventDefault();
       const bounds = element.getBoundingClientRect();
       change(current.current * Math.exp(-event.deltaY / 300), {
@@ -60,14 +79,9 @@ export function useTranslationZoom(
       });
     };
     const key = (event: KeyboardEvent) => {
-      const target = event.target as Element | null;
-      if (
-        event.defaultPrevented ||
-        target?.closest("input, textarea, select, [contenteditable=true]")
-      )
-        return;
+      if (event.defaultPrevented || !canZoom(event.target)) return;
       const command = zoomCommand(event);
-      if (!command) return;
+      if (!command || !keyboardTarget.current()) return;
       event.preventDefault();
       change(
         command === "width"
@@ -76,11 +90,13 @@ export function useTranslationZoom(
       );
     };
     element.addEventListener("wheel", wheel, { passive: false });
-    element.addEventListener("keydown", key);
+    // Claim translation shortcuts before the PDF's document bubble listener,
+    // even when focus is in the toolbar or body.
+    document.addEventListener("keydown", key, true);
     return () => {
       observer.disconnect();
       element.removeEventListener("wheel", wheel);
-      element.removeEventListener("keydown", key);
+      document.removeEventListener("keydown", key, true);
     };
   }, [enabled, pane]);
   return { zoom, width, change };

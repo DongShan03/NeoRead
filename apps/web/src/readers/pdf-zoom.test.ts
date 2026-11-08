@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { defaultTheme, type Document } from "@neoread/core";
+import { act, createElement, useRef } from "react";
+import { createRoot } from "react-dom/client";
+import { useTranslationZoom } from "../translation/useTranslationZoom";
 
 const state = vi.hoisted(() => ({
   scale: 1,
@@ -151,6 +154,65 @@ it("supports zoom out, Ctrl shortcuts and reset to fit width", () => {
   expect(key("0").defaultPrevented).toBe(true);
   expect(state.scaleValue).toBe("page-width");
   expect(zoom).toHaveBeenLastCalledWith("width");
+});
+it("gives each shortcut and wheel gesture to exactly one reading pane", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let translationActive = false;
+  const translationHost = document.createElement("div");
+  document.body.append(translationHost);
+  const root = createRoot(translationHost);
+  function Translation() {
+    const pane = useRef<HTMLDivElement>(null);
+    const value = useTranslationZoom(pane, true, () => translationActive);
+    return createElement("div", {
+      ref: pane,
+      className: "translation-document",
+      style: { zoom: value.zoom },
+    });
+  }
+  try {
+    await act(async () => root.render(createElement(Translation)));
+    const pane = translationHost.firstElementChild as HTMLElement;
+    await act(async () => {
+      key("+");
+    });
+    expect(state.scale).toBe(1.1);
+    expect(Number(pane.style.zoom)).toBe(1);
+    translationActive = true;
+    await act(async () => {
+      key("+");
+    });
+    expect(Number(pane.style.zoom)).toBeCloseTo(1.1);
+    expect(state.scale).toBe(1.1);
+    await act(async () => {
+      key("+", pane);
+    });
+    expect(Number(pane.style.zoom)).toBeCloseTo(1.21);
+    expect(state.scale).toBe(1.1);
+    translationActive = false;
+    await act(async () => {
+      key("+", pane);
+    });
+    expect(state.scale).toBe(1.21);
+    expect(Number(pane.style.zoom)).toBeCloseTo(1.21);
+    const translated = Number(pane.style.zoom);
+    await act(async () => {
+      wheel({}, pane);
+    });
+    expect(Number(pane.style.zoom)).toBeCloseTo(
+      translated * Math.exp(20 / 300),
+    );
+    expect(state.scale).toBe(1.21);
+    wheel();
+    expect(state.scale).toBeGreaterThan(1.21);
+    expect(state.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ origin: [240, 320] }),
+    );
+  } finally {
+    await act(async () => root.unmount());
+    translationHost.remove();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", false);
+  }
 });
 it.each([
   { ctrlKey: true, metaKey: false },

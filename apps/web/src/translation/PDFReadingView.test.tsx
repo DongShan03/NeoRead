@@ -175,10 +175,12 @@ async function renderView(
   extraBlocks: PDFBlock[] = [],
   searchResults: SearchResult[] = [],
   sidebarsOpen = { left: true, right: true },
+  active = true,
 ) {
   await act(async () =>
     root.render(
       <PDFReadingView
+        active={active}
         sidebarsOpen={sidebarsOpen}
         document={{ id: "doc", type: "pdf" } as Document}
         theme={theme}
@@ -257,6 +259,126 @@ async function click(label: string) {
 function notifyResize(node: Element) {
   fixture.resizes.get(node)?.forEach((callback) => callback());
 }
+
+async function zoomKey(
+  key: string,
+  extra: KeyboardEventInit = {},
+  target: EventTarget = document.body,
+) {
+  const event = new KeyboardEvent("keydown", {
+    key,
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+    ...extra,
+  });
+  await act(async () => {
+    target.dispatchEvent(event);
+  });
+  return event;
+}
+function translationScale() {
+  return Number(
+    host.querySelector<HTMLElement>(".translation-zoom-content")!.style.zoom,
+  );
+}
+function movePointer(from: Element, to: Element) {
+  from.dispatchEvent(
+    new MouseEvent("pointerout", { bubbles: true, relatedTarget: to }),
+  );
+  to.dispatchEvent(
+    new MouseEvent("pointerover", { bubbles: true, relatedTarget: from }),
+  );
+}
+it.each([{ metaKey: true }, { metaKey: false, ctrlKey: true }])(
+  "zooms translation-only content from body with %j shortcuts",
+  async (modifiers) => {
+    await click("仅译文");
+    expect(document.activeElement).toBe(document.body);
+    expect((await zoomKey("+", modifiers)).defaultPrevented).toBe(true);
+    expect(translationScale()).toBeCloseTo(1.1);
+    await zoomKey("+", modifiers);
+    expect((await zoomKey("-", modifiers)).defaultPrevented).toBe(true);
+    expect(translationScale()).toBeCloseTo(1.1);
+    expect((await zoomKey("0", modifiers)).defaultPrevented).toBe(true);
+    expect(translationScale()).toBe(1);
+  },
+);
+it("routes parallel shortcuts by the last pane interaction and pointer, independently of focus", async () => {
+  await click("原文译文");
+  const translation = host.querySelector<HTMLElement>(".translation-document")!;
+  const source = host.querySelector<HTMLElement>(".translation-source")!;
+  await act(async () => {
+    translation.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+  });
+  expect((await zoomKey("+")).defaultPrevented).toBe(true);
+  expect(translationScale()).toBeCloseTo(1.1);
+  await act(async () => {
+    source.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+  });
+  expect((await zoomKey("+")).defaultPrevented).toBe(false);
+  expect(translationScale()).toBeCloseTo(1.1);
+  await act(async () => {
+    translation.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+  });
+  expect((await zoomKey("+")).defaultPrevented).toBe(true);
+  expect(translationScale()).toBeCloseTo(1.21);
+  await act(async () => {
+    translation.focus();
+    source.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+  });
+  expect((await zoomKey("+", {}, translation)).defaultPrevented).toBe(false);
+  expect(translationScale()).toBeCloseTo(1.21);
+  expect((await zoomKey("+", {}, translation)).defaultPrevented).toBe(false);
+});
+it("keeps toolbar zoom on translation and restores listeners after mode and tab switches", async () => {
+  await click("原文译文");
+  await click("放大译文");
+  expect(translationScale()).toBe(1.25);
+  expect((await zoomKey("+")).defaultPrevented).toBe(true);
+  expect(translationScale()).toBeCloseTo(1.375);
+  await click("缩小译文");
+  await click("重置译文缩放");
+  expect(translationScale()).toBe(1);
+  await renderView(defaultTheme, [], [], undefined, false);
+  expect((await zoomKey("+")).defaultPrevented).toBe(false);
+  await renderView();
+  expect((await zoomKey("+")).defaultPrevented).toBe(true);
+  expect(translationScale()).toBeCloseTo(1.1);
+  await click("仅译文");
+  await zoomKey("+");
+  expect(translationScale()).toBeCloseTo(1.21);
+  await click("仅原文");
+  expect((await zoomKey("+")).defaultPrevented).toBe(false);
+  await click("原文译文");
+  const translation = host.querySelector<HTMLElement>(".translation-document")!;
+  await act(async () => {
+    translation.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+  });
+  await zoomKey("+");
+  expect(translationScale()).toBeCloseTo(1.331);
+});
+it("reports a source selection finished after the pointer crosses into translation", async () => {
+  await click("原文译文");
+  const source = host.querySelector<HTMLElement>(".translation-source")!;
+  const pane = host.querySelector<HTMLElement>(".translation-document")!;
+  const selection = {
+    text: "First sentence.",
+    location: {
+      type: "pdf" as const,
+      page: 1,
+      rects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.1 }],
+    },
+  };
+  events.selection.mockClear();
+  await act(async () => {
+    source.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    movePointer(source, pane);
+    pane.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+    fixture.events!.selection(selection);
+  });
+  expect(events.selection).toHaveBeenCalledExactlyOnceWith(selection);
+});
 it("switches modes without recreating the PDF or marking the opposite selection", async () => {
   await click("原文译文");
   expect(adapter.focusBlock).not.toHaveBeenCalled();
@@ -603,6 +725,117 @@ function translationGeometry(height = 200) {
     new DOMRect(40, 600 - pane.scrollTop, 520, height);
   return { pane, block };
 }
+it.each([
+  ["source", "hover"],
+  ["translation", "hover"],
+  ["source", "zoom click"],
+  ["source", "zoom focus"],
+] as const)(
+  "keeps %s reading ownership and sync direction after %s",
+  async (owner, action) => {
+    await click("原文译文");
+    const { pane } = translationGeometry();
+    const source = host.querySelector<HTMLElement>(".translation-source")!;
+    const anchor = { blockId: "p1-b1", fraction: 0.5 };
+    const location = { type: "pdf" as const, page: 1, x: 0.1, y: 0.35 };
+    await click("取消同步效果");
+    vi.mocked(adapter.followBlock!).mockClear();
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        if (owner === "source") {
+          source.dispatchEvent(
+            new MouseEvent("pointerdown", { bubbles: true }),
+          );
+          fixture.events!.readingAnchor?.(anchor);
+        } else {
+          pane.dispatchEvent(
+            new WheelEvent("wheel", { bubbles: true, deltaY: 20 }),
+          );
+          pane.scrollTop = 400;
+          pane.dispatchEvent(new Event("scroll", { bubbles: true }));
+          await vi.advanceTimersByTimeAsync(32);
+        }
+      });
+      events.location.mockClear();
+      if (action === "zoom click") await click("放大译文");
+      else
+        await act(async () => {
+          if (action === "zoom focus")
+            host
+              .querySelector<HTMLButtonElement>('[aria-label="放大译文"]')!
+              .focus();
+          else
+            movePointer(
+              owner === "source" ? source : pane,
+              owner === "source" ? pane : source,
+            );
+        });
+      await act(async () => fixture.events!.location(location, 0.5));
+      if (owner === "source")
+        expect(events.location).toHaveBeenCalledExactlyOnceWith(
+          location,
+          0.5,
+          undefined,
+        );
+      else expect(events.location).not.toHaveBeenCalled();
+      await click("开启同步效果");
+      if (owner === "source") {
+        expect(adapter.followBlock).not.toHaveBeenCalled();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(600);
+        });
+        expect(pane.scrollTop).toBe(400);
+      } else {
+        expect(adapter.followBlock).toHaveBeenCalledExactlyOnceWith(anchor);
+        expect(pane.scrollTop).toBe(400);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+it.each([
+  ["block focus", "source"],
+  ["block focus", "translation"],
+  ["follow", "source"],
+  ["follow", "translation"],
+] as const)(
+  "keeps %s animation running when %s receives programmatic focus",
+  async (motion, target) => {
+    await click("原文译文");
+    const { pane, block } = translationGeometry();
+    const source = host.querySelector<HTMLElement>(".translation-source")!;
+    source.tabIndex = 0;
+    if (motion === "follow") {
+      await click("取消同步效果");
+      await act(async () =>
+        fixture.events!.readingAnchor?.({ blockId: "p1-b1", fraction: 0.5 }),
+      );
+    }
+    vi.useFakeTimers();
+    try {
+      if (motion === "block focus") await act(async () => block.click());
+      else await click("开启同步效果");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(96);
+      });
+      expect(pane.scrollTop).toBeGreaterThan(0);
+      expect(pane.scrollTop).toBeLessThan(400);
+      vi.mocked(adapter.cancelBlockFocus!).mockClear();
+      await act(async () => (target === "source" ? source : pane).focus());
+      expect(adapter.cancelBlockFocus).not.toHaveBeenCalled();
+      if (motion === "block focus")
+        expect(block.hasAttribute("data-focused")).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+      expect(pane.scrollTop).toBe(400);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
 it.each(["仅译文", "原文译文"])(
   "reports body completion at the end of %s without changing its restore position",
   async (mode) => {

@@ -27,7 +27,7 @@ import type {
   TOCItem,
   TranslationBlock,
 } from "@neoread/core";
-import { defaultTheme, isPDFPageDecoration } from "@neoread/core";
+import { defaultTheme, isPDFPageDecoration, zoomCommand } from "@neoread/core";
 import { api } from "@neoread/api";
 import { Button } from "@neoread/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@neoread/ui/components/tabs";
@@ -142,8 +142,13 @@ export function PDFReadingView({
     content = useRef<HTMLDivElement>(null),
     control = useRef(new ReadingSync()),
     side = useRef<"source" | "translation">("source"),
+    zoomSide = useRef<"source" | "translation">("source"),
     reading = useRef<PDFReadingAnchor | undefined>(undefined);
-  const translationZoom = useTranslationZoom(pane, active && mode !== "source");
+  const translationZoom = useTranslationZoom(
+    pane,
+    active && mode !== "source",
+    () => mode === "translation" || zoomSide.current === "translation",
+  );
   // Keep only the current follow target. Content coordinates survive scrolling;
   // layout/content changes invalidate them without retaining detached blocks.
   const followGeometry = useRef<
@@ -801,7 +806,12 @@ export function PDFReadingView({
     explicitFocus.current.moving = false;
     setFocusedBlock(undefined);
     side.current = active;
+    zoomSide.current = active;
     control.current.input(active);
+  };
+  const changeTranslationZoom = (zoom: number) => {
+    zoomSide.current = "translation";
+    translationZoom.change(zoom);
   };
   const sourceSelection = (value: ReaderSelection | null) => {
     if (side.current !== "source") return;
@@ -1020,13 +1030,16 @@ export function PDFReadingView({
           className="translation-zoom-controls"
           role="group"
           aria-label="译文缩放"
+          onFocusCapture={() => {
+            zoomSide.current = "translation";
+          }}
         >
           <Button
             variant="ghost"
             size="icon-sm"
             aria-label="缩小译文"
             disabled={translationZoom.zoom <= 1}
-            onClick={() => translationZoom.change(translationZoom.zoom - 0.25)}
+            onClick={() => changeTranslationZoom(translationZoom.zoom - 0.25)}
           >
             <Minus />
           </Button>
@@ -1035,7 +1048,7 @@ export function PDFReadingView({
             size="sm"
             aria-label="重置译文缩放"
             title="重置译文缩放"
-            onClick={() => translationZoom.change(1)}
+            onClick={() => changeTranslationZoom(1)}
           >
             {Math.round(translationZoom.zoom * 100)}%
           </Button>
@@ -1044,7 +1057,7 @@ export function PDFReadingView({
             size="icon-sm"
             aria-label="放大译文"
             disabled={translationZoom.zoom >= 5}
-            onClick={() => translationZoom.change(translationZoom.zoom + 0.25)}
+            onClick={() => changeTranslationZoom(translationZoom.zoom + 0.25)}
           >
             <Plus />
           </Button>
@@ -1081,9 +1094,17 @@ export function PDFReadingView({
             <div
               className="translation-source"
               inert={mode === "translation"}
+              onPointerEnter={() => {
+                zoomSide.current = "source";
+              }}
+              onFocusCapture={() => {
+                zoomSide.current = "source";
+              }}
               onWheelCapture={() => input("source")}
               onPointerDownCapture={() => input("source")}
-              onKeyDownCapture={() => input("source")}
+              onKeyDownCapture={(event) =>
+                input(zoomCommand(event) ? zoomSide.current : "source")
+              }
             >
               <ReaderView
                 active={active}
@@ -1161,6 +1182,12 @@ export function PDFReadingView({
                 ref={pane}
                 tabIndex={0}
                 aria-label="论文译文"
+                onPointerEnter={() => {
+                  zoomSide.current = "translation";
+                }}
+                onFocusCapture={() => {
+                  zoomSide.current = "translation";
+                }}
                 onScroll={() => {
                   hover("translation");
                   translatedScroll();
@@ -1207,7 +1234,9 @@ export function PDFReadingView({
                   }
                   translatedSelection();
                 }}
-                onKeyDownCapture={() => input("translation")}
+                onKeyDownCapture={(event) =>
+                  input(zoomCommand(event) ? zoomSide.current : "translation")
+                }
                 onKeyUp={translatedSelection}
                 style={{
                   fontSize: `${theme.translationFontSize ?? 1}rem`,
