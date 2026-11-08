@@ -22,7 +22,10 @@ import {
 } from "./selection-translation-anchor";
 import { LinkPreviewPanel } from "./LinkPreviewPanel";
 import { AnnotationHoverCard } from "./AnnotationHoverCard";
-import { AnnotationNoteWindow } from "./AnnotationNoteWindow";
+import { AnnotationNoteForm } from "./AnnotationNoteForm";
+import { DocumentSearch, type DocumentSearchState } from "./DocumentSearch";
+import { SearchableReadingView } from "./SearchableReadingView";
+import { PDFPageInput } from "./PDFPageInput";
 import { AnnotationQuote } from "./AnnotationQuote";
 import {
   memo,
@@ -59,12 +62,10 @@ import {
   Type,
   Sun,
   Moon,
-  Check,
   CircleHelp,
 } from "lucide-react";
 import { api, blockImageURL } from "@neoread/api";
 import {
-  locationLabel,
   type DocumentChatSession,
   type Message,
   type Annotation,
@@ -86,7 +87,6 @@ import {
 } from "@neoread/core";
 import { Button } from "@neoread/ui/components/button";
 import { Badge } from "@neoread/ui/components/badge";
-import { Input } from "@neoread/ui/components/input";
 import { Textarea } from "@neoread/ui/components/textarea";
 import {
   Tabs,
@@ -153,8 +153,6 @@ import { copyImage, copyText } from "./chat/clipboard";
 import { NotesPanel } from "./NotesPanel";
 import { PaperNote } from "./PaperNote";
 import { ExportDocumentDialog } from "./ExportDocumentDialog";
-import { EPUBReadingView } from "./translation/EPUBReadingView";
-import { PDFReadingView } from "./translation/PDFReadingView";
 import { refreshAIConfig, useReaderStore } from "./store";
 import { useShallow } from "zustand/react/shallow";
 import { scheduleProgress, flushProgress } from "./progress";
@@ -401,12 +399,12 @@ export const Workspace = memo(function Workspace({
   const [usageOpen, setUsageOpen] = useState(false);
   const [rightTab, setRightTab] = useState("ai");
   const [leftTab, setLeftTab] = useState("toc");
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searchedQuery, setSearchedQuery] = useState("");
+  const searchChanged = useRef<
+    ((state: DocumentSearchState) => void) | undefined
+  >(undefined);
   const searchInput = useRef<HTMLInputElement>(null);
-  const [searching, setSearching] = useState(false);
-  const [note, setNote] = useState("");
+  const noteDraft = useRef("");
+  const [noteDraftKey, setNoteDraftKey] = useState(0);
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteKind, setNoteKind] = useState<"note" | "question">("note");
   const palette = highlightPalette({
@@ -710,16 +708,9 @@ export const Workspace = memo(function Workspace({
   const sendSerial = useRef(0);
   const [preparing, setSending] = useState(false);
   const sending = preparing || chat.busy;
-  const [pageInput, setPageInput] = useState("");
+  const pageDraft = useRef("");
+  const pageChanged = useRef<((page: number) => void) | undefined>(undefined);
   const abort = useRef<AbortController | null>(null);
-  const searchSerial = useRef(0);
-  useEffect(() => {
-    searchSerial.current++;
-    setQuery("");
-    setResults([]);
-    setSearchedQuery("");
-    setSearching(false);
-  }, [doc.id]);
   useAnnotationUpdates(
     doc.id,
     (items) => {
@@ -821,7 +812,10 @@ export const Workspace = memo(function Workspace({
     location.current = next;
     locationChanged.current?.(next);
     if (navigationRef.current?.settle()) setReturnLocation(undefined);
-    if (next.type === "pdf") setPageInput(String(next.page));
+    if (next.type === "pdf") {
+      pageDraft.current = String(next.page);
+      pageChanged.current?.(next.page);
+    }
     scheduleProgress(
       doc.id,
       { progress: next, percentage: percent, bodyReadPosition },
@@ -873,7 +867,6 @@ export const Workspace = memo(function Workspace({
       setNoteOpen(false);
       setNoteSelection(null);
       setEditingAnnotation(null);
-      setNote("");
       return a;
     } catch (e) {
       toast.error((e as Error).message);
@@ -926,7 +919,7 @@ export const Workspace = memo(function Workspace({
       location: annotation.location,
       anchor: hoveredAnnotation?.anchor ?? annotationTarget?.anchor,
     });
-    setNote(annotation.note);
+    setNoteDraftKey((key) => key + 1);
     setNoteOpen(true);
     adapter?.clearSelection();
   };
@@ -1015,22 +1008,6 @@ export const Workspace = memo(function Workspace({
         .querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)
         ?.scrollIntoView({ block: "start" }),
     );
-  };
-  const search = async () => {
-    if (!adapter) return;
-    const serial = ++searchSerial.current;
-    setSearching(true);
-    try {
-      const found = await adapter.search(query.trim());
-      if (serial === searchSerial.current) {
-        setResults(found);
-        setSearchedQuery(query.trim());
-      }
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      if (serial === searchSerial.current) setSearching(false);
-    }
   };
   const openSearchResult = (result: SearchResult) => {
     const go = adapter?.focusLocation
@@ -1310,20 +1287,12 @@ export const Workspace = memo(function Workspace({
         <ChevronLeft />
       </IconButton>
       {doc.type === "pdf" ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const page = Number(pageInput);
-            if (Number.isInteger(page) && page > 0) move({ type: "pdf", page });
-          }}
-        >
-          <Input
-            aria-label="跳转 PDF 页码"
-            value={pageInput}
-            onChange={(e) => setPageInput(e.target.value)}
-            className="h-7 w-14 text-center"
-          />
-        </form>
+        <PDFPageInput
+          key={doc.id}
+          draft={pageDraft}
+          changed={pageChanged}
+          onNavigate={(page) => move({ type: "pdf", page })}
+        />
       ) : null}
       <IconButton
         label="下一页"
@@ -1335,11 +1304,16 @@ export const Workspace = memo(function Workspace({
       </IconButton>
     </div>
   );
-  const closeState = useRef({ busy: false, draft: false, saving: false });
+  const closeState = useRef({
+    busy: false,
+    draft: false,
+    saving: false,
+    noteOpen: false,
+  });
   closeState.current = {
     busy: chat.busy || sending,
-    draft:
-      quotes.length > 0 || images.length > 0 || (noteOpen && !!note.trim()),
+    draft: quotes.length > 0 || images.length > 0,
+    noteOpen,
     saving: noteSaving || annotationSaving.current,
   };
   useEffect(
@@ -1353,6 +1327,7 @@ export const Workspace = memo(function Workspace({
         if (
           closeState.current.busy ||
           closeState.current.draft ||
+          (closeState.current.noteOpen && !!noteDraft.current.trim()) ||
           !!prompt.current.trim() ||
           [...composerDrafts.current].some(
             ([key, draft]) =>
@@ -1693,59 +1668,18 @@ export const Workspace = memo(function Workspace({
                   go={move}
                 />
               </TabsContent>
-              <TabsContent value="search" className="min-h-0 flex-1 p-3">
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void search();
-                  }}
-                  className="flex gap-1"
-                >
-                  <Input
-                    aria-label="搜索文档"
-                    ref={searchInput}
-                    placeholder="搜索文档内容…"
-                    value={query}
-                    onChange={(e) => {
-                      searchSerial.current++;
-                      setQuery(e.target.value);
-                      setResults([]);
-                      setSearchedQuery("");
-                      setSearching(false);
-                    }}
-                  />
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    disabled={searching}
-                    aria-label="搜索"
-                  >
-                    <Search />
-                  </Button>
-                </form>
-                <p className="my-3 text-xs text-muted-foreground">
-                  {searching ? "正在搜索…" : `${results.length} 个结果`}
-                </p>
-                <ScrollArea className="h-[calc(100%-90px)]">
-                  {results.map((result) => (
-                    <Button
-                      key={result.id}
-                      variant="ghost"
-                      className="search-result"
-                      onClick={() => openSearchResult(result)}
-                    >
-                      <small>
-                        {locationLabel(result.location)}
-                        {result.side === "translation"
-                          ? " · 译文"
-                          : result.side === "source"
-                            ? " · 原文"
-                            : ""}
-                      </small>
-                      <span>{result.excerpt}</span>
-                    </Button>
-                  ))}
-                </ScrollArea>
+              <TabsContent
+                value="search"
+                keepMounted
+                className="min-h-0 flex-1 p-3"
+              >
+                <DocumentSearch
+                  key={doc.id}
+                  adapter={adapter}
+                  inputRef={searchInput}
+                  changed={searchChanged}
+                  onNavigate={openSearchResult}
+                />
               </TabsContent>
             </Tabs>
           </aside>
@@ -1756,61 +1690,55 @@ export const Workspace = memo(function Workspace({
         />
         <ResizablePanel id="reading" minSize="30%">
           <div className="reading-pane" ref={readingPane}>
-            {(() => {
-              const ReadingView =
-                doc.type === "pdf" ? PDFReadingView : EPUBReadingView;
-              return (
-                <ReadingView
-                  active={active}
-                  sidebarsOpen={{ left, right }}
-                  document={doc}
-                  theme={theme}
-                  annotations={annotations}
-                  blocks={blocks}
-                  processing={processing}
-                  toolbarHost={readingToolbar}
-                  autoCenterHost={sourceAutoCenterToolbar}
-                  pageNavigation={pageNavigation}
-                  searchResults={results}
-                  searchQuery={searchedQuery}
-                  onReady={(engine, items) => {
-                    setAdapter(engine);
-                    setTOC(items);
-                  }}
-                  events={{
-                    zoom: onZoom,
-                    location: saveLocation,
-                    selection: selectText,
-                    sentenceHover: (next) =>
-                      setHoveredSentence(
-                        selection ||
-                          annotationTarget ||
-                          noteOpen ||
-                          translationSelection ||
-                          !active
-                          ? null
-                          : next,
-                      ),
-                    annotation: selectAnnotation,
-                    annotationHover: (target) =>
-                      setHoveredAnnotation((current) =>
-                        current &&
-                        target &&
-                        current.ids.join(",") === target.ids.join(",")
-                          ? current
-                          : target,
-                      ),
-                    linkPreview: setLinkPreview,
-                    internalLink: (origin) => {
-                      navigationRef.current?.remember(origin);
-                      setReturnLocation(navigationRef.current?.origin);
-                    },
-                    blockAction,
-                    epubBlockAction,
-                  }}
-                />
-              );
-            })()}
+            <SearchableReadingView
+              key={doc.id}
+              searchChanged={searchChanged}
+              active={active}
+              sidebarsOpen={{ left, right }}
+              document={doc}
+              theme={theme}
+              annotations={annotations}
+              blocks={blocks}
+              processing={processing}
+              toolbarHost={readingToolbar}
+              autoCenterHost={sourceAutoCenterToolbar}
+              pageNavigation={pageNavigation}
+              onReady={(engine, items) => {
+                setAdapter(engine);
+                setTOC(items);
+              }}
+              events={{
+                zoom: onZoom,
+                location: saveLocation,
+                selection: selectText,
+                sentenceHover: (next) =>
+                  setHoveredSentence(
+                    selection ||
+                      annotationTarget ||
+                      noteOpen ||
+                      translationSelection ||
+                      !active
+                      ? null
+                      : next,
+                  ),
+                annotation: selectAnnotation,
+                annotationHover: (target) =>
+                  setHoveredAnnotation((current) =>
+                    current &&
+                    target &&
+                    current.ids.join(",") === target.ids.join(",")
+                      ? current
+                      : target,
+                  ),
+                linkPreview: setLinkPreview,
+                internalLink: (origin) => {
+                  navigationRef.current?.remember(origin);
+                  setReturnLocation(navigationRef.current?.origin);
+                },
+                blockAction,
+                epubBlockAction,
+              }}
+            />
             {!toolbarSelection && annotationTarget && selectedAnnotation && (
               <AnnotationToolbar
                 annotation={selectedAnnotation}
@@ -1849,7 +1777,7 @@ export const Workspace = memo(function Workspace({
                     setNoteKind("note");
                     setEditingAnnotation(null);
                     setNoteSelection(toolbarSelection);
-                    setNote("");
+                    setNoteDraftKey((key) => key + 1);
                     setNoteOpen(true);
                     adapter?.clearSelection();
                   }}
@@ -1862,7 +1790,7 @@ export const Workspace = memo(function Workspace({
                     setNoteKind("question");
                     setEditingAnnotation(null);
                     setNoteSelection(toolbarSelection);
-                    setNote("");
+                    setNoteDraftKey((key) => key + 1);
                     setNoteOpen(true);
                     adapter?.clearSelection();
                   }}
@@ -2229,82 +2157,29 @@ export const Workspace = memo(function Workspace({
           onClose={() => setPreviewImage(undefined)}
         />
       )}
-      <AnnotationNoteWindow
+      <AnnotationNoteForm
+        key={noteDraftKey}
         open={active && noteOpen}
-        anchor={noteSelection?.anchor}
-        title={
-          noteKind === "question"
-            ? editingAnnotation
-              ? "编辑问题"
-              : "提问"
-            : editingAnnotation?.note.trim()
-              ? "编辑批注"
-              : "添加批注"
-        }
-        description={
-          noteKind === "question" ? "就当前选区提问" : "为当前选区添加批注"
-        }
+        selection={noteSelection}
+        kind={noteKind}
+        annotation={editingAnnotation}
+        saving={noteSaving}
+        canAnswer={!!provider}
+        draft={noteDraft}
         onOpenChange={(open) => {
-          if (noteSaving) return;
+          if (annotationSaving.current) return;
           setNoteOpen(open);
           if (!open) {
             setNoteSelection(null);
             setEditingAnnotation(null);
           }
         }}
-      >
-        <blockquote className="note-preview max-h-24 overflow-y-auto">
-          {noteSelection && (
-            <AnnotationQuote
-              quote={noteSelection.text}
-              location={noteSelection.location}
-            />
-          )}
-        </blockquote>
-        <Textarea
-          autoFocus
-          placeholder={noteKind === "question" ? "想弄清楚什么？" : "批注内容…"}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        {noteKind === "question" ? (
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => void annotate("question", note)}
-              disabled={noteSaving || !note.trim()}
-            >
-              <Check />
-              保存问题
-            </Button>
-            {!editingAnnotation && (
-              <Button
-                className="flex-1"
-                disabled={noteSaving || !note.trim() || !provider}
-                onClick={() =>
-                  void annotate("question", note).then((saved) => {
-                    if (saved) void answerQuestion(saved);
-                  })
-                }
-              >
-                <Sparkles />
-                保存并让 AI 回答
-              </Button>
-            )}
-          </div>
-        ) : (
-          <Button
-            onClick={() => void annotate("note", note)}
-            disabled={
-              noteSaving || (!note.trim() && !editingAnnotation?.note.trim())
-            }
-          >
-            <Check />
-            保存批注
-          </Button>
-        )}
-      </AnnotationNoteWindow>
+        onSave={(text, answer) => {
+          void annotate(noteKind, text).then((saved) => {
+            if (saved && answer) void answerQuestion(saved);
+          });
+        }}
+      />
       {active && exportingNotes && (
         <ExportDocumentDialog
           key={`export-${doc.id}`}
