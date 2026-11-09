@@ -58,9 +58,6 @@ import {
 } from "../readers/scoped-selection";
 
 const drafts = new Map<string, { text: string; quotes: ChatQuote[] }>();
-const sameScope = (a: LibraryChatScope, b: LibraryChatScope) =>
-  a.category === b.category &&
-  [...a.documentIds].sort().join("\n") === [...b.documentIds].sort().join("\n");
 
 const selectionKey = "neoread.library-chat-selections";
 const categoryKey = (scope: LibraryChatScope) =>
@@ -362,10 +359,8 @@ export function LibraryAgentPanel({
             <LibraryConversation
               key={getChatSession("library", current.id).viewId ?? current.id}
               item={current}
-              activeScope={scope}
               provider={provider}
               onSettings={onSettings}
-              onNew={() => create()}
               onRefresh={refresh}
             />
           ) : (
@@ -400,17 +395,13 @@ export function LibraryAgentPanel({
 
 function LibraryConversation({
   item,
-  activeScope,
   provider,
   onSettings,
-  onNew,
   onRefresh,
 }: {
   item: LibraryChatSession;
-  activeScope: LibraryChatScope;
   provider: string;
   onSettings: () => void;
-  onNew: () => Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
   const modelSaving = useReaderStore((state) => state.aiModelSaving);
@@ -487,10 +478,6 @@ function LibraryConversation({
       ),
     ]);
   };
-  const scopeChanged = useMemo(
-    () => !sameScope(item.scope, activeScope),
-    [item.scope, activeScope],
-  );
   const [scopeOpen, setScopeOpen] = useState(false);
   return (
     <>
@@ -516,16 +503,6 @@ function LibraryConversation({
             {scopeOpen && <ScopePapers ids={item.scope.documentIds} />}
           </PopoverContent>
         </Popover>
-        {scopeChanged && (
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={!activeScope.documentIds.length}
-            onClick={() => void onNew().catch((e) => toast.error(e.message))}
-          >
-            使用当前分类新建
-          </Button>
-        )}
       </div>
       <AssistantPanel
         session={session}

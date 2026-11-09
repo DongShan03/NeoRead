@@ -231,8 +231,11 @@ it("keeps a conversation's paper scope fixed when the category membership change
   await render();
   await render("模型安全", ["alpha", "beta", "gamma"]);
   expect(api.createLibraryChatSession).not.toHaveBeenCalled();
+  expect(makeDraft).not.toHaveBeenCalled();
+  expect(selected().value).toBe(saved.id);
   expect(host.textContent).toContain("2 篇");
-  await click("使用当前分类新建");
+  expect(host.textContent).not.toContain("使用当前分类新建");
+  await click("新建会话");
   expect(makeDraft).toHaveBeenCalledWith(
     "codex",
     expect.objectContaining({ documentIds: ["alpha", "beta", "gamma"] }),
